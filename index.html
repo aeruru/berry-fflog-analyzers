@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Berry FFLogs Analyzers</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="masthead">
+          <div>
+            <p class="eyebrow">Berry FFLogs Analyzers</p>
+            <h1>Recent FFLogs pulls</h1>
+          </div>
+          <button class="ghost-button" id="loadDemoButton" type="button">Load demo</button>
+        </header>
+
+        <form class="search-panel" id="reportForm">
+          <label for="reportInput">FFLogs user reports link or id</label>
+          <div class="input-row">
+            <input
+              id="reportInput"
+              name="reportInput"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              value="https://www.fflogs.com/user/reports-list/3430"
+              placeholder="https://www.fflogs.com/user/reports-list/3430 or 3430"
+            >
+            <button type="submit">Fetch logs</button>
+          </div>
+          <details class="settings">
+            <summary>GraphQL settings</summary>
+            <label for="endpointInput">GraphQL endpoint</label>
+            <input
+              id="endpointInput"
+              name="endpointInput"
+              type="url"
+              value="/api/fflogs/graphql"
+              placeholder="/api/fflogs/graphql"
+            >
+            <label for="tokenInput">Bearer token for local testing</label>
+            <input
+              id="tokenInput"
+              name="tokenInput"
+              type="password"
+              autocomplete="off"
+              placeholder="Leave blank when using a backend proxy"
+            >
+          </details>
+          <p class="status-line" id="statusLine">Uses FFLogs GraphQL v2. Point the endpoint at a backend proxy so credentials stay off the page.</p>
+        </form>
+
+        <section class="content-grid">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Recent sets</h2>
+              <span id="sessionCount">0 sets</span>
+            </div>
+            <div class="session-list" id="sessionList"></div>
+          </div>
+
+          <div class="panel detail-panel">
+            <div class="panel-header">
+              <div>
+                <h2 id="detailTitle">Select a set</h2>
+                <p id="detailSubtitle">Pull details will appear here.</p>
+              </div>
+              <span id="pullCount">0 pulls</span>
+            </div>
+            <div class="pull-list" id="pullList"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

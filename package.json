@@ -1,0 +1,8 @@
+{
+  "name": "berry-fflog-analyzers",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node scripts/start-local.js"
+  }
+}
