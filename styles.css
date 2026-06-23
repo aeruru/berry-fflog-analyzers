@@ -29,7 +29,9 @@ body {
 }
 
 button,
-input {
+input,
+select,
+textarea {
   font: inherit;
 }
 
@@ -71,6 +73,25 @@ button:disabled {
   margin-bottom: 22px;
 }
 
+.auth-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.auth-state {
+  color: var(--muted);
+  font-size: 0.84rem;
+  font-weight: 800;
+  margin-right: 4px;
+}
+
+.hidden {
+  display: none;
+}
+
 .eyebrow {
   color: var(--accent);
   font-size: 0.78rem;
@@ -107,7 +128,8 @@ h2 {
 }
 
 .search-panel,
-.panel {
+.panel,
+.explorer-panel {
   background: rgba(255, 250, 240, 0.92);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -143,7 +165,29 @@ input {
   width: 100%;
 }
 
-input:focus {
+select,
+textarea {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  width: 100%;
+}
+
+select {
+  min-height: 44px;
+  padding: 0 13px;
+}
+
+textarea {
+  min-height: 170px;
+  padding: 12px 13px;
+  resize: vertical;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(27, 111, 106, 0.18);
   outline: 0;
@@ -181,6 +225,65 @@ input:focus {
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.35fr);
+}
+
+.explorer-panel {
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.explorer-header p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 5px 0 0;
+}
+
+.explorer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.explorer-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr);
+  padding: 16px;
+}
+
+.query-editor {
+  display: grid;
+  gap: 10px;
+}
+
+.query-editor label {
+  margin-bottom: -2px;
+}
+
+.raw-panel {
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.raw-header {
+  min-height: 52px;
+}
+
+#rawOutput {
+  background: #171a1f;
+  color: #e8edf2;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  margin: 0;
+  max-height: 520px;
+  overflow: auto;
+  padding: 14px;
+  white-space: pre-wrap;
 }
 
 .panel {
@@ -322,7 +425,8 @@ input:focus {
 
   .masthead,
   .input-row,
-  .content-grid {
+  .content-grid,
+  .explorer-grid {
     grid-template-columns: 1fr;
   }
 

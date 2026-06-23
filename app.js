@@ -1,4 +1,9 @@
 const UNKNOWN_ZONE_NAMES = new Set(['unknown', 'unknown zone', '']);
+const FFLOGS_CLIENT_ID = 'a210738b-1a9b-40d8-98f6-a4054696f1eb';
+const FFLOGS_AUTH_URL = 'https://www.fflogs.com/oauth/authorize';
+const FFLOGS_TOKEN_URL = 'https://www.fflogs.com/oauth/token';
+const TOKEN_STORAGE_KEY = 'berry.fflogs.pkce.token';
+const PKCE_STORAGE_KEY = 'berry.fflogs.pkce.pending';
 
 const sampleSessions = [
   {
@@ -80,11 +85,12 @@ const sampleSessions = [
 
 let sessions = [];
 let selectedSessionId = null;
+let currentUserId = null;
 
 const form = document.querySelector('#reportForm');
 const input = document.querySelector('#reportInput');
 const endpointInput = document.querySelector('#endpointInput');
-const tokenInput = document.querySelector('#tokenInput');
+const redirectInput = document.querySelector('#redirectInput');
 const statusLine = document.querySelector('#statusLine');
 const sessionList = document.querySelector('#sessionList');
 const sessionCount = document.querySelector('#sessionCount');
@@ -92,11 +98,37 @@ const detailTitle = document.querySelector('#detailTitle');
 const detailSubtitle = document.querySelector('#detailSubtitle');
 const pullCount = document.querySelector('#pullCount');
 const pullList = document.querySelector('#pullList');
+const authState = document.querySelector('#authState');
+const loginButton = document.querySelector('#loginButton');
+const logoutButton = document.querySelector('#logoutButton');
 const loadDemoButton = document.querySelector('#loadDemoButton');
+const loadMineButton = document.querySelector('#loadMineButton');
+const introspectionButton = document.querySelector('#introspectionButton');
+const queryTemplate = document.querySelector('#queryTemplate');
+const queryInput = document.querySelector('#queryInput');
+const variablesInput = document.querySelector('#variablesInput');
+const runQueryButton = document.querySelector('#runQueryButton');
+const rawStatus = document.querySelector('#rawStatus');
+const rawOutput = document.querySelector('#rawOutput');
+
+redirectInput.value = getRedirectUri();
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+
+  if (!input.value.trim()) {
+    await loadMyRecentReports();
+    return;
+  }
+
   await loadReports(input.value);
+});
+
+loginButton.addEventListener('click', startFflogsLogin);
+logoutButton.addEventListener('click', () => {
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
+  updateAuthUi();
+  setStatus('Logged out of FFLogs.');
 });
 
 loadDemoButton.addEventListener('click', () => {
@@ -104,7 +136,16 @@ loadDemoButton.addEventListener('click', () => {
   setSessions(sampleSessions);
 });
 
+loadMineButton.addEventListener('click', loadMyRecentReports);
+introspectionButton.addEventListener('click', async () => {
+  setQueryTemplate('schemaFields');
+  await runExplorerQuery();
+});
+queryTemplate.addEventListener('change', () => setQueryTemplate(queryTemplate.value));
+runQueryButton.addEventListener('click', runExplorerQuery);
+
 setSessions(sampleSessions);
+handleOAuthCallback().finally(updateAuthUi);
 
 async function loadReports(value) {
   const userId = parseUserId(value);
@@ -115,6 +156,13 @@ async function loadReports(value) {
   }
 
   const endpoint = endpointInput.value.trim() || '/api/fflogs/graphql';
+  const token = getStoredToken();
+
+  if (!token) {
+    setStatus('Log in to FFLogs first, then fetch real report data.', true);
+    return;
+  }
+
   setLoading(true);
   setStatus(`Fetching recent reports for user ${userId} with FFLogs GraphQL...`);
 
@@ -138,7 +186,11 @@ async function loadReports(value) {
 
 async function fetchRecentSessions({ endpoint, userId }) {
   const reportsResult = await fflogsGraphql(endpoint, RECENT_REPORTS_QUERY, { userId });
-  const reports = reportsResult?.data?.userData?.user?.reports?.data ?? [];
+  const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
+  return hydrateReportSessions(reports);
+}
+
+async function hydrateReportSessions(reports) {
   const baseSessions = normalizeReportList(reports).slice(0, 6);
 
   const hydratedSessions = await Promise.all(baseSessions.map(async (session) => {
@@ -146,9 +198,22 @@ async function fetchRecentSessions({ endpoint, userId }) {
       return session;
     }
 
-    const fightsResult = await fflogsGraphql(endpoint, REPORT_FIGHTS_QUERY, { code: session.reportCode });
-    const report = fightsResult?.data?.reportData?.report;
-    return normalizeSession({ ...report, code: session.reportCode, zone: session.zoneName }, session.id);
+    try {
+      const fightsResult = await fflogsGraphql(getGraphqlEndpoint(), REPORT_FIGHTS_QUERY, { code: session.reportCode });
+      const report = fightsResult?.data?.reportData?.report;
+      return normalizeSession({
+        ...report,
+        code: session.reportCode,
+        title: report?.title ?? session.title,
+        zone: report?.zone ?? session.zoneName,
+      }, session.id);
+    } catch (error) {
+      console.warn(`Could not hydrate fights for report ${session.reportCode}`, error);
+      return {
+        ...session,
+        hydrationError: error.message,
+      };
+    }
   }));
 
   return hydratedSessions
@@ -157,12 +222,111 @@ async function fetchRecentSessions({ endpoint, userId }) {
     .slice(0, 6);
 }
 
-async function fflogsGraphql(endpoint, query, variables) {
-  const headers = { 'content-type': 'application/json' };
-  const token = tokenInput.value.trim();
+async function loadMyRecentReports() {
+  if (!getStoredToken()) {
+    setStatus('Log in to FFLogs first, then load your recent reports.', true);
+    return;
+  }
 
-  if (token) {
-    headers.authorization = `Bearer ${token}`;
+  setButtonLoading(loadMineButton, true, 'Loading...');
+  setRawStatus('Loading');
+  setStatus('Loading recent reports for the logged-in FFLogs account...');
+
+  try {
+    const { normalized, user } = await fetchMyRecentSessions();
+
+    if (normalized.length === 0) {
+      throw new Error('No known-zone reports were found for your account.');
+    }
+
+    setSessions(normalized);
+    setQueryTemplate('recentReports', { userId: currentUserId });
+
+    const latest = normalized[0];
+    const latestText = latest.reportCode
+      ? ` Latest report: ${latest.reportCode}${latest.reportCode === 'gdck389YW1z2JCQb' ? ' (matches expected report).' : '.'}`
+      : '';
+    setStatus(`Loaded ${normalized.length} recent known-zone reports${user?.name ? ` for ${user.name}` : ''}.${latestText}`);
+  } catch (error) {
+    console.warn(error);
+    setStatus(`Could not load your recent reports (${error.message}). Run the current-user or schema query in the explorer to inspect what FFLogs returned.`, true);
+  } finally {
+    setButtonLoading(loadMineButton, false, 'Load my recent reports');
+  }
+}
+
+async function fetchMyRecentSessions() {
+  try {
+    const reportsResult = await fflogsGraphql(getGraphqlEndpoint(), MY_RECENT_REPORTS_QUERY, {});
+    const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
+
+    return {
+      normalized: await hydrateReportSessions(reports),
+      user: null,
+    };
+  } catch (directError) {
+    console.info('Direct logged-in reports query failed; falling back to current user lookup.', directError);
+  }
+
+  const user = await fetchCurrentUser();
+  currentUserId = Number(user.id);
+  const normalized = await fetchRecentSessions({
+    endpoint: getGraphqlEndpoint(),
+    userId: currentUserId,
+  });
+
+  return { normalized, user };
+}
+
+async function fetchCurrentUser() {
+  const errors = [];
+
+  for (const query of CURRENT_USER_QUERY_CANDIDATES) {
+    try {
+      const result = await fflogsGraphql(getGraphqlEndpoint(), query, {});
+      const user = result?.data?.userData?.currentUser
+        ?? result?.data?.userData?.user
+        ?? result?.data?.currentUser;
+
+      if (user?.id) {
+        return user;
+      }
+    } catch (error) {
+      errors.push(error.message);
+    }
+  }
+
+  setQueryTemplate('userDataFields');
+  throw new Error(`FFLogs did not expose a current-user field in the attempted GraphQL shapes. Try the userData fields template to see what account fields are actually available. Errors: ${errors.join(' | ')}`);
+}
+
+async function fflogsGraphql(endpoint, query, variables) {
+  const payload = await fflogsGraphqlRaw(endpoint, query, variables);
+  setRawResponse(payload);
+
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join('; '));
+  }
+
+  return payload;
+}
+
+async function fflogsGraphqlRaw(endpoint, query, variables) {
+  const token = getStoredToken();
+
+  if (!token) {
+    throw new Error('not logged in to FFLogs');
+  }
+
+  const headers = {
+    authorization: `Bearer ${token.access_token}`,
+    'content-type': 'application/json',
+  };
+
+  if (isExpired(token)) {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    updateAuthUi();
+    throw new Error('FFLogs login expired. Log in again.');
   }
 
   const response = await fetch(endpoint, {
@@ -175,12 +339,110 @@ async function fflogsGraphql(endpoint, query, variables) {
     throw new Error(`GraphQL endpoint returned ${response.status}`);
   }
 
-  const payload = await response.json();
-  if (payload.errors?.length) {
-    throw new Error(payload.errors.map((error) => error.message).join('; '));
+  return response.json();
+}
+
+async function startFflogsLogin() {
+  const codeVerifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(64)));
+  const codeChallenge = await sha256Base64Url(codeVerifier);
+  const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
+  const redirectUri = getRedirectUri();
+
+  sessionStorage.setItem(PKCE_STORAGE_KEY, JSON.stringify({
+    codeVerifier,
+    redirectUri,
+    state,
+  }));
+
+  const params = new URLSearchParams({
+    client_id: FFLOGS_CLIENT_ID,
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
+    redirect_uri: redirectUri,
+    response_type: 'code',
+    state,
+  });
+
+  window.location.assign(`${FFLOGS_AUTH_URL}?${params.toString()}`);
+}
+
+async function handleOAuthCallback() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  const returnedState = params.get('state');
+  const error = params.get('error');
+
+  if (error) {
+    setStatus(`FFLogs login failed: ${error}`, true);
+    cleanCallbackUrl();
+    return;
   }
 
-  return payload;
+  if (!code) {
+    return;
+  }
+
+  const pending = JSON.parse(sessionStorage.getItem(PKCE_STORAGE_KEY) || 'null');
+  if (!pending || pending.state !== returnedState) {
+    setStatus('FFLogs login state did not match. Please try logging in again.', true);
+    cleanCallbackUrl();
+    return;
+  }
+
+  setStatus('Completing FFLogs login...');
+
+  try {
+    const body = new URLSearchParams({
+      client_id: FFLOGS_CLIENT_ID,
+      code,
+      code_verifier: pending.codeVerifier,
+      grant_type: 'authorization_code',
+      redirect_uri: pending.redirectUri,
+    });
+
+    const response = await fetch(FFLOGS_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+
+    if (!response.ok) {
+      throw new Error(`token endpoint returned ${response.status}`);
+    }
+
+    const token = await response.json();
+    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({
+      ...token,
+      expires_at: Date.now() + ((token.expires_in ?? 3600) * 1000),
+    }));
+    sessionStorage.removeItem(PKCE_STORAGE_KEY);
+    setStatus('Logged in to FFLogs. Enter a reports-list URL or user id to fetch real data.');
+  } catch (tokenError) {
+    console.warn(tokenError);
+    setStatus(`Could not complete FFLogs login (${tokenError.message}).`, true);
+  } finally {
+    cleanCallbackUrl();
+  }
+}
+
+function getStoredToken() {
+  try {
+    const token = JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || 'null');
+    return token && !isExpired(token) ? token : null;
+  } catch {
+    return null;
+  }
+}
+
+function isExpired(token) {
+  return !token?.access_token || Date.now() > (token.expires_at - 30_000);
+}
+
+function updateAuthUi() {
+  const token = getStoredToken();
+  authState.textContent = token ? 'Logged in to FFLogs' : 'Not logged in';
+  loginButton.classList.toggle('hidden', Boolean(token));
+  logoutButton.classList.toggle('hidden', !token);
 }
 
 function normalizeReportList(raw) {
@@ -221,6 +483,7 @@ function normalizeSession(item, index = 0) {
   return {
     id: String(item.id ?? item.code ?? item.report?.code ?? `session-${index}`),
     reportCode: item.code ?? item.report?.code ?? null,
+    title: item.title ?? item.report?.title ?? null,
     zoneName: String(zoneName),
     startTime,
     endTime,
@@ -272,7 +535,7 @@ function render() {
         <h3>${escapeHtml(session.zoneName)}</h3>
         <span class="pill">${session.pulls.length} pulls</span>
       </div>
-      <p class="meta">${formatDateRange(session.startTime, session.endTime)}</p>
+      <p class="meta">${session.title ? `${escapeHtml(session.title)}<br>` : ''}${session.reportCode ? `${escapeHtml(session.reportCode)}<br>` : ''}${formatDateRange(session.startTime, session.endTime)}${session.hydrationError ? '<br>Fight details unavailable' : ''}</p>
     </button>
   `).join('');
 
@@ -296,11 +559,11 @@ function renderPulls(session) {
   }
 
   detailTitle.textContent = session.zoneName;
-  detailSubtitle.textContent = formatDateRange(session.startTime, session.endTime);
+  detailSubtitle.textContent = `${session.title ? `${session.title} | ` : ''}${session.reportCode ? `${session.reportCode} | ` : ''}${formatDateRange(session.startTime, session.endTime)}`;
   pullCount.textContent = `${session.pulls.length} ${session.pulls.length === 1 ? 'pull' : 'pulls'}`;
 
   if (session.pulls.length === 0) {
-    pullList.innerHTML = `<div class="empty-state">This set does not include pull-level fight data yet.</div>`;
+    pullList.innerHTML = `<div class="empty-state">${session.hydrationError ? `The report loaded, but fight details could not be fetched yet: ${escapeHtml(session.hydrationError)}` : 'This set does not include pull-level fight data yet.'}</div>`;
     return;
   }
 
@@ -450,28 +713,174 @@ function setStatus(message, isError = false) {
 function setLoading(isLoading) {
   const submitButton = form.querySelector('button[type="submit"]');
   submitButton.disabled = isLoading;
-  submitButton.textContent = isLoading ? 'Fetching...' : 'Fetch logs';
+  submitButton.textContent = isLoading ? 'Loading...' : 'Load user';
+}
+
+async function runExplorerQuery() {
+  if (!getStoredToken()) {
+    setStatus('Log in to FFLogs before running GraphQL queries.', true);
+    return;
+  }
+
+  let variables;
+  try {
+    variables = JSON.parse(variablesInput.value || '{}');
+  } catch (error) {
+    setStatus(`Variables must be valid JSON (${error.message}).`, true);
+    return;
+  }
+
+  setButtonLoading(runQueryButton, true, 'Running...');
+  setRawStatus('Loading');
+
+  try {
+    const payload = await fflogsGraphqlRaw(getGraphqlEndpoint(), queryInput.value, variables);
+    setRawResponse(payload);
+
+    if (payload.errors?.length) {
+      setStatus(`GraphQL returned ${payload.errors.length} error${payload.errors.length === 1 ? '' : 's'}.`, true);
+      return;
+    }
+
+    setStatus('GraphQL query completed.');
+    maybeUseExplorerResult(payload, queryTemplate.value);
+  } catch (error) {
+    console.warn(error);
+    setRawStatus('Error');
+    setStatus(`GraphQL query failed (${error.message}).`, true);
+  } finally {
+    setButtonLoading(runQueryButton, false, 'Run query');
+  }
+}
+
+function maybeUseExplorerResult(payload, templateName) {
+  if (templateName === 'recentReports') {
+    const reports = payload?.data?.reportData?.reports?.data ?? [];
+    const normalized = normalizeReportList(reports);
+    if (normalized.length > 0) {
+      setSessions(normalized);
+    }
+  }
+
+  if (templateName === 'reportSummary') {
+    const report = payload?.data?.reportData?.report;
+    if (report) {
+      setSessions([normalizeSession(report)]);
+    }
+  }
+
+  const user = payload?.data?.userData?.currentUser
+    ?? payload?.data?.userData?.user
+    ?? payload?.data?.currentUser;
+  if (user?.id) {
+    currentUserId = Number(user.id);
+  }
+}
+
+function setQueryTemplate(templateName, variableOverrides = {}) {
+  const template = QUERY_TEMPLATES[templateName] ?? QUERY_TEMPLATES.currentUser;
+  queryTemplate.value = templateName;
+  queryInput.value = template.query.trim();
+  variablesInput.value = JSON.stringify({
+    ...template.variables(),
+    ...variableOverrides,
+  }, null, 2);
+}
+
+function setRawResponse(payload) {
+  rawOutput.textContent = JSON.stringify(payload, null, 2);
+  setRawStatus(payload.errors?.length ? 'Errors' : 'OK');
+}
+
+function setRawStatus(value) {
+  rawStatus.textContent = value;
+}
+
+function setButtonLoading(button, isLoading, loadingText) {
+  if (!button.dataset.label) {
+    button.dataset.label = button.textContent;
+  }
+
+  button.disabled = isLoading;
+  button.textContent = isLoading ? loadingText : button.dataset.label;
+}
+
+function getGraphqlEndpoint() {
+  return endpointInput.value.trim() || 'https://www.fflogs.com/api/v2/user';
+}
+
+function getRedirectUri() {
+  return redirectInput?.value?.trim() || window.location.href.split('?')[0].split('#')[0];
+}
+
+function cleanCallbackUrl() {
+  window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
+}
+
+async function sha256Base64Url(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return base64UrlEncode(new Uint8Array(digest));
+}
+
+function base64UrlEncode(bytes) {
+  const binary = String.fromCharCode(...bytes);
+  return btoa(binary)
+    .replaceAll('+', '-')
+    .replaceAll('/', '_')
+    .replaceAll('=', '');
 }
 
 const RECENT_REPORTS_QUERY = `
   query RecentUserReports($userId: Int!) {
-    userData {
-      user(id: $userId) {
-        reports(limit: 12) {
-          data {
-            code
-            title
-            startTime
-            endTime
-            zone {
-              name
-            }
+    reportData {
+      reports(userID: $userId, limit: 12) {
+        data {
+          code
+          title
+          startTime
+          endTime
+          zone {
+            name
           }
         }
       }
     }
   }
 `;
+
+const MY_RECENT_REPORTS_QUERY = `
+  query MyRecentReports {
+    reportData {
+      reports(limit: 12) {
+        data {
+          code
+          title
+          startTime
+          endTime
+          zone {
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+const CURRENT_USER_QUERY = `
+  query CurrentUser {
+    userData {
+      currentUser {
+        id
+        name
+      }
+    }
+  }
+`;
+
+const CURRENT_USER_QUERY_CANDIDATES = [
+  CURRENT_USER_QUERY,
+];
 
 const REPORT_FIGHTS_QUERY = `
   query ReportFights($code: String!) {
@@ -496,3 +905,122 @@ const REPORT_FIGHTS_QUERY = `
     }
   }
 `;
+
+const SCHEMA_FIELDS_QUERY = `
+  query TopLevelSchemaFields {
+    __schema {
+      queryType {
+        fields {
+          name
+          description
+          args {
+            name
+            type {
+              kind
+              name
+              ofType {
+                kind
+                name
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const USER_DATA_FIELDS_QUERY = `
+  query UserDataFields {
+    __type(name: "UserData") {
+      name
+      fields {
+        name
+        description
+        args {
+          name
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+            }
+          }
+        }
+        type {
+          kind
+          name
+          ofType {
+            kind
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+const REPORT_DATA_FIELDS_QUERY = `
+  query ReportDataFields {
+    __type(name: "ReportData") {
+      name
+      fields {
+        name
+        description
+        args {
+          name
+          type {
+            kind
+            name
+            ofType {
+              kind
+              name
+            }
+          }
+        }
+        type {
+          kind
+          name
+          ofType {
+            kind
+            name
+          }
+        }
+      }
+    }
+  }
+`;
+
+const QUERY_TEMPLATES = {
+  currentUser: {
+    query: CURRENT_USER_QUERY,
+    variables: () => ({}),
+  },
+  myRecentReports: {
+    query: MY_RECENT_REPORTS_QUERY,
+    variables: () => ({}),
+  },
+  recentReports: {
+    query: RECENT_REPORTS_QUERY,
+    variables: () => ({ userId: currentUserId ?? 3430 }),
+  },
+  reportSummary: {
+    query: REPORT_FIGHTS_QUERY,
+    variables: () => ({ code: 'gdck389YW1z2JCQb' }),
+  },
+  schemaFields: {
+    query: SCHEMA_FIELDS_QUERY,
+    variables: () => ({}),
+  },
+  userDataFields: {
+    query: USER_DATA_FIELDS_QUERY,
+    variables: () => ({}),
+  },
+  reportDataFields: {
+    query: REPORT_DATA_FIELDS_QUERY,
+    variables: () => ({}),
+  },
+};
+
+setQueryTemplate('currentUser');

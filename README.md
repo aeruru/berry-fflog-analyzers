@@ -10,7 +10,7 @@ Start a local static server:
 npm start
 ```
 
-The default port is `7999`. Override it with `PORT`:
+The default port is `7999`. You can override it with an ENV var but note that fflogs is only set to auth on port 7999 when using localhost:
 
 ```powershell
 $env:PORT = 8080
@@ -19,19 +19,31 @@ npm start
 
 ## FFLogs data access
 
-The app uses FFLogs GraphQL v2 instead of scraping FFLogs pages. By default it posts GraphQL requests to:
+The app uses FFLogs GraphQL v2 instead of scraping FFLogs pages. Browser users log in with FFLogs OAuth PKCE using this public client id:
 
 ```text
-/api/fflogs/graphql
+a210738b-1a9b-40d8-98f6-a4054696f1eb
 ```
 
-That endpoint should be a small backend or serverless proxy that adds the FFLogs OAuth bearer token server-side and forwards requests to:
+By default it posts authenticated GraphQL requests to the private API:
 
 ```text
-https://www.fflogs.com/api/v2/client
+https://www.fflogs.com/api/v2/user
 ```
 
-For local experiments only, the page has a GraphQL settings section where you can point directly at a compatible endpoint and paste a temporary bearer token.
+The public API is `https://www.fflogs.com/api/v2/client`, but FFLogs documents that endpoint for client-credentials tokens. Browser PKCE login uses the private `/api/v2/user` endpoint.
+
+The FFLogs app must allow the exact redirect URL used by the page. For local testing, that is usually:
+
+```text
+http://127.0.0.1:7999/
+```
+
+For GitHub Pages, use the deployed page URL. The page's GraphQL settings section shows the active redirect URI. FFLogs requires an exact match, so `http://127.0.0.1:7999/` and the GitHub Pages URL must both be added if you want both environments to work.
+
+After logging in, use **Load my recent reports** to query the authenticated FFLogs account, list recent reports, and hydrate each report with fight data. The app first tries to fetch reports from the logged-in token alone. If FFLogs requires a numeric `userID`, it falls back to a current-user lookup and uses that id internally. The user-id box is only for inspecting another account.
+
+The GraphQL explorer also includes editable query templates for current user lookup, recent reports, report summary by code, and top-level schema inspection.
 
 ## Key findings
 

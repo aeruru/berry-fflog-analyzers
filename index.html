@@ -14,11 +14,16 @@
             <p class="eyebrow">Berry FFLogs Analyzers</p>
             <h1>Recent FFLogs pulls</h1>
           </div>
-          <button class="ghost-button" id="loadDemoButton" type="button">Load demo</button>
+          <div class="auth-actions">
+            <span class="auth-state" id="authState">Not logged in</span>
+            <button class="ghost-button" id="loginButton" type="button">Log in to FFLogs</button>
+            <button class="ghost-button hidden" id="logoutButton" type="button">Log out</button>
+            <button class="ghost-button" id="loadDemoButton" type="button">Load demo</button>
+          </div>
         </header>
 
         <form class="search-panel" id="reportForm">
-          <label for="reportInput">FFLogs user reports link or id</label>
+          <label for="reportInput">Optional: load another FFLogs user reports link or id</label>
           <div class="input-row">
             <input
               id="reportInput"
@@ -26,10 +31,10 @@
               type="text"
               autocomplete="off"
               spellcheck="false"
-              value="https://www.fflogs.com/user/reports-list/3430"
+              value=""
               placeholder="https://www.fflogs.com/user/reports-list/3430 or 3430"
             >
-            <button type="submit">Fetch logs</button>
+            <button type="submit">Load user</button>
           </div>
           <details class="settings">
             <summary>GraphQL settings</summary>
@@ -38,20 +43,58 @@
               id="endpointInput"
               name="endpointInput"
               type="url"
-              value="/api/fflogs/graphql"
-              placeholder="/api/fflogs/graphql"
+              value="https://www.fflogs.com/api/v2/user"
+              placeholder="https://www.fflogs.com/api/v2/user"
             >
-            <label for="tokenInput">Bearer token for local testing</label>
+            <label for="redirectInput">OAuth redirect URI</label>
             <input
-              id="tokenInput"
-              name="tokenInput"
-              type="password"
+              id="redirectInput"
+              name="redirectInput"
+              type="url"
               autocomplete="off"
-              placeholder="Leave blank when using a backend proxy"
             >
           </details>
-          <p class="status-line" id="statusLine">Uses FFLogs GraphQL v2. Point the endpoint at a backend proxy so credentials stay off the page.</p>
+          <p class="status-line" id="statusLine">Log in with FFLogs, then use Load my recent reports. The user-id box is only for inspecting another account.</p>
         </form>
+
+        <section class="explorer-panel">
+          <div class="panel-header explorer-header">
+            <div>
+              <h2>GraphQL explorer</h2>
+              <p>Run authenticated FFLogs GraphQL v2 queries and inspect the raw response.</p>
+            </div>
+            <div class="explorer-actions">
+              <button id="loadMineButton" type="button">Load my recent reports</button>
+              <button class="ghost-button" id="introspectionButton" type="button">Inspect schema</button>
+            </div>
+          </div>
+          <div class="explorer-grid">
+            <div class="query-editor">
+              <label for="queryTemplate">Query template</label>
+              <select id="queryTemplate">
+                <option value="currentUser">Current user</option>
+                <option value="myRecentReports">My recent reports</option>
+                <option value="recentReports">Recent reports by user id</option>
+                <option value="reportSummary">Report summary by code</option>
+                <option value="schemaFields">Top-level schema fields</option>
+                <option value="userDataFields">userData fields</option>
+                <option value="reportDataFields">reportData fields</option>
+              </select>
+              <label for="queryInput">Query</label>
+              <textarea id="queryInput" spellcheck="false"></textarea>
+              <label for="variablesInput">Variables</label>
+              <textarea id="variablesInput" spellcheck="false"></textarea>
+              <button id="runQueryButton" type="button">Run query</button>
+            </div>
+            <div class="raw-panel">
+              <div class="panel-header raw-header">
+                <h2>Raw response</h2>
+                <span id="rawStatus">Idle</span>
+              </div>
+              <pre id="rawOutput">{}</pre>
+            </div>
+          </div>
+        </section>
 
         <section class="content-grid">
           <div class="panel">
