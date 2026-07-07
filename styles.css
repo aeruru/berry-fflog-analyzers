@@ -313,6 +313,30 @@ textarea:focus {
   color: var(--accent);
 }
 
+.report-card-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.cache-clear-button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.cache-clear-button:hover {
+  background: #fffaf0;
+  color: var(--accent-dark);
+}
+
 .zone-report-toggle h3,
 .zone-fight-card h4 {
   font-size: 0.98rem;

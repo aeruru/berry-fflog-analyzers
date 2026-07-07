@@ -5,6 +5,7 @@ const FFLOGS_TOKEN_URL = 'https://www.fflogs.com/oauth/token';
 const TOKEN_STORAGE_KEY = 'berry.fflogs.pkce.token';
 const USER_STORAGE_KEY = 'berry.fflogs.user';
 const PKCE_STORAGE_KEY = 'berry.fflogs.pkce.pending';
+const CACHE_STORAGE_PREFIX = 'berry.fflogs.cache.';
 const TEST_DATA_URL = 'fflogs-testdata/sample-report-fights.json';
 const GRAPHQL_ENDPOINT = 'https://www.fflogs.com/api/v2/user';
 const TARGET_ZONE_ID = 76;
@@ -31,6 +32,7 @@ const authState = document.querySelector('#authState');
 const userPanelTitle = document.querySelector('#userPanelTitle');
 const loginButton = document.querySelector('#loginButton');
 const logoutButton = document.querySelector('#logoutButton');
+const clearCacheButton = document.querySelector('#clearCacheButton');
 const loadTestDataButton = document.querySelector('#loadTestDataButton');
 
 loginButton.addEventListener('click', startFflogsLogin);
@@ -45,6 +47,12 @@ logoutButton.addEventListener('click', () => {
 });
 
 loadTestDataButton.addEventListener('click', toggleTestData);
+clearCacheButton.addEventListener('click', () => {
+  const cleared = clearCacheEntries();
+  fightEventDetails = new Map();
+  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'}.`);
+  renderZoneReports();
+});
 
 setSessions([]);
 setZoneReports([]);
@@ -124,7 +132,7 @@ async function fetchRecentSessions({ endpoint, userId, limit = 12, zoneId = null
     variables.zoneId = zoneId;
   }
 
-  const reportsResult = await fflogsGraphql(endpoint, RECENT_REPORTS_QUERY, variables);
+  const reportsResult = await cachedFflogsGraphql('RecentUserReports', endpoint, RECENT_REPORTS_QUERY, variables);
   const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
   return hydrateReportSessions(reports);
 }
@@ -138,7 +146,7 @@ async function hydrateReportSessions(reports) {
     }
 
     try {
-      const fightsResult = await fflogsGraphql(getGraphqlEndpoint(), REPORT_FIGHTS_QUERY, { code: session.reportCode });
+      const fightsResult = await cachedFflogsGraphql('ReportFights', getGraphqlEndpoint(), REPORT_FIGHTS_QUERY, { code: session.reportCode });
       const report = fightsResult?.data?.reportData?.report;
       return normalizeSession({
         ...report,
@@ -240,6 +248,23 @@ async function fflogsGraphql(endpoint, query, variables) {
     throw new Error(payload.errors.map((error) => error.message).join('; '));
   }
 
+  return payload;
+}
+
+async function cachedFflogsGraphql(queryName, endpoint, query, variables) {
+  const cacheKey = makeCacheKey(queryName, {
+    endpoint,
+    queryHash: hashString(query),
+    variables,
+  });
+  const cached = readCacheEntry(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const payload = await fflogsGraphql(endpoint, query, variables);
+  writeCacheEntry(cacheKey, payload);
   return payload;
 }
 
@@ -422,6 +447,87 @@ function getStoredUser() {
   }
 }
 
+function makeCacheKey(queryName, inputs) {
+  return `${CACHE_STORAGE_PREFIX}${queryName}:${encodeURIComponent(stableStringify(inputs))}`;
+}
+
+function readCacheEntry(cacheKey) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(cacheKey) || 'null');
+    return cached?.payload ?? null;
+  } catch {
+    localStorage.removeItem(cacheKey);
+    return null;
+  }
+}
+
+function writeCacheEntry(cacheKey, payload) {
+  try {
+    localStorage.setItem(cacheKey, JSON.stringify({
+      cachedAt: Date.now(),
+      payload,
+    }));
+  } catch (error) {
+    console.info('Could not write FFLogs cache entry.', error);
+  }
+}
+
+function clearCacheEntries(predicate = null) {
+  const keys = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith(CACHE_STORAGE_PREFIX)) {
+      keys.push(key);
+    }
+  }
+
+  const keysToClear = predicate ? keys.filter((key) => predicate(readCacheKeyParts(key))) : keys;
+  keysToClear.forEach((key) => localStorage.removeItem(key));
+  return keysToClear.length;
+}
+
+function readCacheKeyParts(key) {
+  const withoutPrefix = key.slice(CACHE_STORAGE_PREFIX.length);
+  const separatorIndex = withoutPrefix.indexOf(':');
+  const queryName = separatorIndex >= 0 ? withoutPrefix.slice(0, separatorIndex) : withoutPrefix;
+  const encodedInputs = separatorIndex >= 0 ? withoutPrefix.slice(separatorIndex + 1) : '';
+
+  try {
+    return {
+      queryName,
+      inputs: JSON.parse(decodeURIComponent(encodedInputs)),
+    };
+  } catch {
+    return {
+      queryName,
+      inputs: null,
+    };
+  }
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`;
+  }
+
+  return JSON.stringify(value);
+}
+
+function hashString(value) {
+  let hash = 5381;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(index);
+  }
+
+  return (hash >>> 0).toString(36);
+}
+
 function isUsingTestData() {
   return Boolean(getStoredUser()?.testData);
 }
@@ -577,7 +683,10 @@ function renderZoneReports() {
             <h3>${escapeHtml(report.title || report.zoneName)}</h3>
             <p class="meta">${report.reportCode ? `<a class="report-code-link" href="${getFflogsReportUrl(report.reportCode)}" target="_blank" rel="noreferrer">${escapeHtml(report.reportCode)}</a><br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
           </div>
-          <span class="pill">${formatFightCount(report.pulls.length)}</span>
+          <div class="report-card-actions">
+            <button class="cache-clear-button report-cache-clear" data-report-id="${escapeHtml(report.id)}" type="button">Clear cache</button>
+            <span class="pill">${formatFightCount(report.pulls.length)}</span>
+          </div>
         </div>
         ${isExpanded ? renderZoneFightCards(report, fights) : ''}
       </article>
@@ -587,6 +696,13 @@ function renderZoneReports() {
   zoneReportList.querySelectorAll('.report-code-link').forEach((link) => {
     link.addEventListener('click', (event) => {
       event.stopPropagation();
+    });
+  });
+
+  zoneReportList.querySelectorAll('.report-cache-clear').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      clearReportCache(button.dataset.reportId);
     });
   });
 
@@ -615,6 +731,13 @@ function renderZoneReports() {
       loadFightEventDetails(card.dataset.reportId, card.dataset.fightId);
     });
   });
+
+  zoneReportList.querySelectorAll('.fight-cache-clear').forEach((button) => {
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      clearFightCache(button.dataset.reportId, button.dataset.fightId);
+    });
+  });
 }
 
 function renderZoneFightCards(report, fights) {
@@ -638,6 +761,7 @@ function renderZoneFightCards(report, fights) {
           <article class="zone-fight-card ${isActive ? 'active' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
             <div class="pull-top">
               <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
+              <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
             </div>
             <div class="pull-meta">
               <span>${formatTime(fight.startTime)}</span>
@@ -662,7 +786,7 @@ function renderZoneFightCards(report, fights) {
 
 async function loadFightEventDetails(reportId, fightId) {
   const report = zoneReports.find((candidate) => candidate.id === reportId);
-  const fight = report?.pulls.find((candidate) => candidate.id === fightId);
+  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
 
   if (!report || !fight) {
     return;
@@ -739,7 +863,7 @@ async function fetchFightEventDetails(report, fight) {
     throw new Error('report code unavailable');
   }
 
-  const result = await fflogsGraphql(getGraphqlEndpoint(), FIGHT_EVENTS_QUERY, {
+  const result = await cachedFflogsGraphql('FightEvents', getGraphqlEndpoint(), FIGHT_EVENTS_QUERY, {
     code: report.reportCode,
     fightIDs: [Number(fight.id)],
     filterExpression: FIGHT_EVENT_FILTER,
@@ -824,6 +948,57 @@ function getFightPlayers(players, friendlyPlayerIds) {
 
 function getFightEventKey(report, fight) {
   return `${report.id}:${fight.id}`;
+}
+
+function clearReportCache(reportId) {
+  const report = zoneReports.find((candidate) => candidate.id === reportId);
+
+  if (!report) {
+    return;
+  }
+
+  const cleared = clearCacheEntries((entry) => {
+    const variables = entry.inputs?.variables;
+    return variables?.code === report.reportCode;
+  });
+
+  [...fightEventDetails.keys()]
+    .filter((key) => key.startsWith(`${report.id}:`))
+    .forEach((key) => fightEventDetails.delete(key));
+
+  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
+    activeFightEventKey = null;
+  }
+
+  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for ${report.reportCode ?? report.title ?? 'this report'}.`);
+  renderZoneReports();
+}
+
+function clearFightCache(reportId, fightId) {
+  const report = zoneReports.find((candidate) => candidate.id === reportId);
+  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
+
+  if (!report || !fight) {
+    return;
+  }
+
+  const fightNumber = Number(fight.id);
+  const cleared = clearCacheEntries((entry) => {
+    const variables = entry.inputs?.variables;
+    return entry.queryName === 'FightEvents'
+      && variables?.code === report.reportCode
+      && Array.isArray(variables.fightIDs)
+      && variables.fightIDs.map(Number).includes(fightNumber);
+  });
+  const eventKey = getFightEventKey(report, fight);
+  fightEventDetails.delete(eventKey);
+
+  if (activeFightEventKey === eventKey) {
+    activeFightEventKey = null;
+  }
+
+  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for fight ${fight.id}.`);
+  renderZoneReports();
 }
 
 function isEmbeddedReport(report) {
