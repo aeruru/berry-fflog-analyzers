@@ -12,6 +12,56 @@
       "id": 76,
       "name": "Dancing Mad"
     },
+    "players": [
+      {
+        "id": 1,
+        "name": "Berry Blue",
+        "type": "Player",
+        "subType": "Paladin"
+      },
+      {
+        "id": 2,
+        "name": "Maple Mint",
+        "type": "Player",
+        "subType": "Warrior"
+      },
+      {
+        "id": 3,
+        "name": "Juniper Jam",
+        "type": "Player",
+        "subType": "WhiteMage"
+      },
+      {
+        "id": 4,
+        "name": "Peach Parfait",
+        "type": "Player",
+        "subType": "Sage"
+      },
+      {
+        "id": 5,
+        "name": "Cocoa Crumble",
+        "type": "Player",
+        "subType": "Viper"
+      },
+      {
+        "id": 6,
+        "name": "Lemon Lassi",
+        "type": "Player",
+        "subType": "Pictomancer"
+      },
+      {
+        "id": 7,
+        "name": "Kiwi Fizz",
+        "type": "Player",
+        "subType": "Dancer"
+      },
+      {
+        "id": 8,
+        "name": "Cherry Choux",
+        "type": "Player",
+        "subType": "Monk"
+      }
+    ],
     "fights": [
       {
         "id": 1,
@@ -123,7 +173,22 @@
         "startTime": 10680000,
         "endTime": 11072000,
         "kill": false,
-        "fightPercentage": 75.1
+        "fightPercentage": 75.1,
+        "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
+        "events": [
+          {
+            "timestamp": 10768100,
+            "type": "applydebuff",
+            "targetID": 5,
+            "abilityGameID": 1002911
+          },
+          {
+            "timestamp": 10894600,
+            "type": "death",
+            "targetID": 8,
+            "abilityGameID": 0
+          }
+        ]
       },
       {
         "id": 15,
@@ -131,7 +196,16 @@
         "startTime": 11220000,
         "endTime": 11327000,
         "kill": false,
-        "fightPercentage": 95.4
+        "fightPercentage": 95.4,
+        "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
+        "events": [
+          {
+            "timestamp": 11256700,
+            "type": "applydebuff",
+            "targetID": 4,
+            "abilityGameID": 1002911
+          }
+        ]
       },
       {
         "id": 16,
@@ -139,7 +213,34 @@
         "startTime": 11340000,
         "endTime": 11646000,
         "kill": false,
-        "fightPercentage": 81.4
+        "fightPercentage": 81.4,
+        "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
+        "events": [
+          {
+            "timestamp": 11385200,
+            "type": "applydebuff",
+            "targetID": 6,
+            "abilityGameID": 1002911
+          },
+          {
+            "timestamp": 11446400,
+            "type": "death",
+            "targetID": 3,
+            "abilityGameID": 0
+          },
+          {
+            "timestamp": 11511900,
+            "type": "applydebuff",
+            "targetID": 7,
+            "abilityGameID": 1002911
+          },
+          {
+            "timestamp": 11584300,
+            "type": "death",
+            "targetID": 2,
+            "abilityGameID": 0
+          }
+        ]
       }
     ]
   }

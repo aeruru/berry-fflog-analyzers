@@ -9,10 +9,14 @@ const TEST_DATA_URL = 'fflogs-testdata/sample-report-fights.json';
 const GRAPHQL_ENDPOINT = 'https://www.fflogs.com/api/v2/user';
 const TARGET_ZONE_ID = 76;
 const TARGET_ZONE_REPORT_LIMIT = 2;
+const DAMAGE_DOWN_ABILITY_ID = 1002911;
+const FIGHT_EVENT_FILTER = `type = "death" OR (type = "applydebuff" AND ability.id = ${DAMAGE_DOWN_ABILITY_ID})`;
 
 let sessions = [];
 let zoneReports = [];
 let expandedZoneReportIds = new Set();
+let activeFightEventKey = null;
+let fightEventDetails = new Map();
 let selectedSessionId = null;
 let currentUserId = null;
 let currentUserName = null;
@@ -90,6 +94,7 @@ async function loadTestData() {
       throw new Error('sample report was missing report data');
     }
 
+    normalized.testData = true;
     currentUserId = payload.user?.id ?? 'test-data';
     currentUserName = 'Test Data';
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify({
@@ -464,14 +469,17 @@ function normalizeSession(item, index = 0) {
   const startTime = toDateString(reportStartTime ?? pulls[0]?.startTime);
   const endTime = toDateString(item.endTime ?? item.end ?? item.end_time ?? item.report?.endTime ?? pulls[pulls.length - 1]?.endTime, reportStartTime);
   const zoneName = item.zoneName ?? item.zone?.name ?? item.zone ?? item.report?.zone?.name ?? item.report?.zoneName ?? 'Unknown Zone';
+  const players = normalizePlayers(item.players ?? item.report?.players ?? item.masterData?.actors ?? item.report?.masterData?.actors);
 
   return {
-    id: String(item.id ?? item.code ?? item.report?.code ?? `session-${index}`),
-    reportCode: item.code ?? item.report?.code ?? null,
+    id: String(item.id ?? item.reportCode ?? item.code ?? item.report?.code ?? `session-${index}`),
+    reportCode: item.reportCode ?? item.code ?? item.report?.code ?? null,
     title: item.title ?? item.report?.title ?? null,
     zoneName: String(zoneName),
     startTime,
     endTime,
+    testData: Boolean(item.testData ?? item.report?.testData),
+    players,
     pulls,
   };
 }
@@ -482,8 +490,12 @@ function normalizePulls(items, reportStartTime = null) {
   }
 
   return items.map((item, index) => {
-    const startTime = toDateString(item.startTime ?? item.start ?? item.start_time, reportStartTime);
-    const endTime = toDateString(item.endTime ?? item.end ?? item.end_time, reportStartTime);
+    const rawStartTime = item.startTime ?? item.start ?? item.start_time;
+    const rawEndTime = item.endTime ?? item.end ?? item.end_time;
+    const startTime = toDateString(rawStartTime, reportStartTime);
+    const endTime = toDateString(rawEndTime, reportStartTime);
+    const startOffsetMs = normalizeOffsetMs(item.startOffsetMs ?? rawStartTime);
+    const endOffsetMs = normalizeOffsetMs(item.endOffsetMs ?? rawEndTime);
     const durationSeconds = normalizeDuration(item.durationSeconds ?? item.duration ?? secondsBetween(startTime, endTime) ?? 0);
     const bossPercent = normalizeBossPercent(item.bossPercentage ?? item.bossPercent ?? item.fightPercentage);
 
@@ -491,12 +503,43 @@ function normalizePulls(items, reportStartTime = null) {
       id: String(item.id ?? item.fightID ?? index + 1),
       name: item.name ?? item.encounterName ?? item.bossName ?? `Pull ${index + 1}`,
       startTime,
+      startOffsetMs,
       endTime: endTime || addSeconds(startTime, durationSeconds),
+      endOffsetMs,
       durationSeconds,
       bossPercent,
       kill: Boolean(item.kill ?? item.isKill ?? bossPercent === 0),
+      events: normalizeFightEvents(item.events ?? item.eventData ?? [], {
+        fightStartTime: startTime,
+        fightStartOffsetMs: startOffsetMs,
+      }),
+      friendlyPlayerIds: normalizeIdList(item.friendlyPlayers ?? item.friendlyPlayerIds),
     };
   });
+}
+
+function normalizePlayers(raw) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw
+    .filter((actor) => actor && typeof actor === 'object')
+    .map((actor) => ({
+      id: Number(actor.id ?? actor.gameID ?? actor.reportID),
+      name: actor.name ?? `Actor ${actor.id ?? ''}`.trim(),
+      type: actor.type ?? null,
+      subType: actor.subType ?? actor.subtype ?? null,
+    }))
+    .filter((actor) => Number.isFinite(actor.id) && actor.name);
+}
+
+function normalizeIdList(raw) {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  return raw.map(Number).filter(Number.isFinite);
 }
 
 function setSessions(nextSessions) {
@@ -508,6 +551,8 @@ function setSessions(nextSessions) {
 function setZoneReports(nextReports) {
   zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
   expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
+  activeFightEventKey = null;
+  fightEventDetails = new Map();
   renderZoneReports();
 }
 
@@ -527,49 +572,72 @@ function renderZoneReports() {
 
     return `
       <article class="zone-report-card ${isExpanded ? 'expanded' : ''}">
-        <button class="zone-report-toggle" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}">
+        <div class="zone-report-toggle" data-zone-report-id="${escapeHtml(report.id)}" role="button" tabindex="0" aria-expanded="${isExpanded}">
           <div>
             <h3>${escapeHtml(report.title || report.zoneName)}</h3>
-            <p class="meta">${report.reportCode ? `${escapeHtml(report.reportCode)}<br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
+            <p class="meta">${report.reportCode ? `<a class="report-code-link" href="${getFflogsReportUrl(report.reportCode)}" target="_blank" rel="noreferrer">${escapeHtml(report.reportCode)}</a><br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
           </div>
           <span class="pill">${formatFightCount(report.pulls.length)}</span>
-        </button>
-        ${isExpanded ? renderZoneFightCards(fights, report.hydrationError) : ''}
+        </div>
+        ${isExpanded ? renderZoneFightCards(report, fights) : ''}
       </article>
     `;
   }).join('');
 
-  zoneReportList.querySelectorAll('.zone-report-toggle').forEach((button) => {
-    button.addEventListener('click', () => {
-      const reportId = button.dataset.zoneReportId;
+  zoneReportList.querySelectorAll('.report-code-link').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+  });
+
+  zoneReportList.querySelectorAll('.zone-report-toggle').forEach((toggle) => {
+    const toggleReport = () => {
+      const reportId = toggle.dataset.zoneReportId;
       if (expandedZoneReportIds.has(reportId)) {
         expandedZoneReportIds.delete(reportId);
       } else {
         expandedZoneReportIds.add(reportId);
       }
       renderZoneReports();
+    };
+
+    toggle.addEventListener('click', toggleReport);
+    toggle.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        toggleReport();
+      }
+    });
+  });
+
+  zoneReportList.querySelectorAll('.zone-fight-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      loadFightEventDetails(card.dataset.reportId, card.dataset.fightId);
     });
   });
 }
 
-function renderZoneFightCards(fights, hydrationError) {
+function renderZoneFightCards(report, fights) {
   if (fights.length === 0) {
-    return `<div class="zone-fight-list"><div class="empty-state">${hydrationError ? `Fight details unavailable: ${escapeHtml(hydrationError)}` : 'This report does not include fight data yet.'}</div></div>`;
+    return `<div class="zone-fight-list"><div class="empty-state">${report.hydrationError ? `Fight details unavailable: ${escapeHtml(report.hydrationError)}` : 'This report does not include fight data yet.'}</div></div>`;
   }
 
   return `
     <div class="zone-fight-list">
       ${fights.map((fight, index) => {
         const progress = fight.kill ? 100 : clamp(100 - fight.bossPercent, 0, 100);
-        const phase = fight.kill ? 'Clear' : estimatePhase(progress);
+        const phase = fight.kill ? 'Clear' : formatPhaseLabel(estimatePhase(progress));
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
         const bossLabel = `${bossRemaining.toFixed(1)}% boss remaining`;
+        const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
+        const eventKey = getFightEventKey(report, fight);
+        const eventState = fightEventDetails.get(eventKey);
+        const isActive = eventKey === activeFightEventKey;
 
         return `
-          <article class="zone-fight-card">
+          <article class="zone-fight-card ${isActive ? 'active' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
             <div class="pull-top">
-              <h4>${escapeHtml(fight.name || `Fight ${index + 1}`)}</h4>
-              <span class="zone-fight-phase">${phase}</span>
+              <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
             </div>
             <div class="pull-meta">
               <span>${formatTime(fight.startTime)}</span>
@@ -584,11 +652,182 @@ function renderZoneFightCards(fights, hydrationError) {
                 <div class="boss-remaining-fill" style="width: ${bossRemaining}%"></div>
               </div>
             </div>
+            ${isActive ? renderFightEventDetails(eventState) : ''}
           </article>
         `;
       }).join('')}
     </div>
   `;
+}
+
+async function loadFightEventDetails(reportId, fightId) {
+  const report = zoneReports.find((candidate) => candidate.id === reportId);
+  const fight = report?.pulls.find((candidate) => candidate.id === fightId);
+
+  if (!report || !fight) {
+    return;
+  }
+
+  const eventKey = getFightEventKey(report, fight);
+  activeFightEventKey = eventKey;
+
+  if (fightEventDetails.has(eventKey)) {
+    renderZoneReports();
+    return;
+  }
+
+  fightEventDetails.set(eventKey, { status: 'loading', events: [] });
+  renderZoneReports();
+
+  try {
+    const detail = isEmbeddedReport(report)
+      ? getEmbeddedFightEventDetails(report, fight)
+      : await fetchFightEventDetails(report, fight);
+    fightEventDetails.set(eventKey, { status: 'ready', ...detail });
+  } catch (error) {
+    console.warn(error);
+    fightEventDetails.set(eventKey, {
+      status: 'error',
+      error: error.message,
+      events: [],
+    });
+  }
+
+  renderZoneReports();
+}
+
+function renderFightEventDetails(eventState) {
+  if (!eventState || eventState.status === 'loading') {
+    return `<div class="fight-events-panel"><div class="empty-state">Loading death and damage down events...</div></div>`;
+  }
+
+  if (eventState.status === 'error') {
+    return `<div class="fight-events-panel"><div class="empty-state">Could not load fight events: ${escapeHtml(eventState.error)}</div></div>`;
+  }
+
+  if (eventState.events.length === 0) {
+    return `<div class="fight-events-panel"><div class="empty-state">No death or damage down events found for this fight.</div></div>`;
+  }
+
+  return `
+    <div class="fight-events-panel">
+      <div class="fight-events-summary">${eventState.players.length} players in report</div>
+      <table class="fight-events-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Player</th>
+            <th>Event</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${eventState.events.map((event) => `
+            <tr>
+              <td>${escapeHtml(formatEventTime(event.timestampMs))}</td>
+              <td>${escapeHtml(event.playerName)}</td>
+              <td class="event-icon">${renderEventIcon(event.kind)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function fetchFightEventDetails(report, fight) {
+  if (!report.reportCode) {
+    throw new Error('report code unavailable');
+  }
+
+  const result = await fflogsGraphql(getGraphqlEndpoint(), FIGHT_EVENTS_QUERY, {
+    code: report.reportCode,
+    fightIDs: [Number(fight.id)],
+    filterExpression: FIGHT_EVENT_FILTER,
+  });
+  const rawReport = result?.data?.reportData?.report;
+  const actors = normalizePlayers(rawReport?.masterData?.actors ?? []);
+  const fightInfo = rawReport?.fights?.[0] ?? {};
+  const eventRows = rawReport?.events?.data ?? [];
+  const playerLookup = buildPlayerLookup(actors);
+  const players = getFightPlayers(actors, fightInfo.friendlyPlayers);
+
+  return {
+    players,
+    events: normalizeFightEvents(eventRows, {
+      fightStartTime: fight.startTime,
+      fightStartOffsetMs: fight.startOffsetMs,
+      playerLookup,
+    }),
+  };
+}
+
+function getEmbeddedFightEventDetails(report, fight) {
+  const playerLookup = buildPlayerLookup(report.players);
+  const players = getFightPlayers(report.players, fight.friendlyPlayerIds);
+
+  return {
+    players,
+    events: normalizeFightEvents(fight.events, {
+      fightStartTime: fight.startTime,
+      fightStartOffsetMs: fight.startOffsetMs,
+      playerLookup,
+    }),
+  };
+}
+
+function normalizeFightEvents(rawEvents, options = {}) {
+  if (!Array.isArray(rawEvents)) {
+    return [];
+  }
+
+  const fightStartMs = new Date(options.fightStartTime ?? 0).getTime();
+  const fightStartOffsetMs = Number(options.fightStartOffsetMs);
+  const playerLookup = options.playerLookup ?? new Map();
+
+  return rawEvents
+    .filter((event) => event && typeof event === 'object')
+    .filter((event) => event.kind === 'death' || event.kind === 'damageDown' || event.type === 'death' || (event.type === 'applydebuff' && Number(event.abilityGameID) === DAMAGE_DOWN_ABILITY_ID))
+    .map((event) => {
+      const playerId = Number(event.targetID ?? event.sourceID ?? event.playerId);
+      const timestamp = Number(event.timestamp ?? event.time ?? event.startTime ?? 0);
+      const timing = normalizeEventTiming({
+        elapsedMs: event.elapsedMs,
+        fightStartMs,
+        fightStartOffsetMs,
+        timestamp,
+        timestampMs: event.timestampMs,
+      });
+
+      return {
+        elapsedMs: timing.elapsedMs,
+        timestampMs: timing.timestampMs,
+        kind: event.kind ?? (event.type === 'death' ? 'death' : 'damageDown'),
+        playerId,
+        playerName: playerLookup.get(playerId)?.name ?? event.playerName ?? event.targetName ?? event.sourceName ?? `Actor ${playerId}`,
+      };
+    })
+    .sort((a, b) => a.elapsedMs - b.elapsedMs);
+}
+
+function buildPlayerLookup(players) {
+  return new Map((players ?? []).map((player) => [Number(player.id), player]));
+}
+
+function getFightPlayers(players, friendlyPlayerIds) {
+  if (!friendlyPlayerIds?.length) {
+    return players ?? [];
+  }
+
+  const friendlyIds = new Set(friendlyPlayerIds.map(Number));
+  return (players ?? []).filter((player) => friendlyIds.has(Number(player.id)));
+}
+
+function getFightEventKey(report, fight) {
+  return `${report.id}:${fight.id}`;
+}
+
+function isEmbeddedReport(report) {
+  return report.testData || report.reportCode?.startsWith('TEST') || currentUserName === 'Test Data' || isUsingTestData();
 }
 
 function renderReportGraph() {
@@ -626,6 +865,18 @@ function renderReportGraph() {
   });
 }
 
+function renderEventIcon(kind) {
+  if (kind === 'death') {
+    return '<span aria-label="Death" title="Death">💀</span>';
+  }
+
+  return '<img class="damage-down-icon" src="assets/damage-down.png" alt="Damage down" title="Damage down">';
+}
+
+function getFflogsReportUrl(reportCode) {
+  return `https://www.fflogs.com/reports/${encodeURIComponent(reportCode)}`;
+}
+
 function normalizeBossPercent(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) {
@@ -633,6 +884,55 @@ function normalizeBossPercent(value) {
   }
 
   return number > 100 ? number / 100 : number;
+}
+
+function normalizeOffsetMs(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number > 100_000_000) {
+    return null;
+  }
+
+  return number;
+}
+
+function normalizeEventTiming({ elapsedMs, fightStartMs, fightStartOffsetMs, timestamp, timestampMs }) {
+  const explicitTimestampMs = Number(timestampMs);
+  if (Number.isFinite(explicitTimestampMs)) {
+    return {
+      elapsedMs: Math.max(0, explicitTimestampMs - fightStartMs),
+      timestampMs: explicitTimestampMs,
+    };
+  }
+
+  const explicitElapsedMs = Number(elapsedMs);
+  if (Number.isFinite(explicitElapsedMs)) {
+    const safeElapsedMs = Math.max(0, explicitElapsedMs);
+    return {
+      elapsedMs: safeElapsedMs,
+      timestampMs: fightStartMs + safeElapsedMs,
+    };
+  }
+
+  if (timestamp > 10_000_000_000) {
+    return {
+      elapsedMs: Math.max(0, timestamp - fightStartMs),
+      timestampMs: timestamp,
+    };
+  }
+
+  if (Number.isFinite(fightStartOffsetMs)) {
+    const calculatedElapsedMs = timestamp >= fightStartOffsetMs ? timestamp - fightStartOffsetMs : timestamp;
+    const safeElapsedMs = Math.max(0, calculatedElapsedMs);
+    return {
+      elapsedMs: safeElapsedMs,
+      timestampMs: fightStartMs + safeElapsedMs,
+    };
+  }
+
+  return {
+    elapsedMs: Math.max(0, timestamp),
+    timestampMs: fightStartMs + Math.max(0, timestamp),
+  };
 }
 
 function normalizeDuration(value) {
@@ -704,8 +1004,27 @@ function formatDuration(seconds) {
   return `${minutes}:${remainder}`;
 }
 
+function formatFightElapsed(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
+function formatEventTime(milliseconds) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(milliseconds));
+}
+
 function formatFightCount(count) {
   return `${count} ${count === 1 ? 'fight' : 'fights'}`;
+}
+
+function formatPhaseLabel(phase) {
+  return phase.replace(/^Phase\s+(\d+)$/i, 'Phase$1');
 }
 
 function estimatePhase(progress) {
@@ -825,6 +1144,31 @@ const REPORT_FIGHTS_QUERY = `
           endTime
           kill
           fightPercentage
+          friendlyPlayers
+        }
+      }
+    }
+  }
+`;
+
+const FIGHT_EVENTS_QUERY = `
+  query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
+    reportData {
+      report(code: $code) {
+        masterData {
+          actors {
+            id
+            name
+            type
+            subType
+          }
+        }
+        fights(fightIDs: $fightIDs) {
+          id
+          friendlyPlayers
+        }
+        events(fightIDs: $fightIDs, filterExpression: $filterExpression, limit: 10000) {
+          data
         }
       }
     }
