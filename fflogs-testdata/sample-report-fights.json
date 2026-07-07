@@ -173,7 +173,10 @@
         "startTime": 10680000,
         "endTime": 11072000,
         "kill": false,
+        "bossPercentage": 75.1,
         "fightPercentage": 75.1,
+        "lastPhase": 2,
+        "lastPhaseIsIntermission": false,
         "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
         "events": [
           {
@@ -196,7 +199,10 @@
         "startTime": 11220000,
         "endTime": 11327000,
         "kill": false,
+        "bossPercentage": 95.4,
         "fightPercentage": 95.4,
+        "lastPhase": 1,
+        "lastPhaseIsIntermission": false,
         "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
         "events": [
           {
@@ -213,13 +219,22 @@
         "startTime": 11340000,
         "endTime": 11646000,
         "kill": false,
+        "bossPercentage": 81.4,
         "fightPercentage": 81.4,
+        "lastPhase": 2,
+        "lastPhaseIsIntermission": false,
         "friendlyPlayers": [1, 2, 3, 4, 5, 6, 7, 8],
         "events": [
           {
             "timestamp": 11385200,
             "type": "applydebuff",
             "targetID": 6,
+            "abilityGameID": 1002911
+          },
+          {
+            "timestamp": 11402000,
+            "type": "applydebuff",
+            "targetID": 99,
             "abilityGameID": 1002911
           },
           {

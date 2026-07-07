@@ -66,6 +66,8 @@ function normalizePulls(items, reportStartTime = null) {
     const endOffsetMs = normalizeOffsetMs(item.endOffsetMs ?? rawEndTime);
     const durationSeconds = normalizeDuration(item.durationSeconds ?? item.duration ?? secondsBetween(startTime, endTime) ?? 0);
     const bossPercent = normalizeBossPercent(item.bossPercentage ?? item.bossPercent ?? item.fightPercentage);
+    const fightPercent = normalizeBossPercent(item.fightPercentage ?? item.fightPercent ?? item.bossPercentage ?? item.bossPercent);
+    const lastPhase = normalizePhaseNumber(item.lastPhase ?? item.phase);
 
     return {
       id: String(item.id ?? item.fightID ?? index + 1),
@@ -76,6 +78,9 @@ function normalizePulls(items, reportStartTime = null) {
       endOffsetMs,
       durationSeconds,
       bossPercent,
+      fightPercent,
+      lastPhase,
+      lastPhaseIsIntermission: Boolean(item.lastPhaseIsIntermission),
       kill: Boolean(item.kill ?? item.isKill ?? bossPercent === 0),
       events: normalizeFightEvents(item.events ?? item.eventData ?? [], {
         fightStartTime: startTime,
@@ -118,10 +123,19 @@ export function normalizeFightEvents(rawEvents, options = {}) {
   const fightStartMs = new Date(options.fightStartTime ?? 0).getTime();
   const fightStartOffsetMs = Number(options.fightStartOffsetMs);
   const playerLookup = options.playerLookup ?? new Map();
+  const playerIds = options.playerIds?.length ? new Set(options.playerIds.map(Number)) : null;
 
   return rawEvents
     .filter((event) => event && typeof event === 'object')
     .filter((event) => event.kind === 'death' || event.kind === 'damageDown' || event.type === 'death' || (event.type === 'applydebuff' && Number(event.abilityGameID) === DAMAGE_DOWN_ABILITY_ID))
+    .filter((event) => {
+      if (!playerIds) {
+        return true;
+      }
+
+      const playerId = Number(event.targetID ?? event.sourceID ?? event.playerId);
+      return playerIds.has(playerId);
+    })
     .map((event) => {
       const playerId = Number(event.targetID ?? event.sourceID ?? event.playerId);
       const timestamp = Number(event.timestamp ?? event.time ?? event.startTime ?? 0);
@@ -164,6 +178,11 @@ function normalizeBossPercent(value) {
   }
 
   return number > 100 ? number / 100 : number;
+}
+
+function normalizePhaseNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function normalizeOffsetMs(value) {

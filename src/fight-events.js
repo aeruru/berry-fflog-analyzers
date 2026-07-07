@@ -26,6 +26,7 @@ export async function fetchFightEventDetails(report, fight, { endpoint, onExpire
   const eventRows = rawReport?.events?.data ?? [];
   const playerLookup = buildPlayerLookup(actors);
   const players = getFightPlayers(actors, fightInfo.friendlyPlayers);
+  const playerIds = players.map((player) => player.id);
 
   return {
     players,
@@ -33,6 +34,7 @@ export async function fetchFightEventDetails(report, fight, { endpoint, onExpire
       fightStartTime: fight.startTime,
       fightStartOffsetMs: fight.startOffsetMs,
       playerLookup,
+      playerIds,
     }),
   };
 }
@@ -40,6 +42,7 @@ export async function fetchFightEventDetails(report, fight, { endpoint, onExpire
 export function getEmbeddedFightEventDetails(report, fight) {
   const playerLookup = buildPlayerLookup(report.players);
   const players = getFightPlayers(report.players, fight.friendlyPlayerIds);
+  const playerIds = players.map((player) => player.id);
 
   return {
     players,
@@ -47,6 +50,7 @@ export function getEmbeddedFightEventDetails(report, fight) {
       fightStartTime: fight.startTime,
       fightStartOffsetMs: fight.startOffsetMs,
       playerLookup,
+      playerIds,
     }),
   };
 }

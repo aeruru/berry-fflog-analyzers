@@ -2,12 +2,12 @@ import { TARGET_ZONE_ID } from './config.js';
 import {
   clamp,
   escapeHtml,
-  estimatePhase,
   formatDateRange,
   formatDuration,
+  formatElapsedTime,
   formatEventTime,
+  formatFightPhase,
   formatFightCount,
-  formatPhaseLabel,
   formatShortDate,
   formatTime,
   getFflogsReportUrl,
@@ -104,10 +104,9 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
   return `
     <div class="zone-fight-list">
       ${fights.map((fight, index) => {
-        const progress = fight.kill ? 100 : clamp(100 - fight.bossPercent, 0, 100);
-        const phase = fight.kill ? 'Clear' : formatPhaseLabel(estimatePhase(progress));
+        const phase = formatFightPhase(fight);
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
-        const bossLabel = `${bossRemaining.toFixed(1)}% boss remaining`;
+        const bossLabel = `${bossRemaining.toFixed(1)}% phase boss remaining`;
         const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
@@ -125,7 +124,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
             </div>
             <div class="boss-remaining">
               <div class="boss-remaining-label">
-                <span>Boss remaining</span>
+                <span>Phase boss remaining</span>
                 <strong>${bossLabel}</strong>
               </div>
               <div class="boss-remaining-track" aria-label="${bossLabel}">
@@ -167,7 +166,7 @@ function renderFightEventDetails(eventState) {
         <tbody>
           ${eventState.events.map((event) => `
             <tr>
-              <td>${escapeHtml(formatEventTime(event.timestampMs))}</td>
+              <td>${escapeHtml(`${formatEventTime(event.timestampMs)} (${formatElapsedTime(event.elapsedMs)})`)}</td>
               <td>${escapeHtml(event.playerName)}</td>
               <td class="event-icon">${renderEventIcon(event.kind)}</td>
             </tr>

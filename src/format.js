@@ -37,6 +37,13 @@ export function formatEventTime(milliseconds) {
   }).format(new Date(milliseconds));
 }
 
+export function formatElapsedTime(milliseconds) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
 export function formatFightCount(count) {
   return `${count} ${count === 1 ? 'fight' : 'fights'}`;
 }
@@ -45,12 +52,17 @@ export function formatPhaseLabel(phase) {
   return phase.replace(/^Phase\s+(\d+)$/i, 'Phase$1');
 }
 
-export function estimatePhase(progress) {
-  if (progress >= 85) return 'Final phase';
-  if (progress >= 65) return 'Phase 4';
-  if (progress >= 45) return 'Phase 3';
-  if (progress >= 22) return 'Phase 2';
-  return 'Phase 1';
+export function formatFightPhase(fight) {
+  if (fight.kill) {
+    return 'Clear';
+  }
+
+  if (fight.lastPhase) {
+    const label = fight.lastPhaseIsIntermission ? `Intermission ${fight.lastPhase}` : `Phase ${fight.lastPhase}`;
+    return formatPhaseLabel(label);
+  }
+
+  return 'Unknown phase';
 }
 
 export function renderEventIcon(kind) {

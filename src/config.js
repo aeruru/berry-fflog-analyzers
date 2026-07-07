@@ -63,7 +63,10 @@ export const REPORT_FIGHTS_QUERY = `
           startTime
           endTime
           kill
+          bossPercentage
           fightPercentage
+          lastPhase
+          lastPhaseIsIntermission
           friendlyPlayers
         }
       }
@@ -85,6 +88,10 @@ export const FIGHT_EVENTS_QUERY = `
         }
         fights(fightIDs: $fightIDs) {
           id
+          bossPercentage
+          fightPercentage
+          lastPhase
+          lastPhaseIsIntermission
           friendlyPlayers
         }
         events(fightIDs: $fightIDs, filterExpression: $filterExpression, limit: 10000) {
