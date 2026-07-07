@@ -1,0 +1,41 @@
+{
+  "user": {
+    "id": "test-data",
+    "name": "Test Data"
+  },
+  "report": {
+    "code": "TESTDATA01",
+    "title": "Berry Test Report",
+    "startTime": 1781230833000,
+    "endTime": 1781231430000,
+    "zone": {
+      "name": "AAC Light-heavyweight"
+    },
+    "fights": [
+      {
+        "id": 1,
+        "name": "M2S",
+        "startTime": 0,
+        "endTime": 388000,
+        "kill": false,
+        "fightPercentage": 45.8
+      },
+      {
+        "id": 2,
+        "name": "M2S",
+        "startTime": 604000,
+        "endTime": 1116000,
+        "kill": false,
+        "fightPercentage": 16.3
+      },
+      {
+        "id": 3,
+        "name": "M2S",
+        "startTime": 1565000,
+        "endTime": 2161000,
+        "kill": true,
+        "fightPercentage": 0
+      }
+    ]
+  }
+}

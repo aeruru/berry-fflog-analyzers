@@ -14,86 +14,35 @@
             <p class="eyebrow">Berry FFLogs Analyzers</p>
             <h1>Recent FFLogs pulls</h1>
           </div>
-          <div class="auth-actions">
-            <span class="auth-state" id="authState">Not logged in</span>
-            <button class="ghost-button" id="loginButton" type="button">Log in to FFLogs</button>
-            <button class="ghost-button hidden" id="logoutButton" type="button">Log out</button>
-            <button class="ghost-button" id="loadDemoButton" type="button">Load demo</button>
-          </div>
         </header>
 
-        <form class="search-panel" id="reportForm">
-          <label for="reportInput">Optional: load another FFLogs user reports link or id</label>
-          <div class="input-row">
-            <input
-              id="reportInput"
-              name="reportInput"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              value=""
-              placeholder="https://www.fflogs.com/user/reports-list/3430 or 3430"
-            >
-            <button type="submit">Load user</button>
+        <section class="user-panel" aria-labelledby="userPanelTitle">
+          <div>
+            <p class="eyebrow">User data</p>
+            <h2 class="account-title" id="userPanelTitle">FFLogs account</h2>
+            <p class="user-summary">
+              <span id="authState">Not logged in</span>
+              <span class="user-name hidden" id="userName"></span>
+            </p>
+            <p class="status-line" id="statusLine">Log in with FFLogs to load your latest reports.</p>
           </div>
-          <details class="settings">
-            <summary>GraphQL settings</summary>
-            <label for="endpointInput">GraphQL endpoint</label>
-            <input
-              id="endpointInput"
-              name="endpointInput"
-              type="url"
-              value="https://www.fflogs.com/api/v2/user"
-              placeholder="https://www.fflogs.com/api/v2/user"
-            >
-            <label for="redirectInput">OAuth redirect URI</label>
-            <input
-              id="redirectInput"
-              name="redirectInput"
-              type="url"
-              autocomplete="off"
-            >
-          </details>
-          <p class="status-line" id="statusLine">Log in with FFLogs, then use Load my recent reports. The user-id box is only for inspecting another account.</p>
-        </form>
+          <div class="user-actions">
+            <button id="loginButton" type="button">Log in to FFLogs</button>
+            <button class="ghost-button hidden" id="logoutButton" type="button">Log out</button>
+            <button class="ghost-button" id="clearCacheButton" type="button">Clear local cache</button>
+            <button class="ghost-button" id="loadTestDataButton" type="button">Use test data</button>
+          </div>
+        </section>
 
-        <section class="explorer-panel">
-          <div class="panel-header explorer-header">
+        <section class="panel report-graph-panel">
+          <div class="panel-header">
             <div>
-              <h2>GraphQL explorer</h2>
-              <p>Run authenticated FFLogs GraphQL v2 queries and inspect the raw response.</p>
+              <h2>Latest reports</h2>
+              <p>Recent report volume by pull count.</p>
             </div>
-            <div class="explorer-actions">
-              <button id="loadMineButton" type="button">Load my recent reports</button>
-              <button class="ghost-button" id="introspectionButton" type="button">Inspect schema</button>
-            </div>
+            <span id="reportGraphCount">0 reports</span>
           </div>
-          <div class="explorer-grid">
-            <div class="query-editor">
-              <label for="queryTemplate">Query template</label>
-              <select id="queryTemplate">
-                <option value="currentUser">Current user</option>
-                <option value="myRecentReports">My recent reports</option>
-                <option value="recentReports">Recent reports by user id</option>
-                <option value="reportSummary">Report summary by code</option>
-                <option value="schemaFields">Top-level schema fields</option>
-                <option value="userDataFields">userData fields</option>
-                <option value="reportDataFields">reportData fields</option>
-              </select>
-              <label for="queryInput">Query</label>
-              <textarea id="queryInput" spellcheck="false"></textarea>
-              <label for="variablesInput">Variables</label>
-              <textarea id="variablesInput" spellcheck="false"></textarea>
-              <button id="runQueryButton" type="button">Run query</button>
-            </div>
-            <div class="raw-panel">
-              <div class="panel-header raw-header">
-                <h2>Raw response</h2>
-                <span id="rawStatus">Idle</span>
-              </div>
-              <pre id="rawOutput">{}</pre>
-            </div>
-          </div>
+          <div class="report-graph" id="reportGraph"></div>
         </section>
 
         <section class="content-grid">
