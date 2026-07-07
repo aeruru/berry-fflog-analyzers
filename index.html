@@ -22,7 +22,6 @@
             <h2 class="account-title" id="userPanelTitle">FFLogs account</h2>
             <p class="user-summary">
               <span id="authState">Not logged in</span>
-              <span class="user-name hidden" id="userName"></span>
             </p>
             <p class="status-line" id="statusLine">Log in with FFLogs to load your latest reports.</p>
           </div>
@@ -34,6 +33,17 @@
           </div>
         </section>
 
+        <section class="panel zone-report-panel">
+          <div class="panel-header">
+            <div>
+              <h2 id="zoneReportTitle">Zone 76 reports</h2>
+              <p>Last two matching reports from the current FFLogs account.</p>
+            </div>
+            <span id="zoneReportCount">0 reports</span>
+          </div>
+          <div class="zone-report-list" id="zoneReportList"></div>
+        </section>
+
         <section class="panel report-graph-panel">
           <div class="panel-header">
             <div>
@@ -43,27 +53,6 @@
             <span id="reportGraphCount">0 reports</span>
           </div>
           <div class="report-graph" id="reportGraph"></div>
-        </section>
-
-        <section class="content-grid">
-          <div class="panel">
-            <div class="panel-header">
-              <h2>Recent sets</h2>
-              <span id="sessionCount">0 sets</span>
-            </div>
-            <div class="session-list" id="sessionList"></div>
-          </div>
-
-          <div class="panel detail-panel">
-            <div class="panel-header">
-              <div>
-                <h2 id="detailTitle">Select a set</h2>
-                <p id="detailSubtitle">Pull details will appear here.</p>
-              </div>
-              <span id="pullCount">0 pulls</span>
-            </div>
-            <div class="pull-list" id="pullList"></div>
-          </div>
         </section>
       </section>
     </main>

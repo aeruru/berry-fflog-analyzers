@@ -7,24 +7,24 @@ const USER_STORAGE_KEY = 'berry.fflogs.user';
 const PKCE_STORAGE_KEY = 'berry.fflogs.pkce.pending';
 const TEST_DATA_URL = 'fflogs-testdata/sample-report-fights.json';
 const GRAPHQL_ENDPOINT = 'https://www.fflogs.com/api/v2/user';
+const TARGET_ZONE_ID = 76;
+const TARGET_ZONE_REPORT_LIMIT = 2;
 
 let sessions = [];
+let zoneReports = [];
+let expandedZoneReportIds = new Set();
 let selectedSessionId = null;
 let currentUserId = null;
 let currentUserName = null;
 
 const statusLine = document.querySelector('#statusLine');
+const zoneReportTitle = document.querySelector('#zoneReportTitle');
+const zoneReportList = document.querySelector('#zoneReportList');
+const zoneReportCount = document.querySelector('#zoneReportCount');
 const reportGraph = document.querySelector('#reportGraph');
 const reportGraphCount = document.querySelector('#reportGraphCount');
-const sessionList = document.querySelector('#sessionList');
-const sessionCount = document.querySelector('#sessionCount');
-const detailTitle = document.querySelector('#detailTitle');
-const detailSubtitle = document.querySelector('#detailSubtitle');
-const pullCount = document.querySelector('#pullCount');
-const pullList = document.querySelector('#pullList');
 const authState = document.querySelector('#authState');
 const userPanelTitle = document.querySelector('#userPanelTitle');
-const userName = document.querySelector('#userName');
 const loginButton = document.querySelector('#loginButton');
 const logoutButton = document.querySelector('#logoutButton');
 const loadTestDataButton = document.querySelector('#loadTestDataButton');
@@ -35,6 +35,7 @@ logoutButton.addEventListener('click', () => {
   localStorage.removeItem(USER_STORAGE_KEY);
   currentUserId = null;
   currentUserName = null;
+  setZoneReports([]);
   updateAuthUi();
   setStatus('Logged out of FFLogs.');
 });
@@ -42,6 +43,7 @@ logoutButton.addEventListener('click', () => {
 loadTestDataButton.addEventListener('click', toggleTestData);
 
 setSessions([]);
+setZoneReports([]);
 handleOAuthCallback().finally(async () => {
   updateAuthUi();
   if (getStoredToken() && !isUsingTestData()) {
@@ -55,6 +57,7 @@ async function toggleTestData() {
     currentUserId = null;
     currentUserName = null;
     setSessions([]);
+    setZoneReports([]);
     updateAuthUi();
 
     if (getStoredToken()) {
@@ -96,6 +99,7 @@ async function loadTestData() {
     }));
     updateAuthUi();
     setSessions([normalized]);
+    setZoneReports([normalized]);
     setStatus('Loaded test data from the local JSON file.');
   } catch (error) {
     console.warn(error);
@@ -105,8 +109,17 @@ async function loadTestData() {
   }
 }
 
-async function fetchRecentSessions({ endpoint, userId }) {
-  const reportsResult = await fflogsGraphql(endpoint, RECENT_REPORTS_QUERY, { userId });
+async function fetchRecentSessions({ endpoint, userId, limit = 12, zoneId = null }) {
+  const variables = {
+    userId,
+    limit,
+  };
+
+  if (zoneId !== null) {
+    variables.zoneId = zoneId;
+  }
+
+  const reportsResult = await fflogsGraphql(endpoint, RECENT_REPORTS_QUERY, variables);
   const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
   return hydrateReportSessions(reports);
 }
@@ -153,13 +166,14 @@ async function loadMyRecentReports() {
   setStatus('Looking up your FFLogs account and latest reports...');
 
   try {
-    const { normalized, user } = await fetchMyRecentSessions();
+    const { normalized, targetZoneReports, user } = await fetchMyRecentSessions();
 
     if (normalized.length === 0) {
       throw new Error('No known-zone reports were found for your account.');
     }
 
     setSessions(normalized);
+    setZoneReports(targetZoneReports);
     setCurrentUser(user);
 
     const latest = normalized[0];
@@ -177,12 +191,20 @@ async function fetchMyRecentSessions() {
   const user = await fetchCurrentUser();
   setCurrentUser(user);
 
-  const normalized = await fetchRecentSessions({
-    endpoint: getGraphqlEndpoint(),
-    userId: currentUserId,
-  });
+  const [normalized, targetZoneReports] = await Promise.all([
+    fetchRecentSessions({
+      endpoint: getGraphqlEndpoint(),
+      userId: currentUserId,
+    }),
+    fetchRecentSessions({
+      endpoint: getGraphqlEndpoint(),
+      userId: currentUserId,
+      limit: TARGET_ZONE_REPORT_LIMIT,
+      zoneId: TARGET_ZONE_ID,
+    }),
+  ]);
 
-  return { normalized, user };
+  return { normalized, targetZoneReports, user };
 }
 
 async function fetchCurrentUser() {
@@ -366,8 +388,6 @@ function updateAuthUi() {
 
   userPanelTitle.textContent = currentUserName || 'FFLogs account';
   authState.textContent = isTestData ? 'Using test data' : isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
-  userName.textContent = currentUserName ? (isTestData ? 'Local sample dataset' : 'FFLogs account') : '';
-  userName.classList.toggle('hidden', !currentUserName);
   loginButton.classList.toggle('hidden', Boolean(token));
   logoutButton.classList.toggle('hidden', !token);
   if (!loadTestDataButton.disabled) {
@@ -482,37 +502,93 @@ function normalizePulls(items, reportStartTime = null) {
 function setSessions(nextSessions) {
   sessions = normalizeReportList(nextSessions);
   selectedSessionId = sessions[0]?.id ?? null;
-  render();
+  renderReportGraph();
 }
 
-function render() {
-  sessionCount.textContent = `${sessions.length} ${sessions.length === 1 ? 'set' : 'sets'}`;
-  renderReportGraph();
+function setZoneReports(nextReports) {
+  zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
+  expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
+  renderZoneReports();
+}
 
-  if (sessions.length === 0) {
-    sessionList.innerHTML = `<div class="empty-state">No recent known-zone sets found.</div>`;
-    renderPulls(null);
+function renderZoneReports() {
+  zoneReportCount.textContent = `${zoneReports.length} ${zoneReports.length === 1 ? 'report' : 'reports'}`;
+  const zoneName = zoneReports.find((report) => report.zoneName)?.zoneName;
+  zoneReportTitle.textContent = zoneName ? `${zoneName} reports` : `Zone ${TARGET_ZONE_ID} reports`;
+
+  if (zoneReports.length === 0) {
+    zoneReportList.innerHTML = `<div class="empty-state">No recent Zone ${TARGET_ZONE_ID} reports found yet.</div>`;
     return;
   }
 
-  sessionList.innerHTML = sessions.map((session) => `
-    <button class="session-card ${session.id === selectedSessionId ? 'active' : ''}" data-session-id="${escapeHtml(session.id)}" type="button">
-      <div class="session-top">
-        <h3>${escapeHtml(session.zoneName)}</h3>
-        <span class="pill">${session.pulls.length} pulls</span>
-      </div>
-      <p class="meta">${session.title ? `${escapeHtml(session.title)}<br>` : ''}${session.reportCode ? `${escapeHtml(session.reportCode)}<br>` : ''}${formatDateRange(session.startTime, session.endTime)}${session.hydrationError ? '<br>Fight details unavailable' : ''}</p>
-    </button>
-  `).join('');
+  zoneReportList.innerHTML = zoneReports.map((report) => {
+    const isExpanded = expandedZoneReportIds.has(report.id);
+    const fights = [...report.pulls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
 
-  sessionList.querySelectorAll('.session-card').forEach((card) => {
-    card.addEventListener('click', () => {
-      selectedSessionId = card.dataset.sessionId;
-      render();
+    return `
+      <article class="zone-report-card ${isExpanded ? 'expanded' : ''}">
+        <button class="zone-report-toggle" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}">
+          <div>
+            <h3>${escapeHtml(report.title || report.zoneName)}</h3>
+            <p class="meta">${report.reportCode ? `${escapeHtml(report.reportCode)}<br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
+          </div>
+          <span class="pill">${formatFightCount(report.pulls.length)}</span>
+        </button>
+        ${isExpanded ? renderZoneFightCards(fights, report.hydrationError) : ''}
+      </article>
+    `;
+  }).join('');
+
+  zoneReportList.querySelectorAll('.zone-report-toggle').forEach((button) => {
+    button.addEventListener('click', () => {
+      const reportId = button.dataset.zoneReportId;
+      if (expandedZoneReportIds.has(reportId)) {
+        expandedZoneReportIds.delete(reportId);
+      } else {
+        expandedZoneReportIds.add(reportId);
+      }
+      renderZoneReports();
     });
   });
+}
 
-  renderPulls(sessions.find((session) => session.id === selectedSessionId));
+function renderZoneFightCards(fights, hydrationError) {
+  if (fights.length === 0) {
+    return `<div class="zone-fight-list"><div class="empty-state">${hydrationError ? `Fight details unavailable: ${escapeHtml(hydrationError)}` : 'This report does not include fight data yet.'}</div></div>`;
+  }
+
+  return `
+    <div class="zone-fight-list">
+      ${fights.map((fight, index) => {
+        const progress = fight.kill ? 100 : clamp(100 - fight.bossPercent, 0, 100);
+        const phase = fight.kill ? 'Clear' : estimatePhase(progress);
+        const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
+        const bossLabel = `${bossRemaining.toFixed(1)}% boss remaining`;
+
+        return `
+          <article class="zone-fight-card">
+            <div class="pull-top">
+              <h4>${escapeHtml(fight.name || `Fight ${index + 1}`)}</h4>
+              <span class="zone-fight-phase">${phase}</span>
+            </div>
+            <div class="pull-meta">
+              <span>${formatTime(fight.startTime)}</span>
+              <span>${formatDuration(fight.durationSeconds)}</span>
+            </div>
+            <div class="boss-remaining">
+              <div class="boss-remaining-label">
+                <span>Boss remaining</span>
+                <strong>${bossLabel}</strong>
+              </div>
+              <div class="boss-remaining-track" aria-label="${bossLabel}">
+                <div class="boss-remaining-fill" style="width: ${bossRemaining}%"></div>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderReportGraph() {
@@ -545,56 +621,9 @@ function renderReportGraph() {
   reportGraph.querySelectorAll('.report-bar').forEach((bar) => {
     bar.addEventListener('click', () => {
       selectedSessionId = bar.dataset.sessionId;
-      render();
+      renderReportGraph();
     });
   });
-}
-
-function renderPulls(session) {
-  if (!session) {
-    detailTitle.textContent = 'Select a set';
-    detailSubtitle.textContent = 'Pull details will appear here.';
-    pullCount.textContent = '0 pulls';
-    pullList.innerHTML = `<div class="empty-state">Choose a recent set to inspect its pulls.</div>`;
-    return;
-  }
-
-  detailTitle.textContent = session.zoneName;
-  detailSubtitle.textContent = `${session.title ? `${session.title} | ` : ''}${session.reportCode ? `${session.reportCode} | ` : ''}${formatDateRange(session.startTime, session.endTime)}`;
-  pullCount.textContent = `${session.pulls.length} ${session.pulls.length === 1 ? 'pull' : 'pulls'}`;
-
-  if (session.pulls.length === 0) {
-    pullList.innerHTML = `<div class="empty-state">${session.hydrationError ? `The report loaded, but fight details could not be fetched yet: ${escapeHtml(session.hydrationError)}` : 'This set does not include pull-level fight data yet.'}</div>`;
-    return;
-  }
-
-  pullList.innerHTML = session.pulls.map((fight, index) => {
-    const progress = fight.kill ? 100 : clamp(100 - fight.bossPercent, 0, 100);
-    const phase = fight.kill ? 'Clear' : estimatePhase(progress);
-
-    return `
-      <article class="pull-card">
-        <div class="pull-top">
-          <h3>${escapeHtml(fight.name || `Pull ${index + 1}`)}</h3>
-          <span class="pill">${fight.kill ? 'Kill' : phase}</span>
-        </div>
-        <div class="pull-meta">
-          <span>${formatTime(fight.startTime)}</span>
-          <span>${formatDuration(fight.durationSeconds)}</span>
-          <span>${fight.kill ? '0% boss remaining' : `${fight.bossPercent.toFixed(1)}% boss remaining`}</span>
-        </div>
-        <div class="progress-wrap">
-          <div class="progress-label">
-            <span>Fight progress</span>
-            <span>${Math.round(progress)}%</span>
-          </div>
-          <div class="progress-track">
-            <div class="progress-fill" style="width: ${progress}%"></div>
-          </div>
-        </div>
-      </article>
-    `;
-  }).join('');
 }
 
 function normalizeBossPercent(value) {
@@ -616,7 +645,7 @@ function normalizeDuration(value) {
 }
 
 function toDateString(value, reportStartTime = null) {
-  if (!value) {
+  if (value === null || value === undefined || value === '') {
     return new Date().toISOString();
   }
 
@@ -675,6 +704,10 @@ function formatDuration(seconds) {
   return `${minutes}:${remainder}`;
 }
 
+function formatFightCount(count) {
+  return `${count} ${count === 1 ? 'fight' : 'fights'}`;
+}
+
 function estimatePhase(progress) {
   if (progress >= 85) return 'Final phase';
   if (progress >= 65) return 'Phase 4';
@@ -705,6 +738,9 @@ function setAppLoading(isLoading) {
   loginButton.disabled = isLoading;
   logoutButton.disabled = isLoading;
   loadTestDataButton.disabled = isLoading;
+  if (!isLoading) {
+    updateAuthUi();
+  }
 }
 
 function setTestDataLoading(isLoading) {
@@ -739,9 +775,9 @@ function base64UrlEncode(bytes) {
 }
 
 const RECENT_REPORTS_QUERY = `
-  query RecentUserReports($userId: Int!) {
+  query RecentUserReports($userId: Int!, $limit: Int!, $zoneId: Int) {
     reportData {
-      reports(userID: $userId, limit: 12) {
+      reports(userID: $userId, limit: $limit, zoneID: $zoneId) {
         data {
           code
           title

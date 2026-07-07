@@ -112,16 +112,8 @@ button:disabled {
 
 .user-summary {
   color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
   font-size: 0.88rem;
-  gap: 8px;
   margin: 6px 0 0;
-}
-
-.user-name {
-  color: var(--ink);
-  font-weight: 800;
 }
 
 .user-actions {
@@ -258,10 +250,116 @@ textarea:focus {
   color: var(--rose);
 }
 
-.content-grid {
+.zone-report-panel {
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+.zone-report-panel .panel-header p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 5px 0 0;
+}
+
+.zone-report-list {
   display: grid;
-  gap: 18px;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.35fr);
+  gap: 12px;
+  padding: 16px;
+}
+
+.zone-report-card {
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.zone-report-card.expanded {
+  border-color: var(--accent);
+  box-shadow: 0 8px 22px rgba(27, 111, 106, 0.15);
+}
+
+.zone-report-toggle {
+  align-items: center;
+  background: transparent;
+  color: var(--ink);
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-height: 0;
+  padding: 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.zone-report-toggle:hover {
+  background: #f0fbf8;
+}
+
+.zone-report-toggle h3,
+.zone-fight-card h4 {
+  font-size: 0.98rem;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.zone-fight-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.zone-fight-card {
+  background: #fffdf8;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.zone-fight-phase {
+  background: var(--accent-dark);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.86rem;
+  font-weight: 900;
+  letter-spacing: 0;
+  padding: 8px 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.boss-remaining {
+  margin-top: 12px;
+}
+
+.boss-remaining-label {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.8rem;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 7px;
+}
+
+.boss-remaining-label strong {
+  color: var(--ink);
+  font-size: 0.86rem;
+}
+
+.boss-remaining-track {
+  background: #ece4d8;
+  border-radius: 999px;
+  height: 13px;
+  overflow: hidden;
+}
+
+.boss-remaining-fill {
+  background: linear-gradient(90deg, var(--rose), var(--gold));
+  border-radius: inherit;
+  height: 100%;
+  min-width: 4px;
 }
 
 .report-graph-panel {
@@ -354,58 +452,17 @@ textarea:focus {
   white-space: nowrap;
 }
 
-#detailSubtitle {
-  color: var(--muted);
-  font-size: 0.84rem;
-  margin: 5px 0 0;
-}
-
-.session-list,
-.pull-list {
-  display: grid;
-  gap: 10px;
-  padding: 14px;
-}
-
-.session-card,
-.pull-card,
 .empty-state {
   background: var(--panel-strong);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
-.session-card {
-  color: var(--ink);
-  cursor: pointer;
-  padding: 14px;
-  text-align: left;
-  width: 100%;
-}
-
-.session-card:hover,
-.session-card.active {
-  border-color: var(--accent);
-  box-shadow: 0 8px 22px rgba(27, 111, 106, 0.15);
-}
-
-.session-card.active {
-  background: #f0fbf8;
-}
-
-.session-top,
 .pull-top {
   align-items: start;
   display: flex;
   gap: 12px;
   justify-content: space-between;
-}
-
-.session-card h3,
-.pull-card h3 {
-  font-size: 0.98rem;
-  line-height: 1.25;
-  margin: 0;
 }
 
 .meta,
@@ -416,40 +473,10 @@ textarea:focus {
   margin: 8px 0 0;
 }
 
-.pull-card {
-  padding: 14px;
-}
-
 .pull-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px 16px;
-}
-
-.progress-wrap {
-  margin-top: 12px;
-}
-
-.progress-label {
-  display: flex;
-  font-size: 0.78rem;
-  font-weight: 800;
-  justify-content: space-between;
-  margin-bottom: 7px;
-}
-
-.progress-track {
-  background: #ece4d8;
-  border-radius: 999px;
-  height: 12px;
-  overflow: hidden;
-}
-
-.progress-fill {
-  background: linear-gradient(90deg, var(--accent), var(--gold));
-  border-radius: inherit;
-  height: 100%;
-  min-width: 4px;
 }
 
 .empty-state {
@@ -465,8 +492,8 @@ textarea:focus {
 
   .masthead,
   .user-panel,
+  .zone-report-toggle,
   .input-row,
-  .content-grid,
   .report-bar {
     grid-template-columns: 1fr;
   }
@@ -483,6 +510,11 @@ textarea:focus {
 
   .user-actions button {
     width: 100%;
+  }
+
+  .zone-report-toggle {
+    align-items: stretch;
+    display: grid;
   }
 
   .panel {
