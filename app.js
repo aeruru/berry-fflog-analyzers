@@ -27,17 +27,12 @@ import {
   normalizeReportList,
   normalizeSession,
 } from './src/normalize.js';
-import {
-  renderReportGraph as renderReportGraphView,
-  renderZoneReports as renderZoneReportsView,
-} from './src/render.js';
+import { renderZoneReports as renderZoneReportsView } from './src/render.js';
 
-let sessions = [];
 let zoneReports = [];
 let expandedZoneReportIds = new Set();
 let activeFightEventKey = null;
 let fightEventDetails = new Map();
-let selectedSessionId = null;
 let currentUserId = null;
 let currentUserName = null;
 
@@ -46,8 +41,6 @@ const elements = {
   zoneReportTitle: document.querySelector('#zoneReportTitle'),
   zoneReportList: document.querySelector('#zoneReportList'),
   zoneReportCount: document.querySelector('#zoneReportCount'),
-  reportGraph: document.querySelector('#reportGraph'),
-  reportGraphCount: document.querySelector('#reportGraphCount'),
   authState: document.querySelector('#authState'),
   userPanelTitle: document.querySelector('#userPanelTitle'),
   loginButton: document.querySelector('#loginButton'),
@@ -75,7 +68,6 @@ elements.clearCacheButton.addEventListener('click', () => {
   renderZoneReports();
 });
 
-setSessions([]);
 setZoneReports([]);
 handleOAuthCallback({
   refreshCurrentUserProfile,
@@ -92,7 +84,6 @@ async function toggleTestData() {
     clearStoredUser();
     currentUserId = null;
     currentUserName = null;
-    setSessions([]);
     setZoneReports([]);
     updateAuthUi();
 
@@ -135,7 +126,6 @@ async function loadTestData() {
       testData: true,
     });
     updateAuthUi();
-    setSessions([normalized]);
     setZoneReports([normalized]);
     setStatus('Loaded test data from the local JSON file.');
   } catch (error) {
@@ -165,7 +155,6 @@ async function loadMyRecentReports() {
       throw new Error('No known-zone reports were found for your account.');
     }
 
-    setSessions(normalized);
     setZoneReports(targetZoneReports);
     setCurrentUser(user);
 
@@ -234,12 +223,6 @@ function setCurrentUser(user) {
   updateAuthUi();
 }
 
-function setSessions(nextSessions) {
-  sessions = normalizeReportList(nextSessions);
-  selectedSessionId = sessions[0]?.id ?? null;
-  renderReportGraph();
-}
-
 function setZoneReports(nextReports) {
   zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
   expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
@@ -259,18 +242,6 @@ function renderZoneReports() {
     onLoadFight: loadFightEventDetails,
     onToggleReport: toggleZoneReport,
     zoneReports,
-  });
-}
-
-function renderReportGraph() {
-  renderReportGraphView({
-    elements,
-    onSelectSession: (sessionId) => {
-      selectedSessionId = sessionId;
-      renderReportGraph();
-    },
-    selectedSessionId,
-    sessions,
   });
 }
 

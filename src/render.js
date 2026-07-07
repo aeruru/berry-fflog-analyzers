@@ -1,4 +1,4 @@
-import { TARGET_ZONE_ID } from './config.js';
+import { TARGET_ZONE_NAME } from './config.js';
 import {
   clamp,
   escapeHtml,
@@ -8,7 +8,6 @@ import {
   formatEventTime,
   formatFightPhase,
   formatFightCount,
-  formatShortDate,
   formatTime,
   getFflogsReportUrl,
   renderEventIcon,
@@ -29,10 +28,10 @@ export function renderZoneReports({
   const { zoneReportCount, zoneReportList, zoneReportTitle } = elements;
   zoneReportCount.textContent = `${zoneReports.length} ${zoneReports.length === 1 ? 'report' : 'reports'}`;
   const zoneName = zoneReports.find((report) => report.zoneName)?.zoneName;
-  zoneReportTitle.textContent = zoneName ? `${zoneName} reports` : `Zone ${TARGET_ZONE_ID} reports`;
+  zoneReportTitle.textContent = `${zoneName || TARGET_ZONE_NAME} reports`;
 
   if (zoneReports.length === 0) {
-    zoneReportList.innerHTML = `<div class="empty-state">No recent Zone ${TARGET_ZONE_ID} reports found yet.</div>`;
+    zoneReportList.innerHTML = `<div class="empty-state">No recent ${TARGET_ZONE_NAME} reports found yet.</div>`;
     return;
   }
 
@@ -106,7 +105,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
       ${fights.map((fight, index) => {
         const phase = formatFightPhase(fight);
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
-        const bossLabel = `${bossRemaining.toFixed(1)}% phase boss remaining`;
+        const bossLabel = `${bossRemaining.toFixed(1)}% remaining`;
         const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
@@ -124,7 +123,6 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
             </div>
             <div class="boss-remaining">
               <div class="boss-remaining-label">
-                <span>Phase boss remaining</span>
                 <strong>${bossLabel}</strong>
               </div>
               <div class="boss-remaining-track" aria-label="${bossLabel}">
@@ -175,44 +173,4 @@ function renderFightEventDetails(eventState) {
       </table>
     </div>
   `;
-}
-
-export function renderReportGraph({
-  elements,
-  onSelectSession,
-  selectedSessionId,
-  sessions,
-}) {
-  const { reportGraph, reportGraphCount } = elements;
-  reportGraphCount.textContent = `${sessions.length} ${sessions.length === 1 ? 'report' : 'reports'}`;
-
-  if (sessions.length === 0) {
-    reportGraph.innerHTML = `<div class="empty-state">Log in to graph your latest FFLogs reports, or use local test data.</div>`;
-    return;
-  }
-
-  const maxPulls = Math.max(...sessions.map((session) => session.pulls.length), 1);
-  reportGraph.innerHTML = sessions.map((session) => {
-    const width = Math.max(8, Math.round((session.pulls.length / maxPulls) * 100));
-    const isActive = session.id === selectedSessionId;
-
-    return `
-      <button class="report-bar ${isActive ? 'active' : ''}" data-session-id="${escapeHtml(session.id)}" type="button">
-        <div>
-          <h3>${escapeHtml(session.zoneName)}</h3>
-          <p class="meta">${session.title ? `${escapeHtml(session.title)}<br>` : ''}${formatShortDate(session.startTime)}</p>
-        </div>
-        <div class="bar-track" aria-hidden="true">
-          <div class="bar-fill" style="width: ${width}%"></div>
-        </div>
-        <span class="pill">${session.pulls.length} pulls</span>
-      </button>
-    `;
-  }).join('');
-
-  reportGraph.querySelectorAll('.report-bar').forEach((bar) => {
-    bar.addEventListener('click', () => {
-      onSelectSession(bar.dataset.sessionId);
-    });
-  });
 }

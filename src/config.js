@@ -9,6 +9,7 @@ export const CACHE_STORAGE_PREFIX = 'berry.fflogs.cache.';
 export const TEST_DATA_URL = 'fflogs-testdata/sample-report-fights.json';
 export const GRAPHQL_ENDPOINT = 'https://www.fflogs.com/api/v2/user';
 export const TARGET_ZONE_ID = 76;
+export const TARGET_ZONE_NAME = 'Dancing Mad';
 export const TARGET_ZONE_REPORT_LIMIT = 2;
 export const DAMAGE_DOWN_ABILITY_ID = 1002911;
 export const FIGHT_EVENT_FILTER = `type = "death" OR (type = "applydebuff" AND ability.id = ${DAMAGE_DOWN_ABILITY_ID})`;
