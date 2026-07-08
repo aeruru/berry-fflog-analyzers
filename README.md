@@ -56,7 +56,7 @@ The **Use test data** toggle loads a local JSON fixture instead of calling FFLog
 
 ## Optional: Altair GraphQL exploration
 
-The web app no longer includes a GraphQL explorer. For separate schema/query exploration, use an external client such as Altair.
+To explore what data fflogs has, use an external client such as Altair.
 
 Use the [get-fflogs-token.ps1](scripts/get-fflogs-token.ps1) script to generate a bearer token for Altair. You can get a client ID and client secret from FFLogs and set them in a file named `.env.local`:
 
@@ -78,6 +78,8 @@ Then set URL to `{{fflogsUrl}}` and Auth to:
 Auth type = Bearer Token
 Bearer Token = {{authToken}}
 ```
+
+This is the fflogs graphql schema documentation: https://www.fflogs.com/v2-api-docs/ff/user.doc.html
 
 Add this to the `Variables` panel in the lower left:
 ```json
