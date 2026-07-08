@@ -17,6 +17,7 @@ import { clearCacheEntries } from './src/cache.js';
 import {
   fetchCurrentUser,
   fetchMyRecentSessions,
+  fetchReportFights,
 } from './src/fflogs.js';
 import {
   fetchFightEventDetails,
@@ -160,7 +161,7 @@ async function loadMyRecentReports() {
 
     const latest = normalized[0];
     const latestText = latest.reportCode ? ` Latest report: ${latest.reportCode}.` : '';
-    setStatus(`Loaded ${normalized.length} latest reports${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
+    setStatus(`Loaded ${normalized.length} Dancing Mad reports from the last 7 days${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
   } catch (error) {
     console.warn(error);
     setStatus(`Could not load your latest reports (${error.message}).`, true);
@@ -245,12 +246,53 @@ function renderZoneReports() {
   });
 }
 
-function toggleZoneReport(reportId) {
+async function toggleZoneReport(reportId) {
   if (expandedZoneReportIds.has(reportId)) {
     expandedZoneReportIds.delete(reportId);
-  } else {
-    expandedZoneReportIds.add(reportId);
+    renderZoneReports();
+    return;
   }
+
+  expandedZoneReportIds.add(reportId);
+
+  const report = zoneReports.find((candidate) => candidate.id === reportId);
+  if (!report || report.fightsLoaded || report.fightsLoading || report.testData) {
+    renderZoneReports();
+    return;
+  }
+
+  await loadReportFights(reportId);
+}
+
+async function loadReportFights(reportId) {
+  const reportIndex = zoneReports.findIndex((candidate) => candidate.id === reportId);
+  const report = zoneReports[reportIndex];
+
+  if (!report?.reportCode) {
+    return;
+  }
+
+  zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+    ? { ...candidate, fightsLoading: true, hydrationError: null }
+    : candidate);
+  renderZoneReports();
+
+  try {
+    const hydrated = await fetchReportFights(report, {
+      endpoint: getGraphqlEndpoint(),
+      onExpired: updateAuthUi,
+    });
+    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+      ? { ...hydrated, fightsLoaded: true, fightsLoading: false }
+      : candidate);
+  } catch (error) {
+    console.warn(`Could not hydrate fights for report ${report.reportCode}`, error);
+    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+      ? { ...candidate, fightsLoading: false, hydrationError: error.message }
+      : candidate);
+    setStatus(`Could not load fights for ${report.reportCode} (${error.message}).`, true);
+  }
+
   renderZoneReports();
 }
 
@@ -263,6 +305,12 @@ async function loadFightEventDetails(reportId, fightId) {
   }
 
   const eventKey = getFightEventKey(report, fight);
+  if (activeFightEventKey === eventKey) {
+    activeFightEventKey = null;
+    renderZoneReports();
+    return;
+  }
+
   activeFightEventKey = eventKey;
 
   if (fightEventDetails.has(eventKey)) {

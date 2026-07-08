@@ -23,8 +23,7 @@ export function normalizeReportList(raw) {
     .map(normalizeSession)
     .filter(Boolean)
     .filter((session) => !UNKNOWN_ZONE_NAMES.has(session.zoneName.trim().toLowerCase()))
-    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime))
-    .slice(0, 6);
+    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
 }
 
 export function normalizeSession(item, index = 0) {
@@ -47,6 +46,7 @@ export function normalizeSession(item, index = 0) {
     startTime,
     endTime,
     testData: Boolean(item.testData ?? item.report?.testData),
+    fightsLoaded: Boolean(item.fightsLoaded ?? item.report?.fightsLoaded ?? item.fights ?? item.encounters ?? item.pulls ?? item.report?.fights),
     players,
     pulls,
   };

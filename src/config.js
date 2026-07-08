@@ -10,14 +10,15 @@ export const TEST_DATA_URL = 'fflogs-testdata/sample-report-fights.json';
 export const GRAPHQL_ENDPOINT = 'https://www.fflogs.com/api/v2/user';
 export const TARGET_ZONE_ID = 76;
 export const TARGET_ZONE_NAME = 'Dancing Mad';
-export const TARGET_ZONE_REPORT_LIMIT = 2;
+export const TARGET_REPORT_LOOKBACK_DAYS = 7;
+export const TARGET_ZONE_REPORT_LIMIT = 100;
 export const DAMAGE_DOWN_ABILITY_ID = 1002911;
 export const FIGHT_EVENT_FILTER = `type = "death" OR (type = "applydebuff" AND ability.id = ${DAMAGE_DOWN_ABILITY_ID})`;
 
 export const RECENT_REPORTS_QUERY = `
-  query RecentUserReports($userId: Int!, $limit: Int!, $zoneId: Int) {
+  query RecentUserReports($userId: Int!, $limit: Int!, $zoneId: Int, $startTime: Float, $endTime: Float) {
     reportData {
-      reports(userID: $userId, limit: $limit, zoneID: $zoneId) {
+      reports(userID: $userId, limit: $limit, zoneID: $zoneId, startTime: $startTime, endTime: $endTime) {
         data {
           code
           title
