@@ -25,21 +25,6 @@ if (!$env:FFLOGS_CLIENT_ID -or !$env:FFLOGS_CLIENT_SECRET) {
     exit 1
 }
 
-# $pair = "$($env:FFLOGS_CLIENT_ID):$($env:FFLOGS_CLIENT_SECRET)"
-# $basic = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
-
-# $response = Invoke-RestMethod `
-#     -Uri "https://www.fflogs.com/oauth/token" `
-#     -Method Post `
-#     -Headers @{ Authorization = "Basic $basic" } `
-#     -Body @{ grant_type = "client_credentials" }
-
-# if (!$response.access_token) {
-#     Write-Error "Failed to get access token."
-#     $response | ConvertTo-Json
-#     exit 1
-# }
-
 $response = & curl.exe `
     --silent `
     --show-error `

@@ -1,6 +1,6 @@
 # berry-fflog-analyzers
 
-Goal: Build a small web tool that accepts an FFLogs report URL/code, fetches report/fight/event data, normalizes it, then runs custom FFXIV analysis rules.
+Client-only web app that loads a logged-in FFLogs user's recent Dancing Mad reports and highlights pull-level death and damage down events.
 
 ## Local development
 
@@ -10,28 +10,29 @@ Start a local static server:
 npm start
 ```
 
-The default port is `7999`. You can override it with an ENV var but note that fflogs is only set to auth on port 7999 when using localhost:
+The default port is `7999`. Use `http://127.0.0.1:7999/` in the browser. FFLogs OAuth redirect URLs must match exactly, so `http://localhost:7999/` is different from `http://127.0.0.1:7999/`.
 
 ```powershell
+# example of how to override port
 $env:PORT = 8080
 npm start
 ```
 
 ## FFLogs data access
 
-The app uses FFLogs GraphQL v2 instead of scraping FFLogs pages. Browser users log in with FFLogs OAuth PKCE using this public client id:
+The app uses FFLogs GraphQL v2 instead of scraping FFLogs pages. Browser users log in with FFLogs OAuth PKCE using this public client ID:
 
 ```text
 a210738b-1a9b-40d8-98f6-a4054696f1eb
 ```
 
-By default it posts authenticated GraphQL requests to the private API:
+After login, the browser stores the FFLogs access token in local storage with an expiration timestamp. The app posts authenticated GraphQL requests to the user API:
 
 ```text
 https://www.fflogs.com/api/v2/user
 ```
 
-The public API is `https://www.fflogs.com/api/v2/client`, but FFLogs documents that endpoint for client-credentials tokens. Browser PKCE login uses the private `/api/v2/user` endpoint.
+The public API is `https://www.fflogs.com/api/v2/client`, but that endpoint is for client-credentials tokens. Browser PKCE login uses `/api/v2/user`.
 
 The FFLogs app must allow the exact redirect URL used by the page. For local testing, that is usually:
 
@@ -39,11 +40,112 @@ The FFLogs app must allow the exact redirect URL used by the page. For local tes
 http://127.0.0.1:7999/
 ```
 
-For GitHub Pages, use the deployed page URL. The page's GraphQL settings section shows the active redirect URI. FFLogs requires an exact match, so `http://127.0.0.1:7999/` and the GitHub Pages URL must both be added if you want both environments to work.
+For GitHub Pages, add the deployed page URL as another redirect URL. FFLogs requires an exact match, so `http://127.0.0.1:7999/` and the GitHub Pages URL must both be configured if you want both environments to work.
 
-After logging in, use **Load my recent reports** to query the authenticated FFLogs account, list recent reports, and hydrate each report with fight data. The app first tries to fetch reports from the logged-in token alone. If FFLogs requires a numeric `userID`, it falls back to a current-user lookup and uses that id internally. The user-id box is only for inspecting another account.
+After logging in, the app looks up the current FFLogs user, loads that user's Dancing Mad reports from the last 7 days, and renders report cards. Report cards are initially lightweight; fight data is fetched only when a report is expanded. Fight event data is fetched only when a fight's **Details** button is opened.
 
-The GraphQL explorer also includes editable query templates for current user lookup, recent reports, report summary by code, and top-level schema inspection.
+The event query is filtered to death events and damage down debuff applications:
+
+```text
+type = "death" OR (type = "applydebuff" AND ability.id = 1002911)
+```
+
+Results are cached client-side in local storage. Cache entries include the GraphQL endpoint, query hash, and variables. Use the app's clear-cache buttons to clear all cached data, a report's cached data, or a fight's cached event data.
+
+The **Use test data** toggle loads a local JSON fixture instead of calling FFLogs. This is useful for UI development without logging in.
+
+## Optional: Altair GraphQL exploration
+
+The web app no longer includes a GraphQL explorer. For separate schema/query exploration, use an external client such as Altair.
+
+Use the [get-fflogs-token.ps1](scripts/get-fflogs-token.ps1) script to generate a bearer token for Altair. You can get a client ID and client secret from FFLogs and set them in a file named `.env.local`:
+
+```ini
+FFLOGS_CLIENT_ID=<client_id>
+FFLOGS_CLIENT_SECRET=<client_secret>
+```
+
+Within Altair Client, set this in your environment:
+```json
+{
+  "fflogsUrl": "https://www.fflogs.com/api/v2/client",
+  "authToken": "<bearer_token>"
+}
+```
+
+Then set URL to `{{fflogsUrl}}` and Auth to:
+```
+Auth type = Bearer Token
+Bearer Token = {{authToken}}
+```
+
+Add this to the `Variables` panel in the lower left:
+```json
+{
+  "userId":3430,
+  "zoneIdDMU":76,
+  "reportIdDMU":"wYrjyBv1ZMpJ3aGV",
+  "fightIdsDMU": [18]
+}
+```
+
+Here are 3 queries to try out:
+```graphql
+query UserInfo (
+  $userId: Int!
+) {
+  userData {
+    user(
+      id:$userId
+      ) {
+      name
+    }
+  }
+}
+
+
+query MyRecentReports(
+  $userId: Int!,
+  $zoneIdDMU: Int!
+) {
+  reportData {
+    reports(
+      userID: $userId,
+      zoneID: $zoneIdDMU,
+      limit: 1
+    ) {
+      data {
+        code
+        title
+        startTime
+        endTime
+        zone {
+          id
+          name
+        }
+      }
+    }
+  }
+}
+
+query ExploreFightEvents (
+  $reportIdDMU: String!,
+  $fightIdsDMU: [Int]
+) {
+  reportData {
+    report (
+      code: $reportIdDMU,
+    ) {
+      events(
+        fightIDs: $fightIdsDMU,
+      ) {
+        data
+        nextPageTimestamp
+      }
+    }
+  }
+}
+```
 
 ## Key findings
 
@@ -63,9 +165,9 @@ The GraphQL explorer also includes editable query templates for current user loo
 
 ## Suggested architecture
 
-* Frontend: paste FFLogs URL/code, choose fight/player, display results.
-* Backend/serverless: handle FFLogs OAuth/client credentials and GraphQL requests.
-* Core library:
+* Frontend: log in with FFLogs, list target-zone reports, expand reports/fights, display focused analysis.
+* Optional backend/serverless: eventually move FFLogs OAuth/client credentials and GraphQL requests out of the browser if this grows beyond a local utility.
+* Core analysis library:
 
   * `getReport(code)`
   * `getFights(code)`
