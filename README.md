@@ -170,7 +170,6 @@ query ExploreFightEvents (
 * Frontend: log in with FFLogs, list target-zone reports, expand reports/fights, display focused analysis.
 * Optional backend/serverless: eventually move FFLogs OAuth/client credentials and GraphQL requests out of the browser if this grows beyond a local utility.
 * Core analysis library:
-
   * `getReport(code)`
   * `getFights(code)`
   * `getFightEvents(code, fightId)`

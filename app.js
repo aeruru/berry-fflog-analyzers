@@ -42,6 +42,7 @@ const elements = {
   zoneReportTitle: document.querySelector('#zoneReportTitle'),
   zoneReportList: document.querySelector('#zoneReportList'),
   zoneReportCount: document.querySelector('#zoneReportCount'),
+  refreshReportsButton: document.querySelector('#refreshReportsButton'),
   authState: document.querySelector('#authState'),
   userPanelTitle: document.querySelector('#userPanelTitle'),
   loginButton: document.querySelector('#loginButton'),
@@ -62,6 +63,9 @@ elements.logoutButton.addEventListener('click', () => {
 });
 
 elements.loadTestDataButton.addEventListener('click', toggleTestData);
+elements.refreshReportsButton.addEventListener('click', () => {
+  loadMyRecentReports({ forceRefresh: true });
+});
 elements.clearCacheButton.addEventListener('click', () => {
   const cleared = clearCacheEntries();
   fightEventDetails = new Map();
@@ -137,18 +141,19 @@ async function loadTestData() {
   }
 }
 
-async function loadMyRecentReports() {
+async function loadMyRecentReports({ forceRefresh = false } = {}) {
   if (!getStoredToken()) {
     setStatus('Log in to FFLogs to load your latest reports.', true);
     return;
   }
 
   setAppLoading(true);
-  setStatus('Looking up your FFLogs account and latest reports...');
+  setStatus(forceRefresh ? 'Checking FFLogs for new reports...' : 'Looking up your FFLogs account and latest reports...');
 
   try {
     const { normalized, targetZoneReports, user } = await fetchMyRecentSessions({
       endpoint: getGraphqlEndpoint(),
+      forceRefresh,
       onExpired: updateAuthUi,
     });
 
@@ -205,6 +210,7 @@ function updateAuthUi() {
   elements.authState.textContent = isTestData ? 'Using test data' : isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
   elements.loginButton.classList.toggle('hidden', Boolean(token));
   elements.logoutButton.classList.toggle('hidden', !token);
+  elements.refreshReportsButton.disabled = !isLoggedIn || isTestData;
   if (!elements.loadTestDataButton.disabled) {
     elements.loadTestDataButton.textContent = isTestData ? 'Use live data' : 'Use test data';
   }
@@ -241,6 +247,7 @@ function renderZoneReports() {
     onClearFightCache: clearFightCache,
     onClearReportCache: clearReportCache,
     onLoadFight: loadFightEventDetails,
+    onRefreshReportFights: refreshReportFights,
     onToggleReport: toggleZoneReport,
     zoneReports,
   });
@@ -264,7 +271,7 @@ async function toggleZoneReport(reportId) {
   await loadReportFights(reportId);
 }
 
-async function loadReportFights(reportId) {
+async function loadReportFights(reportId, { forceRefresh = false } = {}) {
   const reportIndex = zoneReports.findIndex((candidate) => candidate.id === reportId);
   const report = zoneReports[reportIndex];
 
@@ -280,6 +287,7 @@ async function loadReportFights(reportId) {
   try {
     const hydrated = await fetchReportFights(report, {
       endpoint: getGraphqlEndpoint(),
+      forceRefresh,
       onExpired: updateAuthUi,
     });
     zoneReports = zoneReports.map((candidate) => candidate.id === reportId
@@ -294,6 +302,27 @@ async function loadReportFights(reportId) {
   }
 
   renderZoneReports();
+}
+
+async function refreshReportFights(reportId) {
+  const report = zoneReports.find((candidate) => candidate.id === reportId);
+
+  if (!report || report.testData) {
+    setStatus('Use live data to check FFLogs for new fights.', true);
+    return;
+  }
+
+  expandedZoneReportIds.add(reportId);
+  [...fightEventDetails.keys()]
+    .filter((key) => key.startsWith(`${report.id}:`))
+    .forEach((key) => fightEventDetails.delete(key));
+
+  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
+    activeFightEventKey = null;
+  }
+
+  setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
+  await loadReportFights(reportId, { forceRefresh: true });
 }
 
 async function loadFightEventDetails(reportId, fightId) {
@@ -404,6 +433,7 @@ function setStatus(message, isError = false) {
 function setAppLoading(isLoading) {
   elements.loginButton.disabled = isLoading;
   elements.logoutButton.disabled = isLoading;
+  elements.refreshReportsButton.disabled = isLoading || !getStoredToken() || isUsingTestData();
   elements.loadTestDataButton.disabled = isLoading;
   if (!isLoading) {
     updateAuthUi();

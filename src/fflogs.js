@@ -16,7 +16,7 @@ import {
 import { getStoredToken, isExpired } from './auth.js';
 import { normalizeReportList, normalizeSession } from './normalize.js';
 
-export async function fetchMyRecentSessions({ endpoint, onExpired }) {
+export async function fetchMyRecentSessions({ endpoint, forceRefresh = false, onExpired }) {
   const user = await fetchCurrentUser({ endpoint, onExpired });
   const targetZoneReports = await fetchRecentSessions({
     endpoint,
@@ -24,6 +24,7 @@ export async function fetchMyRecentSessions({ endpoint, onExpired }) {
     limit: TARGET_ZONE_REPORT_LIMIT,
     zoneId: TARGET_ZONE_ID,
     ...getLookbackRange(TARGET_REPORT_LOOKBACK_DAYS),
+    forceRefresh,
     onExpired,
   });
   const normalized = targetZoneReports;
@@ -31,7 +32,7 @@ export async function fetchMyRecentSessions({ endpoint, onExpired }) {
   return { normalized, targetZoneReports, user };
 }
 
-export async function fetchRecentSessions({ endpoint, userId, limit = 100, zoneId = null, startTime = null, endTime = null, onExpired }) {
+export async function fetchRecentSessions({ endpoint, userId, limit = 100, zoneId = null, startTime = null, endTime = null, forceRefresh = false, onExpired }) {
   const variables = {
     userId,
     limit,
@@ -49,7 +50,7 @@ export async function fetchRecentSessions({ endpoint, userId, limit = 100, zoneI
     variables.endTime = endTime;
   }
 
-  const reportsResult = await cachedFflogsGraphql('RecentUserReports', endpoint, RECENT_REPORTS_QUERY, variables, { onExpired });
+  const reportsResult = await cachedFflogsGraphql('RecentUserReports', endpoint, RECENT_REPORTS_QUERY, variables, { forceRefresh, onExpired });
   const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
   return normalizeReportList(reports).map((session) => ({
     ...session,
@@ -57,12 +58,12 @@ export async function fetchRecentSessions({ endpoint, userId, limit = 100, zoneI
   }));
 }
 
-export async function fetchReportFights(session, { endpoint, onExpired }) {
+export async function fetchReportFights(session, { endpoint, forceRefresh = false, onExpired }) {
   if (!session.reportCode) {
     throw new Error('report code unavailable');
   }
 
-  const fightsResult = await cachedFflogsGraphql('ReportFights', endpoint, REPORT_FIGHTS_QUERY, { code: session.reportCode }, { onExpired });
+  const fightsResult = await cachedFflogsGraphql('ReportFights', endpoint, REPORT_FIGHTS_QUERY, { code: session.reportCode }, { forceRefresh, onExpired });
   const report = fightsResult?.data?.reportData?.report;
   return normalizeSession({
     ...report,
@@ -94,13 +95,13 @@ export async function fetchCurrentUser({ endpoint, onExpired }) {
   throw new Error(`FFLogs did not expose a current-user field in the attempted GraphQL shapes. Errors: ${errors.join(' | ')}`);
 }
 
-export async function cachedFflogsGraphql(queryName, endpoint, query, variables, { onExpired } = {}) {
+export async function cachedFflogsGraphql(queryName, endpoint, query, variables, { forceRefresh = false, onExpired } = {}) {
   const cacheKey = makeCacheKey(queryName, {
     endpoint,
     queryHash: hashString(query),
     variables,
   });
-  const cached = readCacheEntry(cacheKey);
+  const cached = forceRefresh ? null : readCacheEntry(cacheKey);
 
   if (cached) {
     return cached;
@@ -153,7 +154,12 @@ async function fflogsGraphqlRaw(endpoint, query, variables, { onExpired } = {}) 
 }
 
 function getLookbackRange(days) {
-  const endTime = Date.now();
+  const endTime = getCurrentHourBucket();
   const startTime = endTime - (days * 24 * 60 * 60 * 1000);
   return { startTime, endTime };
+}
+
+function getCurrentHourBucket() {
+  const hourMs = 60 * 60 * 1000;
+  return Math.floor(Date.now() / hourMs) * hourMs;
 }

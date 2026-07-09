@@ -7,9 +7,12 @@ import {
   formatElapsedTime,
   formatEventTime,
   formatFightPhase,
+  formatFightPhaseTag,
   formatFightCount,
   formatTime,
+  getFightPhaseTagClass,
   getFflogsReportUrl,
+  getForsakenAnalyzerUrl,
   renderEventIcon,
 } from './format.js';
 import { getFightEventKey } from './fight-events.js';
@@ -22,6 +25,7 @@ export function renderZoneReports({
   onClearFightCache,
   onClearReportCache,
   onLoadFight,
+  onRefreshReportFights,
   onToggleReport,
   zoneReports,
 }) {
@@ -48,6 +52,7 @@ export function renderZoneReports({
           </div>
           <div class="report-card-actions">
             <button class="toggle-button report-toggle-button" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}">${isExpanded ? 'Collapse' : 'Expand'}</button>
+            <button class="cache-clear-button report-fights-refresh" data-report-id="${escapeHtml(report.id)}" type="button">Check fights</button>
             <button class="cache-clear-button report-cache-clear" data-report-id="${escapeHtml(report.id)}" type="button">Clear cache</button>
             <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(report.pulls.length) : 'Fights unloaded'}</span>
           </div>
@@ -67,6 +72,12 @@ export function renderZoneReports({
     button.addEventListener('click', (event) => {
       event.stopPropagation();
       onClearReportCache(button.dataset.reportId);
+    });
+  });
+
+  zoneReportList.querySelectorAll('.report-fights-refresh').forEach((button) => {
+    button.addEventListener('click', () => {
+      onRefreshReportFights(button.dataset.reportId);
     });
   });
 
@@ -104,17 +115,23 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
       ${fights.map((fight, index) => {
         const phase = formatFightPhase(fight);
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
+        const bossDamageDone = clamp(100 - bossRemaining, 0, 100);
         const bossLabel = `${bossRemaining.toFixed(1)}% remaining`;
         const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
         const isActive = eventKey === activeFightEventKey;
+        const showP2Analyzer = report.reportCode && !fight.kill && Number(fight.lastPhase) === 2 && !fight.lastPhaseIsIntermission;
 
         return `
           <article class="zone-fight-card ${isActive ? 'active' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
             <div class="pull-top">
-              <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
+              <div class="fight-title-row">
+                <span class="phase-tag ${escapeHtml(getFightPhaseTagClass(fight))}" aria-label="${escapeHtml(phase)}">${escapeHtml(formatFightPhaseTag(fight))}</span>
+                <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
+              </div>
               <div class="fight-card-actions">
+                ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
                 <button class="toggle-button fight-details-toggle" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button" aria-expanded="${isActive}">${isActive ? 'Hide details' : 'Details'}</button>
                 <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
@@ -128,7 +145,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
                 <strong>${bossLabel}</strong>
               </div>
               <div class="boss-remaining-track" aria-label="${bossLabel}">
-                <div class="boss-remaining-fill" style="width: ${bossRemaining}%"></div>
+                <div class="boss-remaining-fill" style="width: ${bossDamageDone}%"></div>
               </div>
             </div>
             ${isActive ? renderFightEventDetails(eventState) : ''}

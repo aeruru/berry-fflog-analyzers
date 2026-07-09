@@ -65,6 +65,34 @@ export function formatFightPhase(fight) {
   return 'Unknown phase';
 }
 
+export function formatFightPhaseTag(fight) {
+  if (fight.kill) {
+    return 'CLR';
+  }
+
+  if (fight.lastPhase) {
+    return fight.lastPhaseIsIntermission ? `I${fight.lastPhase}` : `P${fight.lastPhase}`;
+  }
+
+  return '?';
+}
+
+export function getFightPhaseTagClass(fight) {
+  if (fight.kill) {
+    return 'phase-clear';
+  }
+
+  if (fight.lastPhaseIsIntermission) {
+    return 'phase-intermission';
+  }
+
+  if (fight.lastPhase) {
+    return `phase-${((Number(fight.lastPhase) - 1) % 6) + 1}`;
+  }
+
+  return 'phase-unknown';
+}
+
 export function renderEventIcon(kind) {
   if (kind === 'death') {
     return '<span aria-label="Death" title="Death">💀</span>';
@@ -75,6 +103,14 @@ export function renderEventIcon(kind) {
 
 export function getFflogsReportUrl(reportCode) {
   return `https://www.fflogs.com/reports/${encodeURIComponent(reportCode)}`;
+}
+
+export function getForsakenAnalyzerUrl(reportCode, fightId) {
+  const params = new URLSearchParams({
+    report: reportCode,
+    fight: String(fightId),
+  });
+  return `https://analyzer.wtfdig.info/forsaken?${params.toString()}`;
 }
 
 export function clamp(value, min, max) {

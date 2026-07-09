@@ -342,6 +342,26 @@ textarea:focus {
   background: var(--accent-dark);
 }
 
+.analyzer-link {
+  align-items: center;
+  background: #fffaf0;
+  border: 1px solid #d8b56a;
+  border-radius: 6px;
+  color: #7a4b08;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-weight: 900;
+  min-height: 32px;
+  padding: 0 12px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.analyzer-link:hover {
+  background: #f6e8c7;
+  color: #5f3904;
+}
+
 .zone-report-summary h3,
 .zone-fight-card h4 {
   font-size: 0.98rem;
@@ -530,6 +550,14 @@ textarea:focus {
   padding: 16px;
 }
 
+.panel-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .panel-header span,
 .pill {
   background: rgba(27, 111, 106, 0.1);
@@ -553,6 +581,65 @@ textarea:focus {
   display: flex;
   gap: 12px;
   justify-content: space-between;
+}
+
+.fight-title-row {
+  align-items: center;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+}
+
+.phase-tag {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #fff;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.72rem;
+  font-weight: 900;
+  justify-content: center;
+  line-height: 1;
+  min-height: 26px;
+  min-width: 34px;
+  padding: 0 7px;
+}
+
+.phase-1 {
+  background: #1b6f6a;
+}
+
+.phase-2 {
+  background: #9f5b13;
+}
+
+.phase-3 {
+  background: #7f3f98;
+}
+
+.phase-4 {
+  background: #345f9f;
+}
+
+.phase-5 {
+  background: #9a3455;
+}
+
+.phase-6 {
+  background: #5d6b1f;
+}
+
+.phase-intermission {
+  background: #5b6575;
+}
+
+.phase-clear {
+  background: #246a3b;
+}
+
+.phase-unknown {
+  background: #6f6a60;
 }
 
 .fight-card-actions {
