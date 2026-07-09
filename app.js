@@ -30,6 +30,8 @@ import {
 } from './src/normalize.js';
 import { renderZoneReports as renderZoneReportsView } from './src/render.js';
 
+const THEME_STORAGE_KEY = 'berry.fflogs.theme';
+
 let zoneReports = [];
 let expandedZoneReportIds = new Set();
 let activeFightEventKey = null;
@@ -49,8 +51,10 @@ const elements = {
   logoutButton: document.querySelector('#logoutButton'),
   clearCacheButton: document.querySelector('#clearCacheButton'),
   loadTestDataButton: document.querySelector('#loadTestDataButton'),
+  themeToggleButton: document.querySelector('#themeToggleButton'),
 };
 
+applyStoredTheme();
 elements.loginButton.addEventListener('click', startFflogsLogin);
 elements.logoutButton.addEventListener('click', () => {
   clearStoredToken();
@@ -63,6 +67,7 @@ elements.logoutButton.addEventListener('click', () => {
 });
 
 elements.loadTestDataButton.addEventListener('click', toggleTestData);
+elements.themeToggleButton.addEventListener('click', toggleTheme);
 elements.refreshReportsButton.addEventListener('click', () => {
   loadMyRecentReports({ forceRefresh: true });
 });
@@ -429,6 +434,23 @@ function isEmbeddedReport(report) {
 function setStatus(message, isError = false) {
   elements.statusLine.textContent = message;
   elements.statusLine.classList.toggle('error', isError);
+}
+
+function applyStoredTheme() {
+  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark');
+}
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  applyTheme(nextTheme);
+}
+
+function applyTheme(theme) {
+  const isDark = theme === 'dark';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+  elements.themeToggleButton.textContent = isDark ? 'Light mode' : 'Dark mode';
+  elements.themeToggleButton.setAttribute('aria-pressed', String(isDark));
 }
 
 function formatLoadError(prefix, error) {

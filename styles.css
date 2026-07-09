@@ -4,13 +4,70 @@
   --ink: #23201b;
   --muted: #68625a;
   --panel: #fffaf0;
+  --panel-translucent: rgba(255, 250, 240, 0.92);
   --panel-strong: #ffffff;
+  --panel-header: rgba(255, 255, 255, 0.58);
+  --hover-surface: rgba(255, 250, 240, 0.8);
+  --input-bg: #ffffff;
+  --fight-bg: #fffdf8;
+  --bar-track: #ece4d8;
   --line: #d9d1c3;
-  --accent: #1b6f6a;
-  --accent-dark: #124f4b;
+  --accent: #1f4e79;
+  --accent-dark: #173a5c;
+  --link: #1f4e79;
+  --link-hover: #173a5c;
   --gold: #b7791f;
   --rose: #b24b5b;
+  --bar-start: var(--rose);
+  --bar-end: var(--gold);
+  --success: #246a3b;
+  --success-strong: #2f8f57;
+  --report-hover: #eef5fc;
+  --pill-bg: rgba(31, 78, 121, 0.1);
+  --pill-border: rgba(31, 78, 121, 0.24);
+  --focus-ring: rgba(31, 78, 121, 0.18);
+  --accent-shadow: rgba(31, 78, 121, 0.15);
+  --accent-shadow-soft: rgba(31, 78, 121, 0.12);
+  --accent-shadow-button: rgba(31, 78, 121, 0.18);
+  --bg-wash-1: rgba(31, 78, 121, 0.14);
+  --bg-wash-2: rgba(178, 75, 91, 0.12);
   --shadow: 0 18px 45px rgba(52, 42, 27, 0.12);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111827;
+  --ink: #e8edf5;
+  --muted: #9aa8bb;
+  --panel: #1f2937;
+  --panel-translucent: rgba(31, 41, 55, 0.94);
+  --panel-strong: #151c28;
+  --panel-header: rgba(96, 165, 250, 0.08);
+  --hover-surface: rgba(96, 165, 250, 0.1);
+  --input-bg: #0f172a;
+  --fight-bg: #111827;
+  --bar-track: #303948;
+  --line: #374151;
+  --accent: #4f8fd6;
+  --accent-dark: #3d73b3;
+  --link: #78aee8;
+  --link-hover: #9ec7f0;
+  --gold: #d79a32;
+  --rose: #a94f63;
+  --bar-start: #8f4054;
+  --bar-end: #9f7326;
+  --success: #34d399;
+  --success-strong: #10b981;
+  --report-hover: #172033;
+  --pill-bg: rgba(96, 165, 250, 0.14);
+  --pill-border: rgba(96, 165, 250, 0.34);
+  --focus-ring: rgba(96, 165, 250, 0.3);
+  --accent-shadow: rgba(96, 165, 250, 0.15);
+  --accent-shadow-soft: rgba(96, 165, 250, 0.12);
+  --accent-shadow-button: rgba(96, 165, 250, 0.18);
+  --bg-wash-1: rgba(96, 165, 250, 0.16);
+  --bg-wash-2: rgba(148, 163, 184, 0.1);
+  --shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -21,8 +78,8 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(135deg, rgba(27, 111, 106, 0.14), transparent 38%),
-    linear-gradient(315deg, rgba(178, 75, 91, 0.12), transparent 32%),
+    linear-gradient(135deg, var(--bg-wash-1), transparent 38%),
+    linear-gradient(315deg, var(--bg-wash-2), transparent 32%),
     var(--bg);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -81,6 +138,12 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.theme-toggle-button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+}
+
 .auth-state {
   color: var(--muted);
   font-size: 0.84rem;
@@ -90,7 +153,7 @@ button:disabled {
 
 .user-panel {
   align-items: center;
-  background: rgba(255, 250, 240, 0.92);
+  background: var(--panel-translucent);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -160,11 +223,11 @@ h2 {
 }
 
 .ghost-button:hover {
-  background: rgba(255, 250, 240, 0.8);
+  background: var(--hover-surface);
 }
 
 .panel {
-  background: rgba(255, 250, 240, 0.92);
+  background: var(--panel-translucent);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
@@ -184,7 +247,7 @@ label {
 }
 
 input {
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
@@ -196,7 +259,7 @@ input {
 
 select,
 textarea {
-  background: #fff;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
@@ -218,7 +281,7 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(27, 111, 106, 0.18);
+  box-shadow: 0 0 0 3px var(--focus-ring);
   outline: 0;
 }
 
@@ -276,7 +339,7 @@ textarea:focus {
 
 .zone-report-card.expanded {
   border-color: var(--accent);
-  box-shadow: 0 8px 22px rgba(27, 111, 106, 0.15);
+  box-shadow: 0 8px 22px var(--accent-shadow);
 }
 
 .zone-report-summary {
@@ -298,14 +361,14 @@ textarea:focus {
 }
 
 .report-code-link {
-  color: var(--accent-dark);
+  color: var(--link);
   font-weight: 900;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .report-code-link:hover {
-  color: var(--accent);
+  color: var(--link-hover);
 }
 
 .report-card-actions {
@@ -328,7 +391,7 @@ textarea:focus {
 }
 
 .utility-button:hover {
-  background: #fffaf0;
+  background: var(--hover-surface);
   color: var(--accent-dark);
 }
 
@@ -348,7 +411,7 @@ textarea:focus {
 
 .cache-clear-button:hover {
   background: transparent;
-  color: var(--accent-dark);
+  color: var(--link-hover);
   opacity: 1;
 }
 
@@ -368,7 +431,7 @@ textarea:focus {
 }
 
 .fight-details-toggle {
-  box-shadow: 0 3px 10px rgba(27, 111, 106, 0.18);
+  box-shadow: 0 3px 10px var(--accent-shadow-button);
   font-size: 0.82rem;
   min-height: 36px;
   padding: 0 16px;
@@ -415,7 +478,7 @@ textarea:focus {
   align-items: center;
   background: transparent;
   border: 0;
-  color: #7a4b08;
+  color: var(--link);
   display: inline-flex;
   font-size: 0.72rem;
   font-weight: 800;
@@ -429,7 +492,7 @@ textarea:focus {
 
 .analyzer-link:hover {
   background: transparent;
-  color: #5f3904;
+  color: var(--link-hover);
   opacity: 1;
 }
 
@@ -437,7 +500,7 @@ textarea:focus {
   align-items: center;
   background: transparent;
   border: 0;
-  color: #28527f;
+  color: var(--link);
   display: inline-flex;
   font-size: 0.72rem;
   font-weight: 800;
@@ -451,7 +514,7 @@ textarea:focus {
 
 .fflogs-fight-link:hover {
   background: transparent;
-  color: #1c3e61;
+  color: var(--link-hover);
   opacity: 1;
 }
 
@@ -470,7 +533,7 @@ textarea:focus {
 }
 
 .zone-fight-card {
-  background: #fffdf8;
+  background: var(--fight-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
@@ -478,12 +541,12 @@ textarea:focus {
 
 .zone-fight-card.active {
   border-color: var(--accent);
-  box-shadow: 0 8px 22px rgba(27, 111, 106, 0.12);
+  box-shadow: 0 8px 22px var(--accent-shadow-soft);
 }
 
 .zone-fight-card.low-boss-remaining {
-  border-color: rgba(36, 106, 59, 0.65);
-  box-shadow: inset 4px 0 0 rgba(36, 106, 59, 0.72);
+  border-color: color-mix(in srgb, var(--success) 65%, transparent);
+  box-shadow: inset 4px 0 0 color-mix(in srgb, var(--success) 72%, transparent);
 }
 
 .boss-remaining {
@@ -491,21 +554,21 @@ textarea:focus {
 }
 
 .boss-remaining-track {
-  background: #ece4d8;
+  background: var(--bar-track);
   border-radius: 999px;
   height: 13px;
   overflow: hidden;
 }
 
 .boss-remaining-fill {
-  background: linear-gradient(90deg, var(--rose), var(--gold));
+  background: linear-gradient(90deg, var(--bar-start), var(--bar-end));
   border-radius: inherit;
   height: 100%;
   min-width: 4px;
 }
 
 .boss-remaining.low .boss-remaining-fill {
-  background: linear-gradient(90deg, var(--accent), #2f8f57);
+  background: linear-gradient(90deg, var(--accent), var(--success-strong));
 }
 
 .fight-events-panel {
@@ -593,9 +656,9 @@ textarea:focus {
 
 .report-bar:hover,
 .report-bar.active {
-  background: #f0fbf8;
+  background: var(--report-hover);
   border-color: var(--accent);
-  box-shadow: 0 8px 22px rgba(27, 111, 106, 0.15);
+  box-shadow: 0 8px 22px var(--accent-shadow);
 }
 
 .report-bar h3 {
@@ -608,7 +671,7 @@ textarea:focus {
 }
 
 .bar-track {
-  background: #ece4d8;
+  background: var(--bar-track);
   border-radius: 999px;
   height: 16px;
   overflow: hidden;
@@ -628,7 +691,7 @@ textarea:focus {
 
 .panel-header {
   align-items: center;
-  background: rgba(255, 255, 255, 0.58);
+  background: var(--panel-header);
   border-bottom: 1px solid var(--line);
   display: flex;
   gap: 16px;
@@ -647,8 +710,8 @@ textarea:focus {
 
 .panel-header span,
 .pill {
-  background: rgba(27, 111, 106, 0.1);
-  border: 1px solid rgba(27, 111, 106, 0.24);
+  background: var(--pill-bg);
+  border: 1px solid var(--pill-border);
   border-radius: 999px;
   color: var(--accent-dark);
   font-size: 0.77rem;
@@ -694,7 +757,7 @@ textarea:focus {
 }
 
 .phase-1 {
-  background: #1b6f6a;
+  background: var(--accent);
 }
 
 .phase-2 {
@@ -763,7 +826,7 @@ textarea:focus {
 }
 
 .boss-remaining-value.low {
-  color: #246a3b;
+  color: var(--success);
 }
 
 .empty-state {
