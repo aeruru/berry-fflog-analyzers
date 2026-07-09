@@ -169,7 +169,7 @@ async function loadMyRecentReports({ forceRefresh = false } = {}) {
     setStatus(`Loaded ${normalized.length} Dancing Mad reports from the last 7 days${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
   } catch (error) {
     console.warn(error);
-    setStatus(`Could not load your latest reports (${error.message}).`, true);
+    setStatus(formatLoadError('Could not load your latest reports', error), true);
   } finally {
     setAppLoading(false);
   }
@@ -263,12 +263,12 @@ async function toggleZoneReport(reportId) {
   expandedZoneReportIds.add(reportId);
 
   const report = zoneReports.find((candidate) => candidate.id === reportId);
-  if (!report || report.fightsLoaded || report.fightsLoading || report.testData) {
+  if (!report || report.fightsLoading || report.testData) {
     renderZoneReports();
     return;
   }
 
-  await loadReportFights(reportId);
+  await refreshReportFights(reportId);
 }
 
 async function loadReportFights(reportId, { forceRefresh = false } = {}) {
@@ -298,7 +298,7 @@ async function loadReportFights(reportId, { forceRefresh = false } = {}) {
     zoneReports = zoneReports.map((candidate) => candidate.id === reportId
       ? { ...candidate, fightsLoading: false, hydrationError: error.message }
       : candidate);
-    setStatus(`Could not load fights for ${report.reportCode} (${error.message}).`, true);
+    setStatus(formatLoadError(`Could not load fights for ${report.reportCode}`, error), true);
   }
 
   renderZoneReports();
@@ -365,6 +365,7 @@ async function loadFightEventDetails(reportId, fightId) {
       error: error.message,
       events: [],
     });
+    setStatus(formatLoadError(`Could not load events for fight ${fight.id}`, error), true);
   }
 
   renderZoneReports();
@@ -428,6 +429,31 @@ function isEmbeddedReport(report) {
 function setStatus(message, isError = false) {
   elements.statusLine.textContent = message;
   elements.statusLine.classList.toggle('error', isError);
+}
+
+function formatLoadError(prefix, error) {
+  const message = error?.message ?? String(error);
+
+  if (looksLikeFflogsThrottling(message)) {
+    return `${prefix}. FFLogs may be throttling or returning partial data right now; try again in a minute. (${message})`;
+  }
+
+  return `${prefix} (${message}).`;
+}
+
+function looksLikeFflogsThrottling(message) {
+  return [
+    '429',
+    'rate limit',
+    'ratelimit',
+    'throttle',
+    'throttling',
+    'returned no graphql data',
+    'returned an empty graphql payload',
+    'did not return a report list',
+    'did not return fight data',
+    'did not return event data',
+  ].some((pattern) => message.toLowerCase().includes(pattern));
 }
 
 function setAppLoading(isLoading) {

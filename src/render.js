@@ -1,4 +1,7 @@
-import { TARGET_ZONE_NAME } from './config.js';
+import {
+  TARGET_ZONE_ID,
+  TARGET_ZONE_NAME,
+} from './config.js';
 import {
   clamp,
   escapeHtml,
@@ -11,6 +14,7 @@ import {
   formatFightCount,
   formatTime,
   getFightPhaseTagClass,
+  getFflogsFightUrl,
   getFflogsReportUrl,
   getForsakenAnalyzerUrl,
   renderEventIcon,
@@ -41,20 +45,24 @@ export function renderZoneReports({
 
   zoneReportList.innerHTML = zoneReports.map((report) => {
     const isExpanded = expandedZoneReportIds.has(report.id);
-    const fights = [...report.pulls].sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    const fights = report.pulls
+      .filter((fight) => isTargetZoneFight(fight, report))
+      .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
 
     return `
       <article class="zone-report-card ${isExpanded ? 'expanded' : ''}">
         <div class="zone-report-summary">
-          <div>
+          <button class="icon-toggle-button report-toggle-button" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse report' : 'Expand report'}" title="${isExpanded ? 'Collapse report' : 'Expand report'}">
+            <span class="chevron ${isExpanded ? 'up' : 'down'}" aria-hidden="true"></span>
+          </button>
+          <div class="zone-report-info">
             <h3>${escapeHtml(report.title || report.zoneName)}</h3>
             <p class="meta">${report.reportCode ? `<a class="report-code-link" href="${getFflogsReportUrl(report.reportCode)}" target="_blank" rel="noreferrer">${escapeHtml(report.reportCode)}</a><br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
           </div>
           <div class="report-card-actions">
-            <button class="toggle-button report-toggle-button" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}">${isExpanded ? 'Collapse' : 'Expand'}</button>
-            <button class="cache-clear-button report-fights-refresh" data-report-id="${escapeHtml(report.id)}" type="button">Check fights</button>
+            <button class="utility-button report-fights-refresh" data-report-id="${escapeHtml(report.id)}" type="button">Check fights</button>
             <button class="cache-clear-button report-cache-clear" data-report-id="${escapeHtml(report.id)}" type="button">Clear cache</button>
-            <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(report.pulls.length) : 'Fights unloaded'}</span>
+            <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(fights.length) : 'Fights unloaded'}</span>
           </div>
         </div>
         ${isExpanded ? renderZoneFightCards(report, fights, { activeFightEventKey, fightEventDetails }) : ''}
@@ -117,6 +125,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
         const bossDamageDone = clamp(100 - bossRemaining, 0, 100);
         const bossLabel = `${bossRemaining.toFixed(1)}% remaining`;
+        const isLowBossRemaining = !fight.kill && bossRemaining < 15;
         const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
@@ -124,26 +133,25 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const showP2Analyzer = report.reportCode && !fight.kill && Number(fight.lastPhase) === 2 && !fight.lastPhaseIsIntermission;
 
         return `
-          <article class="zone-fight-card ${isActive ? 'active' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
+          <article class="zone-fight-card ${isActive ? 'active' : ''} ${isLowBossRemaining ? 'low-boss-remaining' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
             <div class="pull-top">
               <div class="fight-title-row">
                 <span class="phase-tag ${escapeHtml(getFightPhaseTagClass(fight))}" aria-label="${escapeHtml(phase)}">${escapeHtml(formatFightPhaseTag(fight))}</span>
                 <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
               </div>
               <div class="fight-card-actions">
-                ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
                 <button class="toggle-button fight-details-toggle" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button" aria-expanded="${isActive}">${isActive ? 'Hide details' : 'Details'}</button>
+                ${report.reportCode ? `<a class="fflogs-fight-link" href="${escapeHtml(getFflogsFightUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">FFLogs</a>` : ''}
+                ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
                 <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
             </div>
             <div class="pull-meta">
-              <span>${formatTime(fight.startTime)}</span>
+              <span class="pull-meta-start">${formatTime(fight.startTime)}</span>
               <span>${formatDuration(fight.durationSeconds)}</span>
+              <strong class="boss-remaining-value ${isLowBossRemaining ? 'low' : ''}">${bossLabel}</strong>
             </div>
-            <div class="boss-remaining">
-              <div class="boss-remaining-label">
-                <strong>${bossLabel}</strong>
-              </div>
+            <div class="boss-remaining ${isLowBossRemaining ? 'low' : ''}">
               <div class="boss-remaining-track" aria-label="${bossLabel}">
                 <div class="boss-remaining-fill" style="width: ${bossDamageDone}%"></div>
               </div>
@@ -154,6 +162,16 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
       }).join('')}
     </div>
   `;
+}
+
+function isTargetZoneFight(fight, report) {
+  return normalizeComparableName(fight.name) === normalizeComparableName(TARGET_ZONE_NAME)
+    || normalizeComparableName(fight.gameZoneName) === normalizeComparableName(TARGET_ZONE_NAME)
+    || (Number(report.zoneId) === TARGET_ZONE_ID && normalizeComparableName(fight.name) === normalizeComparableName(report.zoneName));
+}
+
+function normalizeComparableName(value) {
+  return String(value ?? '').trim().toLowerCase();
 }
 
 function renderFightEventDetails(eventState) {

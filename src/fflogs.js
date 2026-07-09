@@ -69,7 +69,8 @@ export async function fetchReportFights(session, { endpoint, forceRefresh = fals
     ...report,
     code: session.reportCode,
     title: report?.title ?? session.title,
-    zone: report?.zone ?? session.zoneName,
+    zoneId: report?.zone?.id ?? session.zoneId,
+    zoneName: report?.zone?.name ?? session.zoneName,
     fightsLoaded: true,
   }, session.id);
 }
@@ -104,10 +105,17 @@ export async function cachedFflogsGraphql(queryName, endpoint, query, variables,
   const cached = forceRefresh ? null : readCacheEntry(cacheKey);
 
   if (cached) {
-    return cached;
+    try {
+      assertCacheableGraphqlPayload(queryName, cached);
+      return cached;
+    } catch (error) {
+      console.info(`Ignoring invalid cached ${queryName} response.`, error);
+      localStorage.removeItem(cacheKey);
+    }
   }
 
   const payload = await fflogsGraphql(endpoint, query, variables, { onExpired });
+  assertCacheableGraphqlPayload(queryName, payload);
   writeCacheEntry(cacheKey, payload);
   return payload;
 }
@@ -151,6 +159,44 @@ async function fflogsGraphqlRaw(endpoint, query, variables, { onExpired } = {}) 
   }
 
   return response.json();
+}
+
+function assertCacheableGraphqlPayload(queryName, payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('FFLogs returned an empty GraphQL payload.');
+  }
+
+  if (payload.errors?.length) {
+    throw new Error(payload.errors.map((error) => error.message).join('; '));
+  }
+
+  if (!payload.data) {
+    throw new Error('FFLogs returned no GraphQL data.');
+  }
+
+  if (queryName === 'RecentUserReports') {
+    const reports = payload.data?.reportData?.reports?.data;
+    if (!Array.isArray(reports)) {
+      throw new Error('FFLogs did not return a report list.');
+    }
+    return;
+  }
+
+  if (queryName === 'ReportFights') {
+    const report = payload.data?.reportData?.report;
+    if (!report || !Array.isArray(report.fights)) {
+      throw new Error('FFLogs did not return fight data for this report.');
+    }
+    return;
+  }
+
+  if (queryName === 'FightEvents') {
+    const report = payload.data?.reportData?.report;
+    const events = report?.events?.data;
+    if (!report || !Array.isArray(events)) {
+      throw new Error('FFLogs did not return event data for this fight.');
+    }
+  }
 }
 
 function getLookbackRange(days) {

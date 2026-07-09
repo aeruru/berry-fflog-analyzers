@@ -25,6 +25,7 @@ export const RECENT_REPORTS_QUERY = `
           startTime
           endTime
           zone {
+            id
             name
           }
         }
@@ -65,6 +66,7 @@ export const REPORT_FIGHTS_QUERY = `
           startTime
           endTime
           kill
+          encounterID
           bossPercentage
           fightPercentage
           lastPhase

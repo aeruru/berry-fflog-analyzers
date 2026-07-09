@@ -105,6 +105,13 @@ export function getFflogsReportUrl(reportCode) {
   return `https://www.fflogs.com/reports/${encodeURIComponent(reportCode)}`;
 }
 
+export function getFflogsFightUrl(reportCode, fightId) {
+  const params = new URLSearchParams({
+    fight: String(fightId),
+  });
+  return `${getFflogsReportUrl(reportCode)}?${params.toString()}`;
+}
+
 export function getForsakenAnalyzerUrl(reportCode, fightId) {
   const params = new URLSearchParams({
     report: reportCode,

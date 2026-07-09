@@ -36,12 +36,14 @@ export function normalizeSession(item, index = 0) {
   const startTime = toDateString(reportStartTime ?? pulls[0]?.startTime);
   const endTime = toDateString(item.endTime ?? item.end ?? item.end_time ?? item.report?.endTime ?? pulls[pulls.length - 1]?.endTime, reportStartTime);
   const zoneName = item.zoneName ?? item.zone?.name ?? item.zone ?? item.report?.zone?.name ?? item.report?.zoneName ?? 'Unknown Zone';
+  const zoneId = normalizeId(item.zoneID ?? item.zoneId ?? item.zone?.id ?? item.report?.zoneID ?? item.report?.zoneId ?? item.report?.zone?.id);
   const players = normalizePlayers(item.players ?? item.report?.players ?? item.masterData?.actors ?? item.report?.masterData?.actors);
 
   return {
     id: String(item.id ?? item.reportCode ?? item.code ?? item.report?.code ?? `session-${index}`),
     reportCode: item.reportCode ?? item.code ?? item.report?.code ?? null,
     title: item.title ?? item.report?.title ?? null,
+    zoneId,
     zoneName: String(zoneName),
     startTime,
     endTime,
@@ -68,9 +70,13 @@ function normalizePulls(items, reportStartTime = null) {
     const bossPercent = normalizeBossPercent(item.bossPercentage ?? item.bossPercent ?? item.fightPercentage);
     const fightPercent = normalizeBossPercent(item.fightPercentage ?? item.fightPercent ?? item.bossPercentage ?? item.bossPercent);
     const lastPhase = normalizePhaseNumber(item.lastPhase ?? item.phase);
+    const gameZone = item.gameZone ?? item.zone ?? null;
 
     return {
       id: String(item.id ?? item.fightID ?? index + 1),
+      encounterId: normalizeId(item.encounterID ?? item.encounterId),
+      gameZoneId: normalizeId(item.gameZoneID ?? item.gameZoneId ?? gameZone?.id),
+      gameZoneName: gameZone?.name ?? item.gameZoneName ?? null,
       name: item.name ?? item.encounterName ?? item.bossName ?? `Pull ${index + 1}`,
       startTime,
       startOffsetMs,
@@ -181,6 +187,11 @@ function normalizeBossPercent(value) {
 }
 
 function normalizePhaseNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeId(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
 }
