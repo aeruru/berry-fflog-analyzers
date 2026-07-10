@@ -34,6 +34,7 @@ const THEME_STORAGE_KEY = 'berry.fflogs.theme';
 
 let zoneReports = [];
 let expandedZoneReportIds = new Set();
+let reportPhaseFilters = new Map();
 let activeFightEventKey = null;
 let fightEventDetails = new Map();
 let currentUserId = null;
@@ -238,6 +239,7 @@ function setCurrentUser(user) {
 function setZoneReports(nextReports) {
   zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
   expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
+  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([id]) => zoneReports.some((report) => report.id === id)));
   activeFightEventKey = null;
   fightEventDetails = new Map();
   renderZoneReports();
@@ -249,13 +251,25 @@ function renderZoneReports() {
     elements,
     expandedZoneReportIds,
     fightEventDetails,
+    reportPhaseFilters,
     onClearFightCache: clearFightCache,
     onClearReportCache: clearReportCache,
     onLoadFight: loadFightEventDetails,
     onRefreshReportFights: refreshReportFights,
+    onSelectReportPhase: selectReportPhase,
     onToggleReport: toggleZoneReport,
     zoneReports,
   });
+}
+
+function selectReportPhase(reportId, phase) {
+  if (phase === 'all') {
+    reportPhaseFilters.delete(reportId);
+  } else {
+    reportPhaseFilters.set(reportId, phase);
+  }
+
+  renderZoneReports();
 }
 
 async function toggleZoneReport(reportId) {

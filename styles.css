@@ -532,6 +532,25 @@ textarea:focus {
   padding: 10px;
 }
 
+.report-phase-select {
+  background: var(--fight-bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 28px;
+  padding: 0 6px;
+  width: 94px;
+}
+
+.report-phase-select:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-shadow-button);
+  outline-offset: 2px;
+}
+
 .zone-fight-card {
   background: var(--fight-bg);
   border: 1px solid var(--line);
