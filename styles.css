@@ -540,7 +540,8 @@ textarea:focus {
   font: inherit;
   font-size: 0.72rem;
   font-weight: 700;
-  height: 28px;
+  min-height: 32px;
+  height: 32px;
   padding: 0 6px;
   width: 94px;
 }
