@@ -74,7 +74,7 @@ function normalizePulls(items, reportStartTime = null) {
 
     return {
       id: String(item.id ?? item.fightID ?? index + 1),
-      encounterId: normalizeId(item.encounterID ?? item.encounterId),
+      encounterId: normalizeEncounterId(item.encounterID ?? item.encounterId),
       gameZoneId: normalizeId(item.gameZoneID ?? item.gameZoneId ?? gameZone?.id),
       gameZoneName: gameZone?.name ?? item.gameZoneName ?? null,
       name: item.name ?? item.encounterName ?? item.bossName ?? `Pull ${index + 1}`,
@@ -194,6 +194,15 @@ function normalizePhaseNumber(value) {
 function normalizeId(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeEncounterId(value) {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
 }
 
 function normalizeOffsetMs(value) {

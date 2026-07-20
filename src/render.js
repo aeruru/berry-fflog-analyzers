@@ -192,9 +192,11 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
 }
 
 function isTargetZoneFight(fight, report) {
-  return normalizeComparableName(fight.name) === normalizeComparableName(TARGET_ZONE_NAME)
+  return fight.encounterId !== 0 && (
+    normalizeComparableName(fight.name) === normalizeComparableName(TARGET_ZONE_NAME)
     || normalizeComparableName(fight.gameZoneName) === normalizeComparableName(TARGET_ZONE_NAME)
-    || (Number(report.zoneId) === TARGET_ZONE_ID && normalizeComparableName(fight.name) === normalizeComparableName(report.zoneName));
+    || (Number(report.zoneId) === TARGET_ZONE_ID && normalizeComparableName(fight.name) === normalizeComparableName(report.zoneName))
+  );
 }
 
 function normalizeComparableName(value) {
