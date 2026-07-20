@@ -23,7 +23,7 @@ export function normalizeReportList(raw) {
     .map(normalizeSession)
     .filter(Boolean)
     .filter((session) => !UNKNOWN_ZONE_NAMES.has(session.zoneName.trim().toLowerCase()))
-    .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
 }
 
 export function normalizeSession(item, index = 0) {
