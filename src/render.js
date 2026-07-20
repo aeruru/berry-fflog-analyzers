@@ -26,10 +26,12 @@ export function renderZoneReports({
   elements,
   expandedZoneReportIds,
   fightEventDetails,
+  reportPhaseFilters,
   onClearFightCache,
   onClearReportCache,
   onLoadFight,
   onRefreshReportFights,
+  onSelectReportPhase,
   onToggleReport,
   zoneReports,
 }) {
@@ -48,6 +50,10 @@ export function renderZoneReports({
     const fights = report.pulls
       .filter((fight) => isTargetZoneFight(fight, report))
       .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+    const selectedPhase = reportPhaseFilters.get(report.id) ?? 'all';
+    const visibleFights = selectedPhase === 'all'
+      ? fights
+      : fights.filter((fight) => String(fight.lastPhase) === selectedPhase);
 
     return `
       <article class="zone-report-card ${isExpanded ? 'expanded' : ''}">
@@ -62,10 +68,11 @@ export function renderZoneReports({
           <div class="report-card-actions">
             <button class="utility-button report-fights-refresh" data-report-id="${escapeHtml(report.id)}" type="button">Check fights</button>
             <button class="cache-clear-button report-cache-clear" data-report-id="${escapeHtml(report.id)}" type="button">Clear cache</button>
+            ${isExpanded ? renderPhaseFilter(report, selectedPhase) : ''}
             <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(fights.length) : 'Fights unloaded'}</span>
           </div>
         </div>
-        ${isExpanded ? renderZoneFightCards(report, fights, { activeFightEventKey, fightEventDetails }) : ''}
+        ${isExpanded ? renderZoneFightCards(report, visibleFights, { activeFightEventKey, fightEventDetails, selectedPhase }) : ''}
       </article>
     `;
   }).join('');
@@ -95,6 +102,12 @@ export function renderZoneReports({
     });
   });
 
+  zoneReportList.querySelectorAll('.report-phase-select').forEach((select) => {
+    select.addEventListener('change', () => {
+      onSelectReportPhase(select.dataset.reportId, select.value);
+    });
+  });
+
   zoneReportList.querySelectorAll('.fight-details-toggle').forEach((button) => {
     button.addEventListener('click', () => {
       onLoadFight(button.dataset.reportId, button.dataset.fightId);
@@ -109,13 +122,27 @@ export function renderZoneReports({
   });
 }
 
-function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventDetails }) {
+function renderPhaseFilter(report, selectedPhase) {
+  return `
+    <select class="report-phase-select" aria-label="Filter fights by phase" data-report-id="${escapeHtml(report.id)}">
+      <option value="all"${selectedPhase === 'all' ? ' selected' : ''}>All phases</option>
+      ${[1, 2, 3, 4, 5].map((phase) => `<option value="${phase}"${selectedPhase === String(phase) ? ' selected' : ''}>Phase ${phase}</option>`).join('')}
+    </select>
+  `;
+}
+
+function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventDetails, selectedPhase }) {
   if (report.fightsLoading) {
     return '<div class="zone-fight-list"><div class="empty-state">Loading fights for this report...</div></div>';
   }
 
   if (fights.length === 0) {
-    return `<div class="zone-fight-list"><div class="empty-state">${report.hydrationError ? `Fight details unavailable: ${escapeHtml(report.hydrationError)}` : 'This report does not include fight data yet.'}</div></div>`;
+    const emptyMessage = selectedPhase !== 'all'
+      ? `No fights reached Phase ${escapeHtml(selectedPhase)} in this report.`
+      : report.hydrationError
+        ? `Fight details unavailable: ${escapeHtml(report.hydrationError)}`
+        : 'This report does not include fight data yet.';
+    return `<div class="zone-fight-list"><div class="empty-state">${emptyMessage}</div></div>`;
   }
 
   return `
