@@ -1,9 +1,13 @@
 export function formatDateRange(startTime, endTime) {
   const start = new Date(startTime);
   const end = new Date(endTime);
-  const date = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(start);
+  const dates = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
   const times = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
-  return `${date}, ${times.format(start)} - ${times.format(end)}`;
+  const startLabel = `${dates.format(start)}, ${times.format(start)}`;
+  const endLabel = start.toDateString() === end.toDateString()
+    ? times.format(end)
+    : `${dates.format(end)}, ${times.format(end)}`;
+  return `${startLabel} - ${endLabel}`;
 }
 
 export function formatShortDate(value) {

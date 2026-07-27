@@ -269,7 +269,7 @@ function toDateString(value, reportStartTime = null) {
   }
 
   if (typeof value === 'number') {
-    if (reportStartTime && value < 100_000_000) {
+    if (reportStartTime && value < 1_700_000_000) {
       return addSeconds(toDateString(reportStartTime), value / 1000);
     }
 
