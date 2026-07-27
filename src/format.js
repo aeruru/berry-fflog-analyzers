@@ -1,6 +1,8 @@
 export function formatDateRange(startTime, endTime) {
-  const start = new Date(startTime);
-  const end = new Date(endTime);
+  const start = toValidDate(startTime);
+  const end = toValidDate(endTime);
+  if (!start || !end) return 'Invalid date';
+
   const dates = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
   const times = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
   const startLabel = `${dates.format(start)}, ${times.format(start)}`;
@@ -11,20 +13,26 @@ export function formatDateRange(startTime, endTime) {
 }
 
 export function formatShortDate(value) {
+  const date = toValidDate(value);
+  if (!date) return 'Invalid date';
+
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatTime(value) {
+  const date = toValidDate(value);
+  if (!date) return 'Invalid date';
+
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatDuration(seconds) {
@@ -34,11 +42,21 @@ export function formatDuration(seconds) {
 }
 
 export function formatEventTime(milliseconds) {
+  const date = toValidDate(milliseconds);
+  if (!date) return 'Invalid date';
+
   return new Intl.DateTimeFormat(undefined, {
     hour: 'numeric',
     minute: '2-digit',
     second: '2-digit',
-  }).format(new Date(milliseconds));
+  }).format(date);
+}
+
+function toValidDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 export function formatElapsedTime(milliseconds) {

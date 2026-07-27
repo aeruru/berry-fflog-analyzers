@@ -3,6 +3,15 @@ import {
   UNKNOWN_ZONE_NAMES,
 } from './config.js';
 
+// FFLogs fight timestamps can be report-relative offsets in milliseconds. This
+// cutoff (~19.7 days) comfortably exceeds a report's duration while remaining
+// below modern Unix timestamps in seconds.
+const REPORT_RELATIVE_TIMESTAMP_CUTOFF_MS = 1_700_000_000;
+
+// Current Unix timestamps have 10 digits in seconds and 13 in milliseconds.
+// Values above 10 billion can therefore be treated as Unix milliseconds.
+const UNIX_MILLISECONDS_CUTOFF = 10_000_000_000;
+
 export function normalizeReportList(raw) {
   if (typeof raw === 'string') {
     return [];
@@ -207,7 +216,7 @@ function normalizeEncounterId(value) {
 
 function normalizeOffsetMs(value) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number > 100_000_000) {
+  if (!Number.isFinite(number) || number >= REPORT_RELATIVE_TIMESTAMP_CUTOFF_MS) {
     return null;
   }
 
@@ -232,7 +241,7 @@ function normalizeEventTiming({ elapsedMs, fightStartMs, fightStartOffsetMs, tim
     };
   }
 
-  if (timestamp > 10_000_000_000) {
+  if (timestamp > UNIX_MILLISECONDS_CUTOFF) {
     return {
       elapsedMs: Math.max(0, timestamp - fightStartMs),
       timestampMs: timestamp,
@@ -265,23 +274,44 @@ function normalizeDuration(value) {
 
 function toDateString(value, reportStartTime = null) {
   if (value === null || value === undefined || value === '') {
-    return new Date().toISOString();
+    return null;
   }
 
   if (typeof value === 'number') {
-    if (reportStartTime && value < 1_700_000_000) {
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+
+    if (reportStartTime && value < REPORT_RELATIVE_TIMESTAMP_CUTOFF_MS) {
       return addSeconds(toDateString(reportStartTime), value / 1000);
     }
 
-    return new Date(value > 10_000_000_000 ? value : value * 1000).toISOString();
+    return toValidIsoString(
+      value > UNIX_MILLISECONDS_CUTOFF ? value : value * 1000,
+    );
   }
 
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+  return toValidIsoString(value);
 }
 
 function addSeconds(value, seconds) {
-  return new Date(new Date(value).getTime() + seconds * 1000).toISOString();
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const startMs = new Date(value).getTime();
+  const secondsNumber = Number(seconds);
+
+  if (!Number.isFinite(startMs) || !Number.isFinite(secondsNumber)) {
+    return null;
+  }
+
+  return new Date(startMs + secondsNumber * 1000).toISOString();
+}
+
+function toValidIsoString(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function secondsBetween(startTime, endTime) {
@@ -289,5 +319,11 @@ function secondsBetween(startTime, endTime) {
     return null;
   }
 
-  return Math.max(0, Math.round((new Date(endTime) - new Date(startTime)) / 1000));
+  const startMs = new Date(startTime).getTime();
+  const endMs = new Date(endTime).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((endMs - startMs) / 1000));
 }
