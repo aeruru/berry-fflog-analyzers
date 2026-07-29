@@ -18,6 +18,7 @@ import {
   getFflogsReportUrl,
   getArrowAnalyzerUrl,
   getForsakenAnalyzerUrl,
+  getP2DPSUrl,
   renderEventIcon,
 } from './format.js';
 import { getFightEventKey } from './fight-events.js';
@@ -161,6 +162,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const isActive = eventKey === activeFightEventKey;
         const showArrowsAnalyzer = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 150000); // 150,000 is 2:30, about the time when arrows start
         const showP2Analyzer = report.reportCode && !fight.kill && Number(fight.lastPhase) === 2 && !fight.lastPhaseIsIntermission;
+        const showP2DPS = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 330000); // 330,000 is 5:30, when the measurement ends
 
         return `
           <article class="zone-fight-card ${isActive ? 'active' : ''} ${isLowBossRemaining ? 'low-boss-remaining' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
@@ -174,6 +176,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
                 ${report.reportCode ? `<a class="fflogs-fight-link" href="${escapeHtml(getFflogsFightUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">FFLogs</a>` : ''}
                 ${showArrowsAnalyzer ? `<a class="analyzer-link" href="${escapeHtml(getArrowAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">Arrows analyzer</a>` : ''}
                 ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
+                ${showP2DPS ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id, fight.startOffsetMs))}" target="_blank" rel="noreferrer">P2 DPS</a>` : ''}
                 <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
             </div>
