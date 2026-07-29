@@ -149,6 +149,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
   return `
     <div class="zone-fight-list">
       ${fights.map((fight, index) => {
+        console.log(fight)
         const phase = formatFightPhase(fight);
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
         const bossDamageDone = clamp(100 - bossRemaining, 0, 100);
