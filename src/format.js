@@ -134,12 +134,22 @@ export function getFflogsFightUrl(reportCode, fightId) {
   return `${getFflogsReportUrl(reportCode)}?${params.toString()}`;
 }
 
-export function getForsakenAnalyzerUrl(reportCode, fightId) {
+export function getAnalyzerUrl(reportCode, fightId, type) {
   const params = new URLSearchParams({
     report: reportCode,
     fight: String(fightId),
   });
-  return `https://analyzer.wtfdig.info/forsaken?${params.toString()}`;
+  return `https://analyzer.wtfdig.info/${type}?${params.toString()}`;
+}
+
+export function getDPSUrl(reportCode, fightId, fightStartTime, measureStartTime, measureEndTime) {
+  const params = new URLSearchParams({
+    fight: String(fightId),
+    type: "damage-done",
+    start: fightStartTime + measureStartTime,
+    end: fightStartTime + measureEndTime
+  });
+  return `${getFflogsReportUrl(reportCode)}?${params.toString()}`;
 }
 
 export function clamp(value, min, max) {

@@ -16,7 +16,8 @@ import {
   getFightPhaseTagClass,
   getFflogsFightUrl,
   getFflogsReportUrl,
-  getForsakenAnalyzerUrl,
+  getAnalyzerUrl,
+  getDPSUrl,
   renderEventIcon,
 } from './format.js';
 import { getFightEventKey } from './fight-events.js';
@@ -148,6 +149,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
   return `
     <div class="zone-fight-list">
       ${fights.map((fight, index) => {
+        console.log(fight)
         const phase = formatFightPhase(fight);
         const bossRemaining = fight.kill ? 0 : clamp(fight.bossPercent, 0, 100);
         const bossDamageDone = clamp(100 - bossRemaining, 0, 100);
@@ -157,7 +159,9 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
         const isActive = eventKey === activeFightEventKey;
+        const showArrowsAnalyzer = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 150000); // 150,000 is 2:30, about the time when arrows start
         const showP2Analyzer = report.reportCode && !fight.kill && Number(fight.lastPhase) === 2 && !fight.lastPhaseIsIntermission;
+        const showP2DPS = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 330000); // 330,000 is 5:30, when the measurement ends
 
         return `
           <article class="zone-fight-card ${isActive ? 'active' : ''} ${isLowBossRemaining ? 'low-boss-remaining' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
@@ -169,7 +173,9 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
               <div class="fight-card-actions">
                 <button class="toggle-button fight-details-toggle" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button" aria-expanded="${isActive}">${isActive ? 'Hide details' : 'Details'}</button>
                 ${report.reportCode ? `<a class="fflogs-fight-link" href="${escapeHtml(getFflogsFightUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">FFLogs</a>` : ''}
-                ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
+                ${showArrowsAnalyzer ? `<a class="analyzer-link" href="${escapeHtml(getAnalyzerUrl(report.reportCode, fight.id, "arrows"))}" target="_blank" rel="noreferrer">Arrows analyzer</a>` : ''}
+                ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getAnalyzerUrl(report.reportCode, fight.id, "forsaken"))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
+                ${showP2DPS ? `<a class="analyzer-link" href="${escapeHtml(getDPSUrl(report.reportCode, fight.id, fight.startOffsetMs, 221000, 331000))}" target="_blank" rel="noreferrer">P2 DPS</a>` : ''}
                 <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
             </div>
