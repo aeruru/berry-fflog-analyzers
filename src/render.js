@@ -176,7 +176,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
                 ${report.reportCode ? `<a class="fflogs-fight-link" href="${escapeHtml(getFflogsFightUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">FFLogs</a>` : ''}
                 ${showArrowsAnalyzer ? `<a class="analyzer-link" href="${escapeHtml(getArrowAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">Arrows analyzer</a>` : ''}
                 ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
-                ${showP2DPS ? `<a class="analyzer-link" href="${escapeHtml(getForsakenAnalyzerUrl(report.reportCode, fight.id, fight.startOffsetMs))}" target="_blank" rel="noreferrer">P2 DPS</a>` : ''}
+                ${showP2DPS ? `<a class="analyzer-link" href="${escapeHtml(getP2DPSUrl(report.reportCode, fight.id, fight.startOffsetMs))}" target="_blank" rel="noreferrer">P2 DPS</a>` : ''}
                 <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
             </div>
