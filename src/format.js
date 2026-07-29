@@ -134,28 +134,20 @@ export function getFflogsFightUrl(reportCode, fightId) {
   return `${getFflogsReportUrl(reportCode)}?${params.toString()}`;
 }
 
-export function getArrowAnalyzerUrl(reportCode, fightId) {
+export function getAnalyzerUrl(reportCode, fightId, type) {
   const params = new URLSearchParams({
     report: reportCode,
     fight: String(fightId),
   });
-  return `https://analyzer.wtfdig.info/arrows?${params.toString()}`;
+  return `https://analyzer.wtfdig.info/${type}?${params.toString()}`;
 }
 
-export function getForsakenAnalyzerUrl(reportCode, fightId) {
-  const params = new URLSearchParams({
-    report: reportCode,
-    fight: String(fightId),
-  });
-  return `https://analyzer.wtfdig.info/forsaken?${params.toString()}`;
-}
-
-export function getP2DPSUrl(reportCode, fightId, fightStartTime) {
+export function getDPSUrl(reportCode, fightId, fightStartTime, measureStartTime, measureEndTime) {
   const params = new URLSearchParams({
     fight: String(fightId),
     type: "damage-done",
-    start: fightStartTime + 220000, // 3:40 past fight start
-    end: fightStartTime + 330000 // 5:30 past fight start
+    start: fightStartTime + measureStartTime,
+    end: fightStartTime + measureEndTime
   });
   return `${getFflogsReportUrl(reportCode)}?${params.toString()}`;
 }
