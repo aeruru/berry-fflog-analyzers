@@ -142,6 +142,14 @@ export function getForsakenAnalyzerUrl(reportCode, fightId) {
   return `https://analyzer.wtfdig.info/forsaken?${params.toString()}`;
 }
 
+export function getArrowAnalyzerUrl(reportCode, fightId) {
+  const params = new URLSearchParams({
+    report: reportCode,
+    fight: String(fightId),
+  });
+  return `https://analyzer.wtfdig.info/arrows?${params.toString()}`;
+}
+
 export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
