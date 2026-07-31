@@ -167,7 +167,7 @@ async function loadMyRecentReports({ forceRefresh = false } = {}) {
       throw new Error('No known-zone reports were found for your account.');
     }
 
-    setZoneReports(targetZoneReports);
+    setZoneReports(targetZoneReports, { preserveFightData: true });
     setCurrentUser(user);
 
     const latest = normalized[0];
@@ -236,12 +236,54 @@ function setCurrentUser(user) {
   updateAuthUi();
 }
 
-function setZoneReports(nextReports) {
-  zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
+function setZoneReports(nextReports, { preserveFightData = false } = {}) {
+  const existingReportsByCode = new Map(
+    zoneReports
+      .filter((report) => report.reportCode)
+      .map((report) => [report.reportCode, report]),
+  );
+  const existingReportsById = new Map(
+    zoneReports.map((report) => [report.id, report]),
+  );
+
+  zoneReports = normalizeReportList(nextReports)
+    .slice(0, TARGET_ZONE_REPORT_LIMIT)
+    .map((report) => {
+      if (!preserveFightData) {
+        return report;
+      }
+
+      const existingReport = existingReportsByCode.get(report.reportCode)
+        ?? existingReportsById.get(report.id);
+      if (!existingReport?.fightsLoaded) {
+        return report;
+      }
+
+      return {
+        ...report,
+        fightsLoaded: true,
+        players: existingReport.players,
+        pulls: existingReport.pulls,
+      };
+    });
   expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
   reportPhaseFilters = new Map([...reportPhaseFilters].filter(([id]) => zoneReports.some((report) => report.id === id)));
-  activeFightEventKey = null;
-  fightEventDetails = new Map();
+
+  if (preserveFightData) {
+    const availableFightEventKeys = new Set(
+      zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
+    );
+    fightEventDetails = new Map(
+      [...fightEventDetails].filter(([key]) => availableFightEventKeys.has(key)),
+    );
+    if (!availableFightEventKeys.has(activeFightEventKey)) {
+      activeFightEventKey = null;
+    }
+  } else {
+    activeFightEventKey = null;
+    fightEventDetails = new Map();
+  }
+
   renderZoneReports();
 }
 
