@@ -33,7 +33,7 @@ import { renderZoneReports as renderZoneReportsView } from './src/render.js';
 const THEME_STORAGE_KEY = 'berry.fflogs.theme';
 
 let zoneReports = [];
-let expandedZoneReportIds = new Set();
+let expandedZoneReportCodes = new Set();
 let reportPhaseFilters = new Map();
 let activeFightEventKey = null;
 let fightEventDetails = new Map();
@@ -122,7 +122,7 @@ async function loadTestData() {
 
     const payload = await response.json();
     const report = payload.report ?? payload?.data?.reportData?.report;
-    const normalized = normalizeSession(report, 'test-data');
+    const normalized = normalizeSession(report);
 
     if (!normalized) {
       throw new Error('sample report was missing report data');
@@ -238,27 +238,24 @@ function setCurrentUser(user) {
 
 function setZoneReports(nextReports, { preserveFightData = false } = {}) {
   const existingReportsByCode = new Map(
-    zoneReports
-      .filter((report) => report.reportCode)
-      .map((report) => [report.reportCode, report]),
-  );
-  const existingReportsById = new Map(
-    zoneReports.map((report) => [report.id, report]),
+    zoneReports.map((report) => [report.reportCode, report]),
   );
 
+  // normalize and limit the new reports
   zoneReports = normalizeReportList(nextReports)
     .slice(0, TARGET_ZONE_REPORT_LIMIT)
     .map((report) => {
+      // return the raw report if the fight data shouldn't be preserved or the report's fights aren't loaded
       if (!preserveFightData) {
         return report;
       }
 
-      const existingReport = existingReportsByCode.get(report.reportCode)
-        ?? existingReportsById.get(report.id);
+      const existingReport = existingReportsByCode.get(report.reportCode);
       if (!existingReport?.fightsLoaded) {
         return report;
       }
 
+      // return an expanded report if the fight data should be preserved and the report already exists
       return {
         ...report,
         fightsLoaded: true,
@@ -266,10 +263,12 @@ function setZoneReports(nextReports, { preserveFightData = false } = {}) {
         pulls: existingReport.pulls,
       };
     });
-  expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
-  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([id]) => zoneReports.some((report) => report.id === id)));
+  // removes the expanded state and the phase filter if a report disappeared from the list (most often through timeout)
+  expandedZoneReportCodes = new Set([...expandedZoneReportCodes].filter((code) => zoneReports.some((report) => report.reportCode === code)));
+  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([code]) => zoneReports.some((report) => report.reportCode === code)));
 
   if (preserveFightData) {
+    // construct keys for every available fight detail
     const availableFightEventKeys = new Set(
       zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
     );
@@ -280,10 +279,12 @@ function setZoneReports(nextReports, { preserveFightData = false } = {}) {
       activeFightEventKey = null;
     }
   } else {
+    // fully clear details when preservation is disabled
     activeFightEventKey = null;
     fightEventDetails = new Map();
   }
 
+  // actually put it into effect
   renderZoneReports();
 }
 
@@ -291,7 +292,7 @@ function renderZoneReports() {
   renderZoneReportsView({
     activeFightEventKey,
     elements,
-    expandedZoneReportIds,
+    expandedZoneReportCodes,
     fightEventDetails,
     reportPhaseFilters,
     onClearFightCache: clearFightCache,
@@ -304,43 +305,43 @@ function renderZoneReports() {
   });
 }
 
-function selectReportPhase(reportId, phase) {
+function selectReportPhase(reportCode, phase) {
   if (phase === 'all') {
-    reportPhaseFilters.delete(reportId);
+    reportPhaseFilters.delete(reportCode);
   } else {
-    reportPhaseFilters.set(reportId, phase);
+    reportPhaseFilters.set(reportCode, phase);
   }
 
   renderZoneReports();
 }
 
-async function toggleZoneReport(reportId) {
-  if (expandedZoneReportIds.has(reportId)) {
-    expandedZoneReportIds.delete(reportId);
+async function toggleZoneReport(reportCode) {
+  if (expandedZoneReportCodes.has(reportCode)) {
+    expandedZoneReportCodes.delete(reportCode);
     renderZoneReports();
     return;
   }
 
-  expandedZoneReportIds.add(reportId);
+  expandedZoneReportCodes.add(reportCode);
 
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   if (!report || report.fightsLoading || report.testData) {
     renderZoneReports();
     return;
   }
 
-  await refreshReportFights(reportId);
+  await refreshReportFights(reportCode);
 }
 
-async function loadReportFights(reportId, { forceRefresh = false } = {}) {
-  const reportIndex = zoneReports.findIndex((candidate) => candidate.id === reportId);
+async function loadReportFights(reportCode, { forceRefresh = false } = {}) {
+  const reportIndex = zoneReports.findIndex((candidate) => candidate.reportCode === reportCode);
   const report = zoneReports[reportIndex];
 
   if (!report?.reportCode) {
     return;
   }
 
-  zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+  zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
     ? { ...candidate, fightsLoading: true, hydrationError: null }
     : candidate);
   renderZoneReports();
@@ -351,12 +352,12 @@ async function loadReportFights(reportId, { forceRefresh = false } = {}) {
       forceRefresh,
       onExpired: updateAuthUi,
     });
-    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
       ? { ...hydrated, fightsLoaded: true, fightsLoading: false }
       : candidate);
   } catch (error) {
     console.warn(`Could not hydrate fights for report ${report.reportCode}`, error);
-    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
       ? { ...candidate, fightsLoading: false, hydrationError: error.message }
       : candidate);
     setStatus(formatLoadError(`Could not load fights for ${report.reportCode}`, error), true);
@@ -365,29 +366,29 @@ async function loadReportFights(reportId, { forceRefresh = false } = {}) {
   renderZoneReports();
 }
 
-async function refreshReportFights(reportId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+async function refreshReportFights(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
 
   if (!report || report.testData) {
     setStatus('Use live data to check FFLogs for new fights.', true);
     return;
   }
 
-  expandedZoneReportIds.add(reportId);
+  expandedZoneReportCodes.add(reportCode);
   [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.id}:`))
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
+  if (activeFightEventKey?.startsWith(`${report.reportCode}:`)) {
     activeFightEventKey = null;
   }
 
   setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
-  await loadReportFights(reportId, { forceRefresh: true });
+  await loadReportFights(reportCode, { forceRefresh: true });
 }
 
-async function loadFightEventDetails(reportId, fightId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+async function loadFightEventDetails(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
 
   if (!report || !fight) {
@@ -432,8 +433,8 @@ async function loadFightEventDetails(reportId, fightId) {
   renderZoneReports();
 }
 
-function clearReportCache(reportId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+function clearReportCache(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
 
   if (!report) {
     return;
@@ -445,10 +446,10 @@ function clearReportCache(reportId) {
   });
 
   [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.id}:`))
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
+  if (activeFightEventKey?.startsWith(`${report.reportCode}:`)) {
     activeFightEventKey = null;
   }
 
@@ -456,8 +457,8 @@ function clearReportCache(reportId) {
   renderZoneReports();
 }
 
-function clearFightCache(reportId, fightId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+function clearFightCache(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
 
   if (!report || !fight) {

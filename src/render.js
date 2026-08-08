@@ -25,7 +25,7 @@ import { getFightEventKey } from './fight-events.js';
 export function renderZoneReports({
   activeFightEventKey,
   elements,
-  expandedZoneReportIds,
+  expandedZoneReportCodes,
   fightEventDetails,
   reportPhaseFilters,
   onClearFightCache,
@@ -47,11 +47,11 @@ export function renderZoneReports({
   }
 
   zoneReportList.innerHTML = zoneReports.map((report) => {
-    const isExpanded = expandedZoneReportIds.has(report.id);
+    const isExpanded = expandedZoneReportCodes.has(report.reportCode);
     const fights = report.pulls
       .filter((fight) => isTargetZoneFight(fight, report))
       .sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
-    const selectedPhase = reportPhaseFilters.get(report.id) ?? 'all';
+    const selectedPhase = reportPhaseFilters.get(report.reportCode) ?? 'all';
     const visibleFights = selectedPhase === 'all'
       ? fights
       : fights.filter((fight) => String(fight.lastPhase) === selectedPhase);
@@ -59,7 +59,7 @@ export function renderZoneReports({
     return `
       <article class="zone-report-card ${isExpanded ? 'expanded' : ''}">
         <div class="zone-report-summary">
-          <button class="icon-toggle-button report-toggle-button" data-zone-report-id="${escapeHtml(report.id)}" type="button" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse report' : 'Expand report'}" title="${isExpanded ? 'Collapse report' : 'Expand report'}">
+          <button class="icon-toggle-button report-toggle-button" data-zone-report-code="${escapeHtml(report.reportCode)}" type="button" aria-expanded="${isExpanded}" aria-label="${isExpanded ? 'Collapse report' : 'Expand report'}" title="${isExpanded ? 'Collapse report' : 'Expand report'}">
             <span class="chevron ${isExpanded ? 'up' : 'down'}" aria-hidden="true"></span>
           </button>
           <div class="zone-report-info">
@@ -67,8 +67,8 @@ export function renderZoneReports({
             <p class="meta">${report.reportCode ? `<a class="report-code-link" href="${getFflogsReportUrl(report.reportCode)}" target="_blank" rel="noreferrer">${escapeHtml(report.reportCode)}</a><br>` : ''}${formatDateRange(report.startTime, report.endTime)}</p>
           </div>
           <div class="report-card-actions">
-            <button class="utility-button report-fights-refresh" data-report-id="${escapeHtml(report.id)}" type="button">Check fights</button>
-            <button class="cache-clear-button report-cache-clear" data-report-id="${escapeHtml(report.id)}" type="button">Clear cache</button>
+            <button class="utility-button report-fights-refresh" data-report-code="${escapeHtml(report.reportCode)}" type="button">Check fights</button>
+            <button class="cache-clear-button report-cache-clear" data-report-code="${escapeHtml(report.reportCode)}" type="button">Clear cache</button>
             ${isExpanded ? renderPhaseFilter(report, selectedPhase) : ''}
             <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(fights.length) : 'Fights unloaded'}</span>
           </div>
@@ -87,45 +87,45 @@ export function renderZoneReports({
   zoneReportList.querySelectorAll('.report-cache-clear').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      onClearReportCache(button.dataset.reportId);
+      onClearReportCache(button.dataset.reportCode);
     });
   });
 
   zoneReportList.querySelectorAll('.report-fights-refresh').forEach((button) => {
     button.addEventListener('click', () => {
-      onRefreshReportFights(button.dataset.reportId);
+      onRefreshReportFights(button.dataset.reportCode);
     });
   });
 
   zoneReportList.querySelectorAll('.report-toggle-button').forEach((button) => {
     button.addEventListener('click', () => {
-      onToggleReport(button.dataset.zoneReportId);
+      onToggleReport(button.dataset.zoneReportCode);
     });
   });
 
   zoneReportList.querySelectorAll('.report-phase-select').forEach((select) => {
     select.addEventListener('change', () => {
-      onSelectReportPhase(select.dataset.reportId, select.value);
+      onSelectReportPhase(select.dataset.reportCode, select.value);
     });
   });
 
   zoneReportList.querySelectorAll('.fight-details-toggle').forEach((button) => {
     button.addEventListener('click', () => {
-      onLoadFight(button.dataset.reportId, button.dataset.fightId);
+      onLoadFight(button.dataset.reportCode, button.dataset.fightId);
     });
   });
 
   zoneReportList.querySelectorAll('.fight-cache-clear').forEach((button) => {
     button.addEventListener('click', (event) => {
       event.stopPropagation();
-      onClearFightCache(button.dataset.reportId, button.dataset.fightId);
+      onClearFightCache(button.dataset.reportCode, button.dataset.fightId);
     });
   });
 }
 
 function renderPhaseFilter(report, selectedPhase) {
   return `
-    <select class="report-phase-select" aria-label="Filter fights by phase" data-report-id="${escapeHtml(report.id)}">
+    <select class="report-phase-select" aria-label="Filter fights by phase" data-report-code="${escapeHtml(report.reportCode)}">
       <option value="all"${selectedPhase === 'all' ? ' selected' : ''}>All phases</option>
       ${[1, 2, 3, 4, 5].map((phase) => `<option value="${phase}"${selectedPhase === String(phase) ? ' selected' : ''}>Phase ${phase}</option>`).join('')}
     </select>
@@ -164,19 +164,19 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const showP2DPS = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 330000); // 330,000 is 5:30, when the measurement ends
 
         return `
-          <article class="zone-fight-card ${isActive ? 'active' : ''} ${isLowBossRemaining ? 'low-boss-remaining' : ''}" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}">
+          <article class="zone-fight-card ${isActive ? 'active' : ''} ${isLowBossRemaining ? 'low-boss-remaining' : ''}" data-report-code="${escapeHtml(report.reportCode)}" data-fight-id="${escapeHtml(fight.id)}">
             <div class="pull-top">
               <div class="fight-title-row">
                 <span class="phase-tag ${escapeHtml(getFightPhaseTagClass(fight))}" aria-label="${escapeHtml(phase)}">${escapeHtml(formatFightPhaseTag(fight))}</span>
                 <h4>${escapeHtml(`${fight.id} - ${fightName}: ${phase}`)}</h4>
               </div>
               <div class="fight-card-actions">
-                <button class="toggle-button fight-details-toggle" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button" aria-expanded="${isActive}">${isActive ? 'Hide details' : 'Details'}</button>
+                <button class="toggle-button fight-details-toggle" data-report-code="${escapeHtml(report.reportCode)}" data-fight-id="${escapeHtml(fight.id)}" type="button" aria-expanded="${isActive}">${isActive ? 'Hide details' : 'Details'}</button>
                 ${report.reportCode ? `<a class="fflogs-fight-link" href="${escapeHtml(getFflogsFightUrl(report.reportCode, fight.id))}" target="_blank" rel="noreferrer">FFLogs</a>` : ''}
                 ${showArrowsAnalyzer ? `<a class="analyzer-link" href="${escapeHtml(getAnalyzerUrl(report.reportCode, fight.id, "arrows"))}" target="_blank" rel="noreferrer">Arrows analyzer</a>` : ''}
                 ${showP2Analyzer ? `<a class="analyzer-link" href="${escapeHtml(getAnalyzerUrl(report.reportCode, fight.id, "forsaken"))}" target="_blank" rel="noreferrer">P2 analyzer</a>` : ''}
                 ${showP2DPS ? `<a class="analyzer-link" href="${escapeHtml(getDPSUrl(report.reportCode, fight.id, fight.startOffsetMs, 221000, 331000))}" target="_blank" rel="noreferrer">P2 DPS</a>` : ''}
-                <button class="cache-clear-button fight-cache-clear" data-report-id="${escapeHtml(report.id)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
+                <button class="cache-clear-button fight-cache-clear" data-report-code="${escapeHtml(report.reportCode)}" data-fight-id="${escapeHtml(fight.id)}" type="button">Clear cache</button>
               </div>
             </div>
             <div class="pull-meta">

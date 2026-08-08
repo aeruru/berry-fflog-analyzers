@@ -72,7 +72,7 @@ export async function fetchReportFights(session, { endpoint, forceRefresh = fals
     zoneId: report?.zone?.id ?? session.zoneId,
     zoneName: report?.zone?.name ?? session.zoneName,
     fightsLoaded: true,
-  }, session.id);
+  });
 }
 
 export async function fetchCurrentUser({ endpoint, onExpired }) {
