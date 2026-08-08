@@ -35,7 +35,7 @@ export function normalizeReportList(raw) {
     .sort((a, b) => new Date(b.endTime) - new Date(a.endTime));
 }
 
-export function normalizeSession(item, index = 0) {
+export function normalizeSession(item) {
   if (!item || typeof item !== 'object') {
     return null;
   }
@@ -47,10 +47,14 @@ export function normalizeSession(item, index = 0) {
   const zoneName = item.zoneName ?? item.zone?.name ?? item.zone ?? item.report?.zone?.name ?? item.report?.zoneName ?? 'Unknown Zone';
   const zoneId = normalizeId(item.zoneID ?? item.zoneId ?? item.zone?.id ?? item.report?.zoneID ?? item.report?.zoneId ?? item.report?.zone?.id);
   const players = normalizePlayers(item.players ?? item.report?.players ?? item.masterData?.actors ?? item.report?.masterData?.actors);
+  const reportCode = item.reportCode ?? item.code ?? item.report?.code;
+
+  if (!reportCode) {
+    return null;
+  }
 
   return {
-    id: String(item.id ?? item.reportCode ?? item.code ?? item.report?.code ?? `session-${index}`),
-    reportCode: item.reportCode ?? item.code ?? item.report?.code ?? null,
+    reportCode: String(reportCode),
     title: item.title ?? item.report?.title ?? null,
     zoneId,
     zoneName: String(zoneName),

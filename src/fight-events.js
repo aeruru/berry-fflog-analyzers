@@ -56,5 +56,5 @@ export function getEmbeddedFightEventDetails(report, fight) {
 }
 
 export function getFightEventKey(report, fight) {
-  return `${report.id}:${fight.id}`;
+  return `${report.reportCode}:${fight.id}`;
 }
