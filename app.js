@@ -74,10 +74,7 @@ elements.refreshReportsButton.addEventListener('click', () => {
 });
 elements.clearCacheButton.addEventListener('click', () => {
   const cleared = clearCacheEntries();
-  openFightEventKeys = new Set();
-  fightEventDetails = new Map();
-  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'}.`);
-  renderZoneReports();
+  setStatus(`Cleared ${cleared} cached FFLogs ${cleared === 1 ? 'response' : 'responses'}.`);
 });
 
 setZoneReports([]);
