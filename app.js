@@ -35,7 +35,7 @@ const THEME_STORAGE_KEY = 'berry.fflogs.theme';
 let zoneReports = [];
 let expandedZoneReportCodes = new Set();
 let reportPhaseFilters = new Map();
-let activeFightEventKey = null;
+let openFightEventKeys = new Set();
 let fightEventDetails = new Map();
 let currentUserId = null;
 let currentUserName = null;
@@ -74,6 +74,7 @@ elements.refreshReportsButton.addEventListener('click', () => {
 });
 elements.clearCacheButton.addEventListener('click', () => {
   const cleared = clearCacheEntries();
+  openFightEventKeys = new Set();
   fightEventDetails = new Map();
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'}.`);
   renderZoneReports();
@@ -236,12 +237,12 @@ function setCurrentUser(user) {
   updateAuthUi();
 }
 
+// takes an FFLogs query response, extracts relevant reports and fights, optionally keeps any expanded fight and details logs, and then updates the display
 function setZoneReports(nextReports, { preserveFightData = false } = {}) {
   const existingReportsByCode = new Map(
     zoneReports.map((report) => [report.reportCode, report]),
   );
 
-  // normalize and limit the new reports
   zoneReports = normalizeReportList(nextReports)
     .slice(0, TARGET_ZONE_REPORT_LIMIT)
     .map((report) => {
@@ -263,37 +264,37 @@ function setZoneReports(nextReports, { preserveFightData = false } = {}) {
         pulls: existingReport.pulls,
       };
     });
-  // removes the expanded state and the phase filter if a report disappeared from the list (most often through timeout)
+  // removes the report code and phase filter if a report disappeared from the list (timeout or report removal)
   expandedZoneReportCodes = new Set([...expandedZoneReportCodes].filter((code) => zoneReports.some((report) => report.reportCode === code)));
   reportPhaseFilters = new Map([...reportPhaseFilters].filter(([code]) => zoneReports.some((report) => report.reportCode === code)));
 
   if (preserveFightData) {
-    // construct keys for every available fight detail
+    // close detail panels and erase fights if the fight was removed
     const availableFightEventKeys = new Set(
       zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
     );
     fightEventDetails = new Map(
       [...fightEventDetails].filter(([key]) => availableFightEventKeys.has(key)),
     );
-    if (!availableFightEventKeys.has(activeFightEventKey)) {
-      activeFightEventKey = null;
-    }
+    openFightEventKeys = new Set(
+      [...openFightEventKeys].filter((key) => availableFightEventKeys.has(key)),
+    );
   } else {
     // fully clear details when preservation is disabled
-    activeFightEventKey = null;
+    openFightEventKeys = new Set();
     fightEventDetails = new Map();
   }
 
-  // actually put it into effect
+  // update the HTML with the new reports
   renderZoneReports();
 }
 
 function renderZoneReports() {
   renderZoneReportsView({
-    activeFightEventKey,
     elements,
     expandedZoneReportCodes,
     fightEventDetails,
+    openFightEventKeys,
     reportPhaseFilters,
     onClearFightCache: clearFightCache,
     onClearReportCache: clearReportCache,
@@ -379,9 +380,9 @@ async function refreshReportFights(reportCode) {
     .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.reportCode}:`)) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
 
   setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
   await loadReportFights(reportCode, { forceRefresh: true });
@@ -396,13 +397,13 @@ async function loadFightEventDetails(reportCode, fightId) {
   }
 
   const eventKey = getFightEventKey(report, fight);
-  if (activeFightEventKey === eventKey) {
-    activeFightEventKey = null;
+  if (openFightEventKeys.has(eventKey)) {
+    openFightEventKeys.delete(eventKey);
     renderZoneReports();
     return;
   }
 
-  activeFightEventKey = eventKey;
+  openFightEventKeys.add(eventKey);
 
   if (fightEventDetails.has(eventKey)) {
     renderZoneReports();
@@ -449,9 +450,9 @@ function clearReportCache(reportCode) {
     .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.reportCode}:`)) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
 
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for ${report.reportCode ?? report.title ?? 'this report'}.`);
   renderZoneReports();
@@ -476,9 +477,7 @@ function clearFightCache(reportCode, fightId) {
   const eventKey = getFightEventKey(report, fight);
   fightEventDetails.delete(eventKey);
 
-  if (activeFightEventKey === eventKey) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys.delete(eventKey);
 
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for fight ${fight.id}.`);
   renderZoneReports();

@@ -23,10 +23,10 @@ import {
 import { getFightEventKey } from './fight-events.js';
 
 export function renderZoneReports({
-  activeFightEventKey,
   elements,
   expandedZoneReportCodes,
   fightEventDetails,
+  openFightEventKeys,
   reportPhaseFilters,
   onClearFightCache,
   onClearReportCache,
@@ -73,7 +73,7 @@ export function renderZoneReports({
             <span class="pill">${report.fightsLoaded || report.testData ? formatFightCount(fights.length) : 'Fights unloaded'}</span>
           </div>
         </div>
-        ${isExpanded ? renderZoneFightCards(report, visibleFights, { activeFightEventKey, fightEventDetails, selectedPhase }) : ''}
+        ${isExpanded ? renderZoneFightCards(report, visibleFights, { fightEventDetails, openFightEventKeys, selectedPhase }) : ''}
       </article>
     `;
   }).join('');
@@ -132,7 +132,7 @@ function renderPhaseFilter(report, selectedPhase) {
   `;
 }
 
-function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventDetails, selectedPhase }) {
+function renderZoneFightCards(report, fights, { fightEventDetails, openFightEventKeys, selectedPhase }) {
   if (report.fightsLoading) {
     return '<div class="zone-fight-list"><div class="empty-state">Loading fights for this report...</div></div>';
   }
@@ -158,7 +158,7 @@ function renderZoneFightCards(report, fights, { activeFightEventKey, fightEventD
         const fightName = fight.name || report.zoneName || `Fight ${index + 1}`;
         const eventKey = getFightEventKey(report, fight);
         const eventState = fightEventDetails.get(eventKey);
-        const isActive = eventKey === activeFightEventKey;
+        const isActive = openFightEventKeys.has(eventKey);
         const showArrowsAnalyzer = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 150000); // 150,000 is 2:30, about the time when arrows start
         const showP2Analyzer = report.reportCode && !fight.kill && Number(fight.lastPhase) === 2 && !fight.lastPhaseIsIntermission;
         const showP2DPS = report.reportCode && !fight.kill && !fight.lastPhaseIsIntermission && (fight.endOffsetMs - fight.startOffsetMs > 330000); // 330,000 is 5:30, when the measurement ends
