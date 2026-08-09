@@ -33,9 +33,9 @@ import { renderZoneReports as renderZoneReportsView } from './src/render.js';
 const THEME_STORAGE_KEY = 'berry.fflogs.theme';
 
 let zoneReports = [];
-let expandedZoneReportIds = new Set();
+let expandedZoneReportCodes = new Set();
 let reportPhaseFilters = new Map();
-let activeFightEventKey = null;
+let openFightEventKeys = new Set();
 let fightEventDetails = new Map();
 let currentUserId = null;
 let currentUserName = null;
@@ -74,6 +74,7 @@ elements.refreshReportsButton.addEventListener('click', () => {
 });
 elements.clearCacheButton.addEventListener('click', () => {
   const cleared = clearCacheEntries();
+  openFightEventKeys = new Set();
   fightEventDetails = new Map();
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'}.`);
   renderZoneReports();
@@ -122,7 +123,7 @@ async function loadTestData() {
 
     const payload = await response.json();
     const report = payload.report ?? payload?.data?.reportData?.report;
-    const normalized = normalizeSession(report, 'test-data');
+    const normalized = normalizeSession(report);
 
     if (!normalized) {
       throw new Error('sample report was missing report data');
@@ -167,7 +168,7 @@ async function loadMyRecentReports({ forceRefresh = false } = {}) {
       throw new Error('No known-zone reports were found for your account.');
     }
 
-    setZoneReports(targetZoneReports);
+    setZoneReports(targetZoneReports, { preserveFightData: true });
     setCurrentUser(user);
 
     const latest = normalized[0];
@@ -236,21 +237,64 @@ function setCurrentUser(user) {
   updateAuthUi();
 }
 
-function setZoneReports(nextReports) {
-  zoneReports = normalizeReportList(nextReports).slice(0, TARGET_ZONE_REPORT_LIMIT);
-  expandedZoneReportIds = new Set([...expandedZoneReportIds].filter((id) => zoneReports.some((report) => report.id === id)));
-  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([id]) => zoneReports.some((report) => report.id === id)));
-  activeFightEventKey = null;
-  fightEventDetails = new Map();
+// takes an FFLogs query response, extracts relevant reports and fights, optionally keeps any expanded fight and details logs, and then updates the display
+function setZoneReports(nextReports, { preserveFightData = false } = {}) {
+  const existingReportsByCode = new Map(
+    zoneReports.map((report) => [report.reportCode, report]),
+  );
+
+  zoneReports = normalizeReportList(nextReports)
+    .slice(0, TARGET_ZONE_REPORT_LIMIT)
+    .map((report) => {
+      // return the raw report if the fight data shouldn't be preserved or the report's fights aren't loaded
+      if (!preserveFightData) {
+        return report;
+      }
+
+      const existingReport = existingReportsByCode.get(report.reportCode);
+      if (!existingReport?.fightsLoaded) {
+        return report;
+      }
+
+      // return an expanded report if the fight data should be preserved and the report already exists
+      return {
+        ...report,
+        fightsLoaded: true,
+        players: existingReport.players,
+        pulls: existingReport.pulls,
+      };
+    });
+  // removes the report code and phase filter if a report disappeared from the list (timeout or report removal)
+  expandedZoneReportCodes = new Set([...expandedZoneReportCodes].filter((code) => zoneReports.some((report) => report.reportCode === code)));
+  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([code]) => zoneReports.some((report) => report.reportCode === code)));
+
+  if (preserveFightData) {
+    // close detail panels and erase fights if the fight was removed
+    const availableFightEventKeys = new Set(
+      zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
+    );
+    fightEventDetails = new Map(
+      [...fightEventDetails].filter(([key]) => availableFightEventKeys.has(key)),
+    );
+    openFightEventKeys = new Set(
+      [...openFightEventKeys].filter((key) => availableFightEventKeys.has(key)),
+    );
+  } else {
+    // fully clear details when preservation is disabled
+    openFightEventKeys = new Set();
+    fightEventDetails = new Map();
+  }
+
+  // update the HTML with the new reports
   renderZoneReports();
 }
 
 function renderZoneReports() {
   renderZoneReportsView({
-    activeFightEventKey,
     elements,
-    expandedZoneReportIds,
+    expandedZoneReportCodes,
     fightEventDetails,
+    openFightEventKeys,
     reportPhaseFilters,
     onClearFightCache: clearFightCache,
     onClearReportCache: clearReportCache,
@@ -262,43 +306,43 @@ function renderZoneReports() {
   });
 }
 
-function selectReportPhase(reportId, phase) {
+function selectReportPhase(reportCode, phase) {
   if (phase === 'all') {
-    reportPhaseFilters.delete(reportId);
+    reportPhaseFilters.delete(reportCode);
   } else {
-    reportPhaseFilters.set(reportId, phase);
+    reportPhaseFilters.set(reportCode, phase);
   }
 
   renderZoneReports();
 }
 
-async function toggleZoneReport(reportId) {
-  if (expandedZoneReportIds.has(reportId)) {
-    expandedZoneReportIds.delete(reportId);
+async function toggleZoneReport(reportCode) {
+  if (expandedZoneReportCodes.has(reportCode)) {
+    expandedZoneReportCodes.delete(reportCode);
     renderZoneReports();
     return;
   }
 
-  expandedZoneReportIds.add(reportId);
+  expandedZoneReportCodes.add(reportCode);
 
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   if (!report || report.fightsLoading || report.testData) {
     renderZoneReports();
     return;
   }
 
-  await refreshReportFights(reportId);
+  await refreshReportFights(reportCode);
 }
 
-async function loadReportFights(reportId, { forceRefresh = false } = {}) {
-  const reportIndex = zoneReports.findIndex((candidate) => candidate.id === reportId);
+async function loadReportFights(reportCode, { forceRefresh = false } = {}) {
+  const reportIndex = zoneReports.findIndex((candidate) => candidate.reportCode === reportCode);
   const report = zoneReports[reportIndex];
 
   if (!report?.reportCode) {
     return;
   }
 
-  zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+  zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
     ? { ...candidate, fightsLoading: true, hydrationError: null }
     : candidate);
   renderZoneReports();
@@ -309,12 +353,12 @@ async function loadReportFights(reportId, { forceRefresh = false } = {}) {
       forceRefresh,
       onExpired: updateAuthUi,
     });
-    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
       ? { ...hydrated, fightsLoaded: true, fightsLoading: false }
       : candidate);
   } catch (error) {
     console.warn(`Could not hydrate fights for report ${report.reportCode}`, error);
-    zoneReports = zoneReports.map((candidate) => candidate.id === reportId
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
       ? { ...candidate, fightsLoading: false, hydrationError: error.message }
       : candidate);
     setStatus(formatLoadError(`Could not load fights for ${report.reportCode}`, error), true);
@@ -323,29 +367,29 @@ async function loadReportFights(reportId, { forceRefresh = false } = {}) {
   renderZoneReports();
 }
 
-async function refreshReportFights(reportId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+async function refreshReportFights(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
 
   if (!report || report.testData) {
     setStatus('Use live data to check FFLogs for new fights.', true);
     return;
   }
 
-  expandedZoneReportIds.add(reportId);
+  expandedZoneReportCodes.add(reportCode);
   [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.id}:`))
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
 
   setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
-  await loadReportFights(reportId, { forceRefresh: true });
+  await loadReportFights(reportCode, { forceRefresh: true });
 }
 
-async function loadFightEventDetails(reportId, fightId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+async function loadFightEventDetails(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
 
   if (!report || !fight) {
@@ -353,13 +397,13 @@ async function loadFightEventDetails(reportId, fightId) {
   }
 
   const eventKey = getFightEventKey(report, fight);
-  if (activeFightEventKey === eventKey) {
-    activeFightEventKey = null;
+  if (openFightEventKeys.has(eventKey)) {
+    openFightEventKeys.delete(eventKey);
     renderZoneReports();
     return;
   }
 
-  activeFightEventKey = eventKey;
+  openFightEventKeys.add(eventKey);
 
   if (fightEventDetails.has(eventKey)) {
     renderZoneReports();
@@ -390,8 +434,8 @@ async function loadFightEventDetails(reportId, fightId) {
   renderZoneReports();
 }
 
-function clearReportCache(reportId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+function clearReportCache(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
 
   if (!report) {
     return;
@@ -403,19 +447,19 @@ function clearReportCache(reportId) {
   });
 
   [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.id}:`))
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
     .forEach((key) => fightEventDetails.delete(key));
 
-  if (activeFightEventKey?.startsWith(`${report.id}:`)) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
 
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for ${report.reportCode ?? report.title ?? 'this report'}.`);
   renderZoneReports();
 }
 
-function clearFightCache(reportId, fightId) {
-  const report = zoneReports.find((candidate) => candidate.id === reportId);
+function clearFightCache(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
   const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
 
   if (!report || !fight) {
@@ -433,9 +477,7 @@ function clearFightCache(reportId, fightId) {
   const eventKey = getFightEventKey(report, fight);
   fightEventDetails.delete(eventKey);
 
-  if (activeFightEventKey === eventKey) {
-    activeFightEventKey = null;
-  }
+  openFightEventKeys.delete(eventKey);
 
   setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for fight ${fight.id}.`);
   renderZoneReports();
