@@ -36,13 +36,10 @@ export function renderZoneReports({
   onToggleReport,
   zoneReports,
 }) {
-  const { zoneReportCount, zoneReportList, zoneReportTitle } = elements;
-  zoneReportCount.textContent = `${zoneReports.length} ${zoneReports.length === 1 ? 'report' : 'reports'}`;
-  const zoneName = zoneReports.find((report) => report.zoneName)?.zoneName;
-  zoneReportTitle.textContent = `${zoneName || TARGET_ZONE_NAME} reports`;
+  const { zoneReportList } = elements;
 
   if (zoneReports.length === 0) {
-    zoneReportList.innerHTML = `<div class="empty-state">No recent ${TARGET_ZONE_NAME} reports found yet.</div>`;
+    zoneReportList.innerHTML = '';
     return;
   }
 

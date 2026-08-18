@@ -24,7 +24,7 @@
             <p class="user-summary">
               <span id="authState">Not logged in</span>
             </p>
-            <p class="status-line" id="statusLine">Log in with FFLogs to load your latest reports.</p>
+            <p class="status-line" id="statusLine">Log in with FFLogs to analyze a report.</p>
           </div>
           <div class="user-actions">
             <button id="loginButton" type="button">Log in to FFLogs</button>
@@ -34,17 +34,16 @@
           </div>
         </section>
 
-        <section class="panel zone-report-panel">
-          <div class="panel-header">
-            <div>
-              <h2 id="zoneReportTitle">Dancing Mad reports</h2>
-              <p>Matching reports from the last 7 days.</p>
+        <section class="report-lookup" aria-labelledby="reportSearchTitle">
+          <form class="report-search-form" id="reportSearchForm">
+            <label for="reportSearchInput" id="reportSearchTitle">Analyze an FFLogs report</label>
+            <div class="report-search-controls">
+              <input id="reportSearchInput" list="recentReportCodes" type="text" autocomplete="off" placeholder="FFLogs report URL or report code" spellcheck="false">
+              <button id="loadReportButton" type="submit">Load report</button>
             </div>
-            <div class="panel-actions">
-              <button class="ghost-button" id="refreshReportsButton" type="button">Check for new reports</button>
-              <span id="zoneReportCount">0 reports</span>
-            </div>
-          </div>
+            <p>Paste an FFLogs report URL or enter its report code.</p>
+            <datalist id="recentReportCodes"></datalist>
+          </form>
           <div class="zone-report-list" id="zoneReportList"></div>
         </section>
       </section>

@@ -313,21 +313,61 @@ textarea:focus {
   color: var(--rose);
 }
 
-.zone-report-panel {
+.report-lookup {
   margin-bottom: 18px;
-  overflow: hidden;
 }
 
-.zone-report-panel .panel-header p {
+.report-search-form {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.report-search-form label {
+  color: var(--ink);
+  display: block;
+  font-size: 1rem;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+.report-search-form p {
   color: var(--muted);
   font-size: 0.84rem;
-  margin: 5px 0 0;
+  margin: 8px 0 0;
+}
+
+.report-search-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.report-search-controls input {
+  background: var(--panel-strong);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  flex: 1 1 auto;
+  font: inherit;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.report-search-controls input:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.report-search-controls input[aria-invalid="true"] {
+  border-color: var(--rose);
 }
 
 .zone-report-list {
   display: grid;
   gap: 12px;
-  padding: 16px;
+  padding: 16px 0;
 }
 
 .zone-report-card {
@@ -879,6 +919,15 @@ textarea:focus {
   }
 
   .user-actions button {
+    width: 100%;
+  }
+
+  .report-search-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .report-search-controls button {
     width: 100%;
   }
 

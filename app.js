@@ -1,5 +1,7 @@
 import {
   GRAPHQL_ENDPOINT,
+  TARGET_ZONE_ID,
+  TARGET_ZONE_NAME,
   TARGET_ZONE_REPORT_LIMIT,
   TEST_DATA_URL,
 } from './src/config.js';
@@ -29,10 +31,12 @@ import {
   normalizeSession,
 } from './src/normalize.js';
 import { renderZoneReports as renderZoneReportsView } from './src/render.js';
+import { parseFflogsReportCode } from './src/report-search.js';
 
 const THEME_STORAGE_KEY = 'berry.fflogs.theme';
 
 let zoneReports = [];
+let recentZoneReports = [];
 let expandedZoneReportCodes = new Set();
 let reportPhaseFilters = new Map();
 let openFightEventKeys = new Set();
@@ -42,10 +46,11 @@ let currentUserName = null;
 
 const elements = {
   statusLine: document.querySelector('#statusLine'),
-  zoneReportTitle: document.querySelector('#zoneReportTitle'),
   zoneReportList: document.querySelector('#zoneReportList'),
-  zoneReportCount: document.querySelector('#zoneReportCount'),
-  refreshReportsButton: document.querySelector('#refreshReportsButton'),
+  reportSearchForm: document.querySelector('#reportSearchForm'),
+  reportSearchInput: document.querySelector('#reportSearchInput'),
+  recentReportCodes: document.querySelector('#recentReportCodes'),
+  loadReportButton: document.querySelector('#loadReportButton'),
   authState: document.querySelector('#authState'),
   userPanelTitle: document.querySelector('#userPanelTitle'),
   loginButton: document.querySelector('#loginButton'),
@@ -62,6 +67,7 @@ elements.logoutButton.addEventListener('click', () => {
   clearStoredUser();
   currentUserId = null;
   currentUserName = null;
+  setRecentZoneReports([]);
   setZoneReports([]);
   updateAuthUi();
   setStatus('Logged out of FFLogs.');
@@ -69,9 +75,7 @@ elements.logoutButton.addEventListener('click', () => {
 
 elements.loadTestDataButton.addEventListener('click', toggleTestData);
 elements.themeToggleButton.addEventListener('click', toggleTheme);
-elements.refreshReportsButton.addEventListener('click', () => {
-  loadMyRecentReports({ forceRefresh: true });
-});
+elements.reportSearchForm.addEventListener('submit', searchForReport);
 elements.clearCacheButton.addEventListener('click', () => {
   const cleared = clearCacheEntries();
   setStatus(`Cleared ${cleared} cached FFLogs ${cleared === 1 ? 'response' : 'responses'}.`);
@@ -83,7 +87,9 @@ handleOAuthCallback({
   setStatus,
 }).finally(async () => {
   updateAuthUi();
-  if (getStoredToken() && !isUsingTestData()) {
+  if (isUsingTestData()) {
+    await loadTestData();
+  } else if (getStoredToken()) {
     await loadMyRecentReports();
   }
 });
@@ -93,6 +99,7 @@ async function toggleTestData() {
     clearStoredUser();
     currentUserId = null;
     currentUserName = null;
+    setRecentZoneReports([]);
     setZoneReports([]);
     updateAuthUi();
 
@@ -101,7 +108,7 @@ async function toggleTestData() {
       return;
     }
 
-    setStatus('Switched back to live data. Log in with FFLogs to load your latest reports.');
+    setStatus('Switched back to live data. Log in with FFLogs to analyze a report.');
     return;
   }
 
@@ -135,7 +142,11 @@ async function loadTestData() {
       testData: true,
     });
     updateAuthUi();
+    setRecentZoneReports([normalized]);
     setZoneReports([normalized]);
+    expandedZoneReportCodes.add(normalized.reportCode);
+    elements.reportSearchInput.value = normalized.reportCode;
+    renderZoneReports();
     setStatus('Loaded test data from the local JSON file.');
   } catch (error) {
     console.warn(error);
@@ -147,12 +158,12 @@ async function loadTestData() {
 
 async function loadMyRecentReports({ forceRefresh = false } = {}) {
   if (!getStoredToken()) {
-    setStatus('Log in to FFLogs to load your latest reports.', true);
+    setStatus('Log in to FFLogs to load report-code suggestions.', true);
     return;
   }
 
   setAppLoading(true);
-  setStatus(forceRefresh ? 'Checking FFLogs for new reports...' : 'Looking up your FFLogs account and latest reports...');
+  setStatus(forceRefresh ? 'Refreshing recent report-code suggestions...' : 'Looking up your FFLogs account and recent report codes...');
 
   try {
     const { normalized, targetZoneReports, user } = await fetchMyRecentSessions({
@@ -165,15 +176,13 @@ async function loadMyRecentReports({ forceRefresh = false } = {}) {
       throw new Error('No known-zone reports were found for your account.');
     }
 
-    setZoneReports(targetZoneReports, { preserveFightData: true });
+    setRecentZoneReports(targetZoneReports);
     setCurrentUser(user);
 
-    const latest = normalized[0];
-    const latestText = latest.reportCode ? ` Latest report: ${latest.reportCode}.` : '';
-    setStatus(`Loaded ${normalized.length} Dancing Mad reports from the last 7 days${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
+    setStatus(`Loaded ${normalized.length} recent report code ${normalized.length === 1 ? 'suggestion' : 'suggestions'}${currentUserName ? ` for ${currentUserName}` : ''}.`);
   } catch (error) {
     console.warn(error);
-    setStatus(formatLoadError('Could not load your latest reports', error), true);
+    setStatus(formatLoadError('Could not load recent report-code suggestions', error), true);
   } finally {
     setAppLoading(false);
   }
@@ -214,9 +223,71 @@ function updateAuthUi() {
   elements.authState.textContent = isTestData ? 'Using test data' : isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
   elements.loginButton.classList.toggle('hidden', Boolean(token));
   elements.logoutButton.classList.toggle('hidden', !token);
-  elements.refreshReportsButton.disabled = !isLoggedIn || isTestData;
+  elements.reportSearchInput.disabled = !isLoggedIn && !isTestData;
+  elements.loadReportButton.disabled = !isLoggedIn && !isTestData;
   if (!elements.loadTestDataButton.disabled) {
     elements.loadTestDataButton.textContent = isTestData ? 'Use live data' : 'Use test data';
+  }
+}
+
+function setRecentZoneReports(reports) {
+  recentZoneReports = normalizeReportList(reports).slice(0, TARGET_ZONE_REPORT_LIMIT);
+  elements.recentReportCodes.replaceChildren(
+    ...recentZoneReports.map((report) => {
+      const option = document.createElement('option');
+      option.value = report.reportCode;
+      return option;
+    }),
+  );
+}
+
+async function searchForReport(event) {
+  event.preventDefault();
+  const reportCode = parseFflogsReportCode(elements.reportSearchInput.value);
+
+  if (!reportCode) {
+    elements.reportSearchInput.setAttribute('aria-invalid', 'true');
+    setStatus('Enter a report code or a valid https://www.fflogs.com/reports/ URL.', true);
+    return;
+  }
+
+  elements.reportSearchInput.removeAttribute('aria-invalid');
+  const knownReport = recentZoneReports.find((report) => report.reportCode === reportCode);
+
+  if (isUsingTestData()) {
+    if (!knownReport) {
+      setStatus(`Test data does not include report ${reportCode}.`, true);
+      return;
+    }
+
+    setZoneReports([knownReport]);
+    expandedZoneReportCodes.add(reportCode);
+    renderZoneReports();
+    setStatus(`Loaded test report ${reportCode}.`);
+    return;
+  }
+
+  if (!getStoredToken()) {
+    setStatus('Log in to FFLogs before loading a report.', true);
+    return;
+  }
+
+  const report = knownReport ?? normalizeSession({
+    code: reportCode,
+    title: TARGET_ZONE_NAME,
+    zoneId: TARGET_ZONE_ID,
+    zoneName: TARGET_ZONE_NAME,
+    fightsLoaded: false,
+  });
+
+  setZoneReports([report]);
+  expandedZoneReportCodes.add(reportCode);
+  renderZoneReports();
+  setStatus(`Loading report ${reportCode}...`);
+  await loadReportFights(reportCode);
+
+  if (zoneReports.find((candidate) => candidate.reportCode === reportCode)?.fightsLoaded) {
+    setStatus(`Loaded report ${reportCode}.`);
   }
 }
 
@@ -534,7 +605,8 @@ function looksLikeFflogsThrottling(message) {
 function setAppLoading(isLoading) {
   elements.loginButton.disabled = isLoading;
   elements.logoutButton.disabled = isLoading;
-  elements.refreshReportsButton.disabled = isLoading || !getStoredToken() || isUsingTestData();
+  elements.reportSearchInput.disabled = isLoading || (!getStoredToken() && !isUsingTestData());
+  elements.loadReportButton.disabled = isLoading || (!getStoredToken() && !isUsingTestData());
   elements.loadTestDataButton.disabled = isLoading;
   if (!isLoading) {
     updateAuthUi();
