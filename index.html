@@ -8,46 +8,36 @@
   </head>
   <body>
     <main class="app-shell">
-      <section class="workspace">
+      <div class="workspace">
         <header class="masthead">
-          <div>
-            <p class="eyebrow">Berry FFLogs Companion</p>
-            <h1>FFLogs Analyzer for DMU</h1>
-          </div>
-          <button class="ghost-button theme-toggle-button" id="themeToggleButton" type="button" aria-pressed="false">Dark mode</button>
+          <p class="eyebrow">Berry FFLogs Companion</p>
+          <h1>FFLogs Analyzer for DMU</h1>
         </header>
 
-        <section class="user-panel" aria-labelledby="userPanelTitle">
-          <div>
-            <p class="eyebrow">User data</p>
-            <h2 class="account-title" id="userPanelTitle">FFLogs account</h2>
-            <p class="user-summary">
-              <span id="authState">Not logged in</span>
-            </p>
-            <p class="status-line" id="statusLine">Log in with FFLogs to load your latest reports.</p>
-          </div>
-          <div class="user-actions">
-            <button id="loginButton" type="button">Log in to FFLogs</button>
-            <button class="ghost-button hidden" id="logoutButton" type="button">Log out</button>
-            <button class="ghost-button" id="clearCacheButton" type="button">Clear local cache</button>
-            <button class="ghost-button" id="loadTestDataButton" type="button">Use test data</button>
-          </div>
-        </section>
+        <div class="dashboard-grid">
+          <section class="account-panel" aria-labelledby="accountName">
+            <div class="account-copy">
+              <p class="eyebrow">User data</p>
+              <h2 id="accountName">FFLogs account</h2>
+            </div>
+            <button id="authButton" type="button">Log in to FFLogs</button>
+            <p class="auth-state" id="authState">Not logged in</p>
+            <p class="status-line" id="statusLine" role="status">Log in with FFLogs to get started.</p>
+          </section>
 
-        <section class="panel zone-report-panel">
-          <div class="panel-header">
-            <div>
-              <h2 id="zoneReportTitle">Dancing Mad reports</h2>
-              <p>Matching reports from the last 7 days.</p>
+          <section class="reports-panel" aria-labelledby="reportsTitle">
+            <div class="reports-header">
+              <div>
+                <p class="eyebrow">Last 7 days</p>
+                <h2 id="reportsTitle">Reports</h2>
+              </div>
+              <span class="report-count" id="reportCount">0 reports</span>
             </div>
-            <div class="panel-actions">
-              <button class="ghost-button" id="refreshReportsButton" type="button">Check for new reports</button>
-              <span id="zoneReportCount">0 reports</span>
-            </div>
-          </div>
-          <div class="zone-report-list" id="zoneReportList"></div>
-        </section>
-      </section>
+            <p class="reports-status" id="reportsStatus">Log in to load reports.</p>
+            <div class="reports-list" id="reportsList"></div>
+          </section>
+        </div>
+      </div>
     </main>
 
     <script type="module" src="app.js"></script>

@@ -1,171 +1,94 @@
+import { getFflogsAccessToken } from './auth.js';
 import {
-  CURRENT_USER_QUERY_CANDIDATES,
-  RECENT_REPORTS_QUERY,
-  REPORT_FIGHTS_QUERY,
-  TARGET_REPORT_LOOKBACK_DAYS,
-  TARGET_ZONE_ID,
-  TARGET_ZONE_REPORT_LIMIT,
-  TOKEN_STORAGE_KEY,
+  FFLOGS_GRAPHQL_ENDPOINT,
+  REPORT_LOOKBACK_DAYS,
+  REPORT_PAGE_SIZE,
 } from './config.js';
-import {
-  hashString,
-  makeCacheKey,
-  readCacheEntry,
-  writeCacheEntry,
-} from './cache.js';
-import { getStoredToken, isExpired } from './auth.js';
-import { normalizeReportList, normalizeSession } from './normalize.js';
 
-export async function fetchMyRecentSessions({ endpoint, forceRefresh = false, onExpired }) {
-  const user = await fetchCurrentUser({ endpoint, onExpired });
-  const targetZoneReports = await fetchRecentSessions({
-    endpoint,
-    userId: user.id,
-    limit: TARGET_ZONE_REPORT_LIMIT,
-    zoneId: TARGET_ZONE_ID,
-    ...getLookbackRange(TARGET_REPORT_LOOKBACK_DAYS),
-    forceRefresh,
-    onExpired,
-  });
-  const normalized = targetZoneReports;
-
-  return { normalized, targetZoneReports, user };
-}
-
-export async function fetchRecentSessions({ endpoint, userId, limit = 100, zoneId = null, startTime = null, endTime = null, forceRefresh = false, onExpired }) {
-  const variables = {
-    userId,
-    limit,
-  };
-
-  if (zoneId !== null) {
-    variables.zoneId = zoneId;
-  }
-
-  if (startTime !== null) {
-    variables.startTime = startTime;
-  }
-
-  if (endTime !== null) {
-    variables.endTime = endTime;
-  }
-
-  const reportsResult = await cachedFflogsGraphql('RecentUserReports', endpoint, RECENT_REPORTS_QUERY, variables, { forceRefresh, onExpired });
-  const reports = reportsResult?.data?.reportData?.reports?.data ?? [];
-  return normalizeReportList(reports).map((session) => ({
-    ...session,
-    fightsLoaded: false,
-  }));
-}
-
-export async function fetchReportFights(session, { endpoint, forceRefresh = false, onExpired }) {
-  if (!session.reportCode) {
-    throw new Error('report code unavailable');
-  }
-
-  const fightsResult = await cachedFflogsGraphql('ReportFights', endpoint, REPORT_FIGHTS_QUERY, { code: session.reportCode }, { forceRefresh, onExpired });
-  const report = fightsResult?.data?.reportData?.report;
-  return normalizeSession({
-    ...report,
-    code: session.reportCode,
-    title: report?.title ?? session.title,
-    zoneId: report?.zone?.id ?? session.zoneId,
-    zoneName: report?.zone?.name ?? session.zoneName,
-    fightsLoaded: true,
-  });
-}
-
-export async function fetchCurrentUser({ endpoint, onExpired }) {
-  const errors = [];
-
-  for (const query of CURRENT_USER_QUERY_CANDIDATES) {
-    try {
-      const result = await fflogsGraphql(endpoint, query, {}, { onExpired });
-      const user = result?.data?.userData?.currentUser
-        ?? result?.data?.userData?.user
-        ?? result?.data?.currentUser;
-
-      if (user?.id) {
-        return user;
+const REPORT_LIST_QUERY = `
+  query WeeklyReports(
+    $userId: Int!
+    $startTime: Float!
+    $endTime: Float!
+    $limit: Int!
+    $page: Int!
+  ) {
+    reportData {
+      reports(
+        userID: $userId
+        startTime: $startTime
+        endTime: $endTime
+        limit: $limit
+        page: $page
+      ) {
+        current_page
+        last_page
+        has_more_pages
+        data {
+          code
+          title
+          startTime
+          endTime
+          zone {
+            id
+            name
+          }
+        }
       }
-    } catch (error) {
-      errors.push(error.message);
     }
   }
+`;
 
-  throw new Error(`FFLogs did not expose a current-user field in the attempted GraphQL shapes. Errors: ${errors.join(' | ')}`);
-}
-
-export async function cachedFflogsGraphql(queryName, endpoint, query, variables, { forceRefresh = false, onExpired } = {}) {
-  const cacheKey = makeCacheKey(queryName, {
-    endpoint,
-    queryHash: hashString(query),
-    variables,
-  });
-  const cached = forceRefresh ? null : readCacheEntry(cacheKey);
-
-  if (cached) {
-    try {
-      assertCacheableGraphqlPayload(queryName, cached);
-      return cached;
-    } catch (error) {
-      console.info(`Ignoring invalid cached ${queryName} response.`, error);
-      localStorage.removeItem(cacheKey);
+const REPORT_FIGHTS_QUERY = `
+  query ReportFights($code: String!) {
+    reportData {
+      report(code: $code) {
+        code
+        title
+        startTime
+        endTime
+        zone {
+          id
+          name
+        }
+        fights {
+          id
+          encounterID
+          name
+          startTime
+          endTime
+          kill
+          bossPercentage
+          fightPercentage
+          lastPhase
+          lastPhaseIsIntermission
+        }
+      }
     }
   }
+`;
 
-  const payload = await fflogsGraphql(endpoint, query, variables, { onExpired });
-  assertCacheableGraphqlPayload(queryName, payload);
-  writeCacheEntry(cacheKey, payload);
-  return payload;
-}
-
-async function fflogsGraphql(endpoint, query, variables, { onExpired } = {}) {
-  const payload = await fflogsGraphqlRaw(endpoint, query, variables, { onExpired });
-
-  if (payload.errors?.length) {
-    throw new Error(payload.errors.map((error) => error.message).join('; '));
+export async function queryFflogs(query, variables = {}, { signal } = {}) {
+  const accessToken = getFflogsAccessToken();
+  if (!accessToken) {
+    throw new Error('Not logged in to FFLogs.');
   }
 
-  return payload;
-}
-
-async function fflogsGraphqlRaw(endpoint, query, variables, { onExpired } = {}) {
-  const token = getStoredToken();
-
-  if (!token) {
-    throw new Error('not logged in to FFLogs');
-  }
-
-  const headers = {
-    authorization: `Bearer ${token.access_token}`,
-    'content-type': 'application/json',
-  };
-
-  if (isExpired(token)) {
-    localStorage.removeItem(TOKEN_STORAGE_KEY);
-    onExpired?.();
-    throw new Error('FFLogs login expired. Log in again.');
-  }
-
-  const response = await fetch(endpoint, {
+  const response = await fetch(FFLOGS_GRAPHQL_ENDPOINT, {
     method: 'POST',
-    headers,
+    headers: {
+      authorization: `Bearer ${accessToken}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify({ query, variables }),
+    signal,
   });
 
   if (!response.ok) {
-    throw new Error(`GraphQL endpoint returned ${response.status}`);
+    throw new Error(`FFLogs GraphQL endpoint returned ${response.status}.`);
   }
 
-  return response.json();
-}
-
-function assertCacheableGraphqlPayload(queryName, payload) {
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('FFLogs returned an empty GraphQL payload.');
-  }
-
+  const payload = await response.json();
   if (payload.errors?.length) {
     throw new Error(payload.errors.map((error) => error.message).join('; '));
   }
@@ -174,38 +97,70 @@ function assertCacheableGraphqlPayload(queryName, payload) {
     throw new Error('FFLogs returned no GraphQL data.');
   }
 
-  if (queryName === 'RecentUserReports') {
-    const reports = payload.data?.reportData?.reports?.data;
-    if (!Array.isArray(reports)) {
-      throw new Error('FFLogs did not return a report list.');
-    }
-    return;
-  }
-
-  if (queryName === 'ReportFights') {
-    const report = payload.data?.reportData?.report;
-    if (!report || !Array.isArray(report.fights)) {
-      throw new Error('FFLogs did not return fight data for this report.');
-    }
-    return;
-  }
-
-  if (queryName === 'FightEvents') {
-    const report = payload.data?.reportData?.report;
-    const events = report?.events?.data;
-    if (!report || !Array.isArray(events)) {
-      throw new Error('FFLogs did not return event data for this fight.');
-    }
-  }
+  return payload.data;
 }
 
-function getLookbackRange(days) {
-  const endTime = getCurrentHourBucket();
-  const startTime = endTime - (days * 24 * 60 * 60 * 1000);
-  return { startTime, endTime };
+export function fetchCurrentFflogsUser(options) {
+  return queryFflogs(`
+    query CurrentUser {
+      userData {
+        currentUser {
+          id
+          name
+        }
+      }
+    }
+  `, {}, options).then((data) => data.userData.currentUser);
 }
 
-function getCurrentHourBucket() {
-  const hourMs = 60 * 60 * 1000;
-  return Math.floor(Date.now() / hourMs) * hourMs;
+export async function fetchWeeklyReports(userId, options) {
+  const endTime = Date.now();
+  const startTime = endTime - (REPORT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const reports = [];
+  let page = 1;
+
+  while (true) {
+    const data = await queryFflogs(REPORT_LIST_QUERY, {
+      userId: Number(userId),
+      startTime,
+      endTime,
+      limit: REPORT_PAGE_SIZE,
+      page,
+    }, options);
+    const result = data.reportData.reports;
+    reports.push(...(result.data ?? []));
+
+    if (!result.has_more_pages && page >= (result.last_page ?? page)) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  const hydratedReports = await mapWithConcurrency(reports, 4, async (report) => {
+    const data = await queryFflogs(REPORT_FIGHTS_QUERY, { code: report.code }, options);
+    return data.reportData.report;
+  });
+
+  return hydratedReports
+    .filter((report) => report?.fights?.length > 0)
+    .sort((first, second) => second.startTime - first.startTime);
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
+  );
+  return results;
 }
