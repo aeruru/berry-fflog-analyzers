@@ -98,7 +98,8 @@ h2 {
 }
 
 .account-panel,
-.reports-panel {
+.reports-panel,
+.report-lookup-panel {
   align-items: flex-start;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -113,6 +114,294 @@ h2 {
 .reports-panel {
   display: block;
   min-width: 0;
+}
+
+.report-lookup-panel {
+  display: block;
+}
+
+.report-search-form > label {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 800;
+  margin-bottom: 10px;
+}
+
+.report-search-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.report-search-controls input {
+  background: rgba(17, 24, 39, 0.62);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 11px;
+  width: 100%;
+}
+
+.report-search-controls input:focus {
+  border-color: var(--accent);
+  outline: 2px solid rgba(79, 143, 214, 0.24);
+  outline-offset: 1px;
+}
+
+.report-search-controls input[aria-invalid="true"] {
+  border-color: #f08ca0;
+}
+
+.report-search-controls input::placeholder,
+.report-search-form > p,
+.lookup-status {
+  color: var(--muted);
+}
+
+.report-search-controls button {
+  min-height: 40px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+
+.report-search-form > p,
+.lookup-status {
+  font-size: 0.84rem;
+  margin: 8px 0 0;
+}
+
+.lookup-status.error {
+  color: #f08ca0;
+}
+
+.lookup-result {
+  container-name: reports-list;
+  container-type: inline-size;
+  margin-top: 14px;
+}
+
+.lookup-result:empty {
+  margin-top: 0;
+}
+
+.detailed-report-card {
+  background: rgba(17, 24, 39, 0.62);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 8px 22px rgba(79, 143, 214, 0.16);
+  overflow: hidden;
+}
+
+.detailed-report-summary {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.detailed-report-info {
+  min-width: 0;
+}
+
+.detailed-report-info h3,
+.detailed-fight-title h4 {
+  font-size: 0.98rem;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.report-code-link {
+  color: var(--link);
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.detailed-report-dates {
+  color: var(--muted);
+  font-size: 0.78rem;
+  margin: 4px 0 0;
+}
+
+.detailed-report-actions,
+.detailed-fight-links {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.report-phase-select {
+  background: rgba(17, 24, 39, 0.8);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+  height: 32px;
+  padding: 0 6px;
+  width: 94px;
+}
+
+.fight-count-pill {
+  background: rgba(96, 165, 250, 0.14);
+  border: 1px solid rgba(96, 165, 250, 0.34);
+  border-radius: 999px;
+  color: var(--link);
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+
+.detailed-fight-list {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.detailed-fight-card {
+  background: rgba(17, 24, 39, 0.78);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.detailed-fight-card.low-boss-remaining {
+  border-color: rgba(16, 185, 129, 0.65);
+  box-shadow: inset 4px 0 0 rgba(16, 185, 129, 0.72);
+}
+
+.detailed-fight-top {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.detailed-fight-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detailed-phase-tag {
+  border-radius: 5px;
+  color: #fff;
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 900;
+  padding: 5px 7px;
+}
+
+.detailed-fight-links a {
+  color: var(--link);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.fight-details-button {
+  box-shadow: 0 3px 10px rgba(79, 143, 214, 0.22);
+  font-size: 0.78rem;
+  min-height: 34px;
+  padding: 0 13px;
+  white-space: nowrap;
+}
+
+.detailed-fight-meta {
+  align-items: center;
+  color: var(--muted);
+  display: grid;
+  font-size: 0.76rem;
+  gap: 12px;
+  grid-template-columns: max-content max-content 1fr;
+  margin-top: 10px;
+}
+
+.detailed-fight-meta strong {
+  color: var(--ink);
+  justify-self: end;
+}
+
+.detailed-fight-meta strong.low {
+  color: #34d399;
+}
+
+.boss-health-bar {
+  background: #374151;
+  border-radius: 999px;
+  height: 13px;
+  margin-top: 7px;
+  overflow: hidden;
+}
+
+.boss-health-bar > div {
+  background: linear-gradient(90deg, #ad4960, #a97916);
+  border-radius: inherit;
+  height: 100%;
+  min-width: 4px;
+}
+
+.boss-health-bar.low > div {
+  background: linear-gradient(90deg, var(--accent), #10b981);
+}
+
+.detailed-empty-state {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 0;
+  padding: 12px;
+  text-align: center;
+}
+
+.fight-details-panel {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-top: 14px;
+  overflow-x: auto;
+  padding-top: 12px;
+}
+
+.fight-details-table {
+  border-collapse: collapse;
+  color: var(--ink);
+  font-size: 0.78rem;
+  width: 100%;
+}
+
+.fight-details-table th,
+.fight-details-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 7px 6px;
+  text-align: left;
+}
+
+.fight-details-table th {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.fight-details-table .fight-event-icon {
+  font-size: 1.1rem;
+  text-align: center;
+  width: 64px;
+}
+
+.damage-down-icon {
+  display: inline-block;
+  height: 22px;
+  image-rendering: pixelated;
+  object-fit: contain;
+  vertical-align: middle;
+  width: auto;
 }
 
 .account-panel {
@@ -171,6 +460,27 @@ h2 {
   justify-content: space-between;
 }
 
+.reports-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.test-data-button {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 0.76rem;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.test-data-button:hover {
+  background: rgba(96, 165, 250, 0.1);
+}
+
 .report-count {
   background: rgba(96, 165, 250, 0.14);
   border: 1px solid rgba(96, 165, 250, 0.34);
@@ -193,6 +503,8 @@ h2 {
 }
 
 .reports-list {
+  container-name: reports-list;
+  container-type: inline-size;
   display: grid;
   gap: 9px;
   margin-top: 14px;
@@ -209,22 +521,34 @@ h2 {
 }
 
 .report-card {
+  align-items: center;
   background: rgba(17, 24, 39, 0.62);
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 12px;
+  column-gap: 14px;
+  display: grid;
+  grid-template-areas: "load identity pulls best date";
+  grid-template-columns: 22px max-content max-content max-content 1fr;
+  padding: 9px 14px;
 }
 
-.report-card-heading {
-  align-items: baseline;
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
+.report-load-button {
+  align-items: center;
+  align-self: center;
+  display: inline-flex;
+  font-size: 0.82rem;
+  grid-area: load;
+  height: 28px;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0;
+  width: 22px;
 }
 
 .report-identity {
   display: grid;
   gap: 3px;
+  grid-area: identity;
   min-width: 0;
 }
 
@@ -246,34 +570,168 @@ h2 {
   font-weight: 800;
 }
 
-.report-card-heading time {
+.report-date {
   color: var(--muted);
-  flex: 0 0 auto;
   font-size: 0.76rem;
+  grid-area: date;
+  justify-self: end;
+  white-space: nowrap;
 }
 
-.report-metrics {
+.report-metric {
   display: grid;
-  gap: 10px;
-  grid-template-columns: 0.7fr 1.3fr;
-  margin: 12px 0 0;
-}
-
-.report-metrics div {
+  gap: 2px;
   min-width: 0;
 }
 
-.report-metrics dt {
+.report-pull-count {
+  grid-area: pulls;
+}
+
+.report-best-pull {
+  grid-area: best;
+}
+
+.report-metric span {
   color: var(--muted);
   font-size: 0.7rem;
   font-weight: 700;
-  margin-bottom: 2px;
+  white-space: nowrap;
 }
 
-.report-metrics dd {
+.report-metric strong {
   font-size: 0.84rem;
   font-weight: 800;
-  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.report-metric .best-pull-badge {
+  align-items: center;
+  border-radius: 999px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 0.76rem;
+  gap: 5px;
+  justify-self: start;
+  line-height: 1;
+  padding: 3px 8px 3px 4px;
+}
+
+.report-metric .best-pull-icon {
+  align-items: center;
+  background: #fff;
+  border-radius: 50%;
+  color: #000;
+  display: inline-flex;
+  font-size: 0.68rem;
+  height: 16px;
+  justify-content: center;
+  position: relative;
+  width: 16px;
+}
+
+.report-metric .best-pull-text {
+  color: #fff;
+}
+
+.failure-icon::before,
+.failure-icon::after,
+.no-pull-icon::before {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 1.5px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  width: 8px;
+}
+
+.failure-icon::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.failure-icon::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
+}
+
+.no-pull-icon::before {
+  transform: translate(-50%, -50%);
+}
+
+.clear-icon::before {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 1.5px;
+  left: 3.5px;
+  position: absolute;
+  top: 7.5px;
+  transform: translate(5%, 10%) rotate(50deg);
+  transform-origin: left center;
+  width: 5px;
+}
+
+.clear-icon::after {
+  background: currentColor;
+  border-radius: 999px;
+  content: "";
+  height: 1.5px;
+  left: 6.8px;
+  position: absolute;
+  top: 11px;
+  transform: translate(5%, 10%) rotate(-60deg);
+  transform-origin: left center;
+  width: 8px;
+}
+
+.phase-1 {
+  background: var(--accent);
+}
+
+.phase-2 {
+  background: #9f5b13;
+}
+
+.phase-3 {
+  background: #7f3f98;
+}
+
+.phase-4 {
+  background: #345f9f;
+}
+
+.phase-5 {
+  background: #9a3455;
+}
+
+.phase-6 {
+  background: #5d6b1f;
+}
+
+.phase-intermission {
+  background: #5b6575;
+}
+
+.phase-clear {
+  background: #246a3b;
+}
+
+.phase-unknown {
+  background: #6f6a60;
+}
+
+@container reports-list (max-width: 500px) {
+  .report-card {
+    align-items: end;
+    grid-template-areas:
+      "load identity identity date"
+      "load pulls best best";
+    grid-template-columns: 22px max-content minmax(0, 1fr) auto;
+    row-gap: 8px;
+  }
 }
 
 @media (max-width: 440px) {
@@ -281,9 +739,22 @@ h2 {
     padding: 18px;
   }
 
-  .report-metrics {
-    grid-template-columns: 1fr 1fr;
+  .report-search-controls {
+    align-items: stretch;
+    flex-direction: column;
   }
+
+  .detailed-report-summary,
+  .detailed-fight-top {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .detailed-report-actions,
+  .detailed-fight-links {
+    justify-content: flex-start;
+  }
+
 }
 
 @media (max-width: 300px) {

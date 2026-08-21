@@ -62,6 +62,32 @@ const REPORT_FIGHTS_QUERY = `
           fightPercentage
           lastPhase
           lastPhaseIsIntermission
+          friendlyPlayers
+        }
+      }
+    }
+  }
+`;
+
+const FIGHT_EVENT_FILTER = 'type = "death" OR (type = "applydebuff" AND ability.id = 1002911)';
+const FIGHT_EVENTS_QUERY = `
+  query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
+    reportData {
+      report(code: $code) {
+        masterData {
+          actors {
+            id
+            name
+            type
+            subType
+          }
+        }
+        fights(fightIDs: $fightIDs) {
+          id
+          friendlyPlayers
+        }
+        events(fightIDs: $fightIDs, filterExpression: $filterExpression, limit: 10000) {
+          data
         }
       }
     }
@@ -111,6 +137,20 @@ export function fetchCurrentFflogsUser(options) {
       }
     }
   `, {}, options).then((data) => data.userData.currentUser);
+}
+
+export async function fetchReportByCode(code, options) {
+  const data = await queryFflogs(REPORT_FIGHTS_QUERY, { code }, options);
+  return data.reportData.report;
+}
+
+export async function fetchFightEventDetails(code, fightId, options) {
+  const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
+    code,
+    fightIDs: [Number(fightId)],
+    filterExpression: FIGHT_EVENT_FILTER,
+  }, options);
+  return data.reportData.report;
 }
 
 export async function fetchWeeklyReports(userId, options) {
