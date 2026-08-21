@@ -1,487 +1,645 @@
 import {
-  GRAPHQL_ENDPOINT,
-  TARGET_ZONE_REPORT_LIMIT,
-  TEST_DATA_URL,
-} from './src/config.js';
-import {
-  clearStoredToken,
-  clearStoredUser,
-  getStoredToken,
-  getStoredUser,
-  handleOAuthCallback,
-  isUsingTestData,
+  clearFflogsSession,
+  completeFflogsLogin,
+  isLoggedInToFflogs,
   startFflogsLogin,
-  storeUser,
 } from './src/auth.js';
-import { clearCacheEntries } from './src/cache.js';
+import { DMU_ENCOUNTER_ID } from './src/config.js';
 import {
-  fetchCurrentUser,
-  fetchMyRecentSessions,
-  fetchReportFights,
-} from './src/fflogs.js';
-import {
+  fetchCurrentFflogsUser,
   fetchFightEventDetails,
-  getEmbeddedFightEventDetails,
-  getFightEventKey,
-} from './src/fight-events.js';
-import {
-  normalizeReportList,
-  normalizeSession,
-} from './src/normalize.js';
-import { renderZoneReports as renderZoneReportsView } from './src/render.js';
-
-const THEME_STORAGE_KEY = 'berry.fflogs.theme';
-
-let zoneReports = [];
-let expandedZoneReportCodes = new Set();
-let reportPhaseFilters = new Map();
-let openFightEventKeys = new Set();
-let fightEventDetails = new Map();
-let currentUserId = null;
-let currentUserName = null;
+  fetchReportByCode,
+  fetchWeeklyReports,
+} from './src/fflogs.js';
+import { parseFflogsReportCode } from './src/report-search.js';
 
 const elements = {
-  statusLine: document.querySelector('#statusLine'),
-  zoneReportTitle: document.querySelector('#zoneReportTitle'),
-  zoneReportList: document.querySelector('#zoneReportList'),
-  zoneReportCount: document.querySelector('#zoneReportCount'),
-  refreshReportsButton: document.querySelector('#refreshReportsButton'),
+  accountName: document.querySelector('#accountName'),
+  authButton: document.querySelector('#authButton'),
   authState: document.querySelector('#authState'),
-  userPanelTitle: document.querySelector('#userPanelTitle'),
-  loginButton: document.querySelector('#loginButton'),
-  logoutButton: document.querySelector('#logoutButton'),
-  clearCacheButton: document.querySelector('#clearCacheButton'),
-  loadTestDataButton: document.querySelector('#loadTestDataButton'),
-  themeToggleButton: document.querySelector('#themeToggleButton'),
+  loadReportButton: document.querySelector('#loadReportButton'),
+  lookupResult: document.querySelector('#lookupResult'),
+  lookupStatus: document.querySelector('#lookupStatus'),
+  recentReportCodes: document.querySelector('#recentReportCodes'),
+  reportCount: document.querySelector('#reportCount'),
+  reportSearchForm: document.querySelector('#reportSearchForm'),
+  reportSearchInput: document.querySelector('#reportSearchInput'),
+  reportsList: document.querySelector('#reportsList'),
+  reportsStatus: document.querySelector('#reportsStatus'),
+  statusLine: document.querySelector('#statusLine'),
+  testDataButton: document.querySelector('#testDataButton'),
 };
 
-applyStoredTheme();
-elements.loginButton.addEventListener('click', startFflogsLogin);
-elements.logoutButton.addEventListener('click', () => {
-  clearStoredToken();
-  clearStoredUser();
-  currentUserId = null;
-  currentUserName = null;
-  setZoneReports([]);
-  updateAuthUi();
-  setStatus('Logged out of FFLogs.');
-});
+let currentUser = null;
+let fightDetails = new Map();
+let openFightDetailKeys = new Set();
+let reports = [];
+let selectedReport = null;
+let selectedReportPhase = 'all';
+let usingTestData = false;
 
-elements.loadTestDataButton.addEventListener('click', toggleTestData);
-elements.themeToggleButton.addEventListener('click', toggleTheme);
-elements.refreshReportsButton.addEventListener('click', () => {
-  loadMyRecentReports({ forceRefresh: true });
-});
-elements.clearCacheButton.addEventListener('click', () => {
-  const cleared = clearCacheEntries();
-  setStatus(`Cleared ${cleared} cached FFLogs ${cleared === 1 ? 'response' : 'responses'}.`);
-});
+elements.authButton.addEventListener('click', async () => {
+  if (isLoggedInToFflogs()) {
+    clearFflogsSession();
+    currentUser = null;
+    if (!usingTestData) {
+      reports = [];
+    }
+    renderAccount();
+    renderReports();
+    setStatus('Logged out of FFLogs.');
+    setReportsStatus(usingTestData ? 'Using local test report data.' : 'Log in to load reports.');
+    return;
+  }
 
-setZoneReports([]);
-handleOAuthCallback({
-  refreshCurrentUserProfile,
-  setStatus,
-}).finally(async () => {
-  updateAuthUi();
-  if (getStoredToken() && !isUsingTestData()) {
-    await loadMyRecentReports();
+  setBusy(true);
+  setStatus('Opening FFLogs login...');
+
+  try {
+    await startFflogsLogin();
+  } catch (error) {
+    setBusy(false);
+    setStatus(error.message, true);
   }
 });
 
-async function toggleTestData() {
-  if (isUsingTestData()) {
-    clearStoredUser();
-    currentUserId = null;
-    currentUserName = null;
-    setZoneReports([]);
-    updateAuthUi();
+elements.testDataButton.addEventListener('click', toggleTestData);
+elements.reportSearchForm.addEventListener('submit', searchForReport);
 
-    if (getStoredToken()) {
-      await loadMyRecentReports();
+initialize();
+
+async function initialize() {
+  setBusy(true);
+
+  try {
+    const token = await completeFflogsLogin();
+    if (token) {
+      setStatus('FFLogs login complete. Loading your account...');
+    }
+
+    if (isLoggedInToFflogs()) {
+      currentUser = await fetchCurrentFflogsUser();
+      setStatus('Loading your reports...');
+      setReportsStatus('Loading every nonempty report from the last week...');
+      reports = await fetchWeeklyReports(currentUser.id);
+      setStatus('Ready to query FFLogs.');
+      setReportsStatus(reports.length > 0 ? '' : 'No nonempty reports found in the last week.');
+    }
+  } catch (error) {
+    setStatus(error.message, true);
+    setReportsStatus('Reports could not be loaded.', true);
+  } finally {
+    setBusy(false);
+    renderAccount();
+    renderReports();
+  }
+}
+
+function renderReports() {
+  elements.reportCount.textContent = `${reports.length} ${reports.length === 1 ? 'report' : 'reports'}`;
+  elements.reportsList.replaceChildren(...reports.map(createReportCard));
+  elements.testDataButton.textContent = usingTestData ? 'Use live data' : 'Use test data';
+  elements.recentReportCodes.replaceChildren(...reports.map((report) => {
+    const option = document.createElement('option');
+    option.value = report.code;
+    return option;
+  }));
+}
+
+async function toggleTestData() {
+  elements.testDataButton.disabled = true;
+
+  try {
+    if (!usingTestData) {
+      setReportsStatus('Loading local test report data...');
+      const response = await fetch('./test-data/reports.json');
+      if (!response.ok) {
+        throw new Error(`Test report data returned ${response.status}.`);
+      }
+
+      const payload = await response.json();
+      reports = payload.reports
+        .filter((report) => report?.fights?.length > 0)
+        .map((report) => ({ ...report, testActors: payload.actors ?? [] }));
+      usingTestData = true;
+      setReportsStatus('Using local test report data.');
       return;
     }
 
-    setStatus('Switched back to live data. Log in with FFLogs to load your latest reports.');
-    return;
-  }
-
-  await loadTestData();
-}
-
-async function loadTestData() {
-  setTestDataLoading(true);
-
-  try {
-    const response = await fetch(TEST_DATA_URL);
-
-    if (!response.ok) {
-      throw new Error(`test data returned ${response.status}`);
+    usingTestData = false;
+    if (!isLoggedInToFflogs() || !currentUser) {
+      reports = [];
+      setReportsStatus('Log in to load reports.');
+      return;
     }
 
-    const payload = await response.json();
-    const report = payload.report ?? payload?.data?.reportData?.report;
-    const normalized = normalizeSession(report);
-
-    if (!normalized) {
-      throw new Error('sample report was missing report data');
-    }
-
-    normalized.testData = true;
-    currentUserId = payload.user?.id ?? 'test-data';
-    currentUserName = 'Test Data';
-    storeUser({
-      id: currentUserId,
-      name: currentUserName,
-      testData: true,
-    });
-    updateAuthUi();
-    setZoneReports([normalized]);
-    setStatus('Loaded test data from the local JSON file.');
+    setReportsStatus('Restoring live reports...');
+    reports = await fetchWeeklyReports(currentUser.id);
+    setReportsStatus(reports.length > 0 ? '' : 'No nonempty reports found in the last week.');
   } catch (error) {
-    console.warn(error);
-    setStatus(`Could not load local test data (${error.message}).`, true);
+    setReportsStatus(error.message, true);
   } finally {
-    setTestDataLoading(false);
+    elements.testDataButton.disabled = false;
+    renderReports();
   }
 }
 
-async function loadMyRecentReports({ forceRefresh = false } = {}) {
-  if (!getStoredToken()) {
-    setStatus('Log in to FFLogs to load your latest reports.', true);
+async function searchForReport(event) {
+  event.preventDefault();
+  const reportCode = parseFflogsReportCode(elements.reportSearchInput.value);
+
+  if (!reportCode) {
+    elements.reportSearchInput.setAttribute('aria-invalid', 'true');
+    setLookupStatus('Enter a report code or a valid https://www.fflogs.com/reports/ URL.', true);
     return;
   }
 
-  setAppLoading(true);
-  setStatus(forceRefresh ? 'Checking FFLogs for new reports...' : 'Looking up your FFLogs account and latest reports...');
+  elements.reportSearchInput.removeAttribute('aria-invalid');
+  const knownReport = reports.find((report) => report.code === reportCode);
+
+  if (knownReport) {
+    loadKnownReport(knownReport);
+    return;
+  }
+
+  if (usingTestData) {
+    setLookupStatus(`Test data does not include report ${reportCode}.`, true);
+    return;
+  }
+
+  if (!isLoggedInToFflogs()) {
+    setLookupStatus('Log in to FFLogs before loading a report.', true);
+    return;
+  }
+
+  elements.loadReportButton.disabled = true;
+  elements.reportSearchInput.disabled = true;
+  setLookupStatus(`Loading report ${reportCode}...`);
 
   try {
-    const { normalized, targetZoneReports, user } = await fetchMyRecentSessions({
-      endpoint: getGraphqlEndpoint(),
-      forceRefresh,
-      onExpired: updateAuthUi,
-    });
+    selectedReport = await fetchReportByCode(reportCode);
+    if (!selectedReport) {
+      throw new Error(`FFLogs could not find report ${reportCode}.`);
+    }
+    selectedReportPhase = 'all';
+    fightDetails = new Map();
+    openFightDetailKeys = new Set();
+    renderLookupResult();
+    setLookupStatus(`Loaded report ${reportCode}.`);
+  } catch (error) {
+    selectedReport = null;
+    renderLookupResult();
+    setLookupStatus(error.message, true);
+  } finally {
+    elements.loadReportButton.disabled = false;
+    elements.reportSearchInput.disabled = false;
+  }
+}
 
-    if (normalized.length === 0) {
-      throw new Error('No known-zone reports were found for your account.');
+function renderLookupResult() {
+  elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
+}
+
+function loadKnownReport(report) {
+  selectedReport = report;
+  selectedReportPhase = 'all';
+  fightDetails = new Map();
+  openFightDetailKeys = new Set();
+  elements.reportSearchInput.value = report.code;
+  elements.reportSearchInput.removeAttribute('aria-invalid');
+  renderLookupResult();
+  setLookupStatus(`Loaded report ${report.code}.`);
+}
+
+function createDetailedReportView(report) {
+  const article = document.createElement('article');
+  article.className = 'detailed-report-card';
+
+  const summary = document.createElement('div');
+  summary.className = 'detailed-report-summary';
+
+  const info = document.createElement('div');
+  info.className = 'detailed-report-info';
+  const title = document.createElement('h3');
+  title.textContent = report.title || report.zone?.name || 'Untitled report';
+  const codeLink = document.createElement('a');
+  codeLink.className = 'report-code-link';
+  codeLink.href = `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}`;
+  codeLink.target = '_blank';
+  codeLink.rel = 'noreferrer';
+  codeLink.textContent = report.code;
+  const dateRange = document.createElement('p');
+  dateRange.className = 'detailed-report-dates';
+  dateRange.textContent = formatReportDateRange(report.startTime, report.endTime);
+  info.append(title, codeLink, dateRange);
+
+  const actions = document.createElement('div');
+  actions.className = 'detailed-report-actions';
+  const phaseFilter = document.createElement('select');
+  phaseFilter.className = 'report-phase-select';
+  phaseFilter.setAttribute('aria-label', 'Filter fights by phase');
+  phaseFilter.append(new Option('All phases', 'all'));
+  for (let phase = 1; phase <= 5; phase += 1) {
+    phaseFilter.append(new Option(`Phase ${phase}`, String(phase)));
+  }
+  phaseFilter.value = selectedReportPhase;
+  phaseFilter.addEventListener('change', () => {
+    selectedReportPhase = phaseFilter.value;
+    renderLookupResult();
+  });
+
+  const fights = report.fights.filter(isDmuPull)
+    .sort((first, second) => Number(second.startTime) - Number(first.startTime));
+  const fightCount = document.createElement('span');
+  fightCount.className = 'fight-count-pill';
+  fightCount.textContent = `${fights.length} ${fights.length === 1 ? 'fight' : 'fights'}`;
+  actions.append(phaseFilter, fightCount);
+  summary.append(info, actions);
+
+  const visibleFights = selectedReportPhase === 'all'
+    ? fights
+    : fights.filter((fight) => String(Number(fight.lastPhase) || 1) === selectedReportPhase);
+  const fightList = document.createElement('div');
+  fightList.className = 'detailed-fight-list';
+  if (visibleFights.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detailed-empty-state';
+    empty.textContent = selectedReportPhase === 'all'
+      ? 'This report does not include DMU fight data.'
+      : `No fights reached Phase ${selectedReportPhase} in this report.`;
+    fightList.append(empty);
+  } else {
+    fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight)));
+  }
+
+  article.append(summary, fightList);
+  return article;
+}
+
+function createDetailedFightCard(report, fight) {
+  const bossRemaining = fight.kill ? 0 : normalizeBossHealth(fight);
+  const bossDamageDone = Math.min(100, Math.max(0, 100 - bossRemaining));
+  const isLowBossRemaining = !fight.kill && bossRemaining < 15;
+  const card = document.createElement('article');
+  card.className = `detailed-fight-card${isLowBossRemaining ? ' low-boss-remaining' : ''}`;
+
+  const top = document.createElement('div');
+  top.className = 'detailed-fight-top';
+  const titleRow = document.createElement('div');
+  titleRow.className = 'detailed-fight-title';
+  const phaseTag = document.createElement('span');
+  phaseTag.className = `detailed-phase-tag ${getPullColorClass(fight)}`;
+  phaseTag.textContent = fight.kill ? 'CLR' : fight.lastPhaseIsIntermission
+    ? `I${Number(fight.lastPhase) || 1}`
+    : `P${Number(fight.lastPhase) || 1}`;
+  const heading = document.createElement('h4');
+  const phaseName = fight.kill ? 'Clear' : fight.lastPhaseIsIntermission
+    ? `Intermission ${Number(fight.lastPhase) || 1}`
+    : `Phase${Number(fight.lastPhase) || 1}`;
+  heading.textContent = `${fight.id} - ${fight.name || 'Dancing Mad'}: ${phaseName}`;
+  titleRow.append(phaseTag, heading);
+
+  const links = document.createElement('div');
+  links.className = 'detailed-fight-links';
+  const detailKey = `${report.code}:${fight.id}`;
+  const detailsButton = document.createElement('button');
+  detailsButton.className = 'fight-details-button';
+  detailsButton.type = 'button';
+  detailsButton.textContent = openFightDetailKeys.has(detailKey) ? 'Hide details' : 'Details';
+  detailsButton.setAttribute('aria-expanded', String(openFightDetailKeys.has(detailKey)));
+  detailsButton.addEventListener('click', () => toggleFightDetails(report, fight));
+  const fflogsLink = document.createElement('a');
+  fflogsLink.href = `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}`;
+  fflogsLink.target = '_blank';
+  fflogsLink.rel = 'noreferrer';
+  fflogsLink.textContent = 'FFLogs';
+  links.append(detailsButton, fflogsLink);
+  const durationMs = getFightDuration(fight);
+  if (!fight.kill && !fight.lastPhaseIsIntermission && durationMs > 150_000) {
+    links.append(createExternalLink(
+      'Arrows analyzer',
+      `https://analyzer.wtfdig.info/arrows?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
+    ));
+  }
+  if (!fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) === 2) {
+    links.append(createExternalLink(
+      'P2 analyzer',
+      `https://analyzer.wtfdig.info/forsaken?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
+    ));
+  }
+  if (!fight.kill && !fight.lastPhaseIsIntermission && durationMs > 330_000) {
+    const startOffset = Number(fight.startTime);
+    links.append(createExternalLink(
+      'P2 DPS',
+      `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 221_000}&end=${startOffset + 331_000}`,
+    ));
+  }
+  top.append(titleRow, links);
+
+  const meta = document.createElement('div');
+  meta.className = 'detailed-fight-meta';
+  const start = document.createElement('span');
+  start.textContent = formatFightStartTime(report.startTime, fight.startTime);
+  const duration = document.createElement('span');
+  duration.textContent = formatFightDuration(getFightDuration(fight));
+  const health = document.createElement('strong');
+  health.className = isLowBossRemaining ? 'low' : '';
+  health.textContent = `${bossRemaining.toFixed(1)}% remaining`;
+  meta.append(start, duration, health);
+
+  const bar = document.createElement('div');
+  bar.className = `boss-health-bar${isLowBossRemaining ? ' low' : ''}`;
+  const fill = document.createElement('div');
+  fill.style.width = `${bossDamageDone}%`;
+  bar.append(fill);
+  card.append(top, meta, bar);
+  if (openFightDetailKeys.has(detailKey)) {
+    card.append(createFightDetailsPanel(report, fight, fightDetails.get(detailKey)));
+  }
+  return card;
+}
+
+function createExternalLink(label, href) {
+  const link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.textContent = label;
+  return link;
+}
+
+async function toggleFightDetails(report, fight) {
+  const key = `${report.code}:${fight.id}`;
+  if (openFightDetailKeys.has(key)) {
+    openFightDetailKeys.delete(key);
+    renderLookupResult();
+    return;
+  }
+
+  openFightDetailKeys.add(key);
+  renderLookupResult();
+  if (fightDetails.has(key)) {
+    return;
+  }
+
+  if (usingTestData) {
+    fightDetails.set(key, normalizeEmbeddedFightDetails(report, fight));
+    renderLookupResult();
+    return;
+  }
+
+  fightDetails.set(key, { status: 'loading' });
+  renderLookupResult();
+  try {
+    const rawDetails = await fetchFightEventDetails(report.code, fight.id);
+    fightDetails.set(key, normalizeFightDetails(rawDetails));
+  } catch (error) {
+    fightDetails.set(key, { status: 'error', error: error.message });
+  }
+  renderLookupResult();
+}
+
+function normalizeFightDetails(rawDetails) {
+  const actors = rawDetails?.masterData?.actors ?? [];
+  const actorNames = new Map(actors.map((actor) => [Number(actor.id), actor.name]));
+  const friendlyPlayers = rawDetails?.fights?.[0]?.friendlyPlayers ?? [];
+  const friendlyIds = new Set(friendlyPlayers.map(Number));
+  const events = (rawDetails?.events?.data ?? [])
+    .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
+    .map((event) => ({
+      kind: event.type === 'death' ? 'Death' : 'Damage down',
+      player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
+      timestamp: Number(event.timestamp),
+    }));
+  return { status: 'ready', events };
+}
+
+function normalizeEmbeddedFightDetails(report, fight) {
+  const actorNames = new Map((report.testActors ?? []).map((actor) => [Number(actor.id), actor.name]));
+  const friendlyIds = new Set((fight.friendlyPlayers ?? []).map(Number));
+  const events = (fight.events ?? [])
+    .filter((event) => event.type === 'death' || (event.type === 'applydebuff' && Number(event.abilityGameID) === 1002911))
+    .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
+    .map((event) => ({
+      kind: event.type === 'death' ? 'Death' : 'Damage down',
+      player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
+      timestamp: Number(event.timestamp),
+    }));
+  return { status: 'ready', events };
+}
+
+function createFightDetailsPanel(report, fight, state) {
+  const panel = document.createElement('div');
+  panel.className = 'fight-details-panel';
+  if (!state || state.status === 'loading') {
+    panel.textContent = 'Loading death and damage down events...';
+    return panel;
+  }
+  if (state.status === 'error') {
+    panel.textContent = `Could not load fight events: ${state.error}`;
+    return panel;
+  }
+  if (state.events.length === 0) {
+    panel.textContent = 'No death or damage down events found for this fight.';
+    return panel;
+  }
+
+  const table = document.createElement('table');
+  table.className = 'fight-details-table';
+  const head = table.createTHead().insertRow();
+  for (const label of ['Time', 'Player', 'Event']) {
+    const cell = document.createElement('th');
+    cell.textContent = label;
+    head.append(cell);
+  }
+  const body = table.createTBody();
+  for (const event of state.events) {
+    const row = body.insertRow();
+    const elapsedMs = Math.max(0, event.timestamp - Number(fight.startTime));
+    const absoluteMs = Number(report.startTime) + event.timestamp;
+    const time = new Date(absoluteMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+    row.insertCell().textContent = `${time} (${formatFightDuration(elapsedMs)})`;
+    row.insertCell().textContent = event.player;
+    const eventCell = row.insertCell();
+    eventCell.className = 'fight-event-icon';
+    if (event.kind === 'Death') {
+      const deathIcon = document.createElement('span');
+      deathIcon.setAttribute('aria-label', 'Death');
+      deathIcon.title = 'Death';
+      deathIcon.textContent = '💀';
+      eventCell.append(deathIcon);
+    } else {
+      const damageDownIcon = document.createElement('img');
+      damageDownIcon.className = 'damage-down-icon';
+      damageDownIcon.src = 'assets/damage-down.png';
+      damageDownIcon.alt = 'Damage down';
+      damageDownIcon.title = 'Damage down';
+      eventCell.append(damageDownIcon);
+    }
+  }
+  panel.replaceChildren(table);
+  return panel;
+}
+
+function createReportCard(report) {
+  const dmuPulls = report.fights.filter(isDmuPull);
+  const bestPull = getBestDmuPull(dmuPulls);
+  const article = document.createElement('article');
+  article.className = 'report-card';
+
+  const loadButton = document.createElement('button');
+  loadButton.className = 'report-load-button';
+  loadButton.type = 'button';
+  loadButton.setAttribute('aria-label', `Load report ${report.code}`);
+  loadButton.title = 'Load this report below';
+  loadButton.textContent = '↓';
+  loadButton.addEventListener('click', () => loadKnownReport(report));
+
+  const identity = document.createElement('div');
+  identity.className = 'report-identity';
+
+  const title = document.createElement('strong');
+  title.textContent = report.title || 'Untitled report';
+
+  const codeLink = document.createElement('a');
+  codeLink.href = `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}`;
+  codeLink.target = '_blank';
+  codeLink.rel = 'noreferrer';
+  codeLink.textContent = report.code;
+  identity.append(title, codeLink);
+
+  const date = document.createElement('time');
+  date.className = 'report-date';
+  date.dateTime = new Date(report.startTime).toISOString();
+  date.textContent = formatReportDate(report.startTime);
+
+  const pullCount = createMetric('DMU pulls', String(dmuPulls.length), 'report-pull-count');
+  const best = createMetric('Best DMU pull', createBestPullBadge(bestPull), 'report-best-pull');
+
+  article.append(loadButton, identity, pullCount, best, date);
+  return article;
+}
+
+function createMetric(label, value, className) {
+  const wrapper = document.createElement('div');
+  wrapper.className = `report-metric ${className}`;
+  const labelElement = document.createElement('span');
+  const valueElement = document.createElement('strong');
+  labelElement.textContent = label;
+  if (value instanceof Node) {
+    valueElement.append(value);
+  } else {
+    valueElement.textContent = value;
+  }
+  wrapper.append(labelElement, valueElement);
+  return wrapper;
+}
+
+function isDmuPull(fight) {
+  return Number(fight.encounterID) === DMU_ENCOUNTER_ID;
+}
+
+function getBestDmuPull(pulls) {
+  if (pulls.length === 0) {
+    return null;
+  }
+
+  return [...pulls].sort((first, second) => {
+    if (first.kill !== second.kill) {
+      return first.kill ? -1 : 1;
     }
 
-    setZoneReports(targetZoneReports, { preserveFightData: true });
-    setCurrentUser(user);
+    if (first.kill && second.kill) {
+      return getFightDuration(first) - getFightDuration(second);
+    }
 
-    const latest = normalized[0];
-    const latestText = latest.reportCode ? ` Latest report: ${latest.reportCode}.` : '';
-    setStatus(`Loaded ${normalized.length} Dancing Mad reports from the last 7 days${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
-  } catch (error) {
-    console.warn(error);
-    setStatus(formatLoadError('Could not load your latest reports', error), true);
-  } finally {
-    setAppLoading(false);
-  }
+    const phaseDifference = (Number(second.lastPhase) || 0) - (Number(first.lastPhase) || 0);
+    if (phaseDifference !== 0) {
+      return phaseDifference;
+    }
+
+    const healthDifference = normalizeBossHealth(first) - normalizeBossHealth(second);
+    if (healthDifference !== 0) {
+      return healthDifference;
+    }
+
+    return getFightDuration(second) - getFightDuration(first);
+  })[0];
 }
 
-async function refreshCurrentUserProfile() {
-  try {
-    const user = await fetchCurrentUser({
-      endpoint: getGraphqlEndpoint(),
-      onExpired: updateAuthUi,
-    });
-    setCurrentUser(user);
-  } catch (error) {
-    console.info('Could not load current FFLogs user profile yet.', error);
-  }
+function normalizeBossHealth(fight) {
+  const health = Number(fight.bossPercentage);
+  return Number.isFinite(health) ? (health > 100 ? health / 100 : health) : 100;
 }
 
-function updateAuthUi() {
-  const token = getStoredToken();
-  const storedUser = getStoredUser();
-  const isTestData = isUsingTestData();
-  const isLoggedIn = Boolean(token);
-
-  if (storedUser && (isLoggedIn || isTestData)) {
-    currentUserId = storedUser.id;
-    currentUserName = storedUser.name;
-  } else if (isLoggedIn) {
-    currentUserId = Number.isFinite(Number(currentUserId)) ? currentUserId : null;
-    currentUserName = null;
-    clearStoredUser();
-  } else if (!isLoggedIn) {
-    currentUserId = null;
-    currentUserName = null;
-    clearStoredUser();
-  }
-
-  elements.userPanelTitle.textContent = currentUserName || 'FFLogs account';
-  elements.authState.textContent = isTestData ? 'Using test data' : isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
-  elements.loginButton.classList.toggle('hidden', Boolean(token));
-  elements.logoutButton.classList.toggle('hidden', !token);
-  elements.refreshReportsButton.disabled = !isLoggedIn || isTestData;
-  if (!elements.loadTestDataButton.disabled) {
-    elements.loadTestDataButton.textContent = isTestData ? 'Use live data' : 'Use test data';
-  }
+function getFightDuration(fight) {
+  return Math.max(0, Number(fight.endTime) - Number(fight.startTime));
 }
 
-function setCurrentUser(user) {
-  if (!user?.id && !user?.name) {
-    return;
-  }
+function createBestPullBadge(pull) {
+  const badge = document.createElement('span');
+  badge.className = `best-pull-badge ${getPullColorClass(pull)}`;
 
-  currentUserId = Number.isFinite(Number(user.id)) ? Number(user.id) : user.id;
-  currentUserName = user.name ?? currentUserName;
-  storeUser({
-    id: currentUserId,
-    name: currentUserName,
-  });
-  updateAuthUi();
-}
+  const icon = document.createElement('span');
+  icon.className = `best-pull-icon ${!pull ? 'no-pull-icon' : pull.kill ? 'clear-icon' : 'failure-icon'}`;
+  icon.setAttribute('aria-hidden', 'true');
 
-// takes an FFLogs query response, extracts relevant reports and fights, optionally keeps any expanded fight and details logs, and then updates the display
-function setZoneReports(nextReports, { preserveFightData = false } = {}) {
-  const existingReportsByCode = new Map(
-    zoneReports.map((report) => [report.reportCode, report]),
-  );
-
-  zoneReports = normalizeReportList(nextReports)
-    .slice(0, TARGET_ZONE_REPORT_LIMIT)
-    .map((report) => {
-      // return the raw report if the fight data shouldn't be preserved or the report's fights aren't loaded
-      if (!preserveFightData) {
-        return report;
-      }
-
-      const existingReport = existingReportsByCode.get(report.reportCode);
-      if (!existingReport?.fightsLoaded) {
-        return report;
-      }
-
-      // return an expanded report if the fight data should be preserved and the report already exists
-      return {
-        ...report,
-        fightsLoaded: true,
-        players: existingReport.players,
-        pulls: existingReport.pulls,
-      };
-    });
-  // removes the report code and phase filter if a report disappeared from the list (timeout or report removal)
-  expandedZoneReportCodes = new Set([...expandedZoneReportCodes].filter((code) => zoneReports.some((report) => report.reportCode === code)));
-  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([code]) => zoneReports.some((report) => report.reportCode === code)));
-
-  if (preserveFightData) {
-    // close detail panels and erase fights if the fight was removed
-    const availableFightEventKeys = new Set(
-      zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
-    );
-    fightEventDetails = new Map(
-      [...fightEventDetails].filter(([key]) => availableFightEventKeys.has(key)),
-    );
-    openFightEventKeys = new Set(
-      [...openFightEventKeys].filter((key) => availableFightEventKeys.has(key)),
-    );
+  const text = document.createElement('span');
+  text.className = 'best-pull-text';
+  if (!pull) {
+    text.textContent = 'No DMU pulls';
+  } else if (pull.kill) {
+    text.textContent = formatFightDuration(getFightDuration(pull));
   } else {
-    // fully clear details when preservation is disabled
-    openFightEventKeys = new Set();
-    fightEventDetails = new Map();
+    const phase = Number(pull.lastPhase) || 1;
+    const phaseLabel = pull.lastPhaseIsIntermission ? `I${phase}` : `P${phase}`;
+    text.textContent = `${normalizeBossHealth(pull).toFixed(1)}% ${phaseLabel}`;
   }
 
-  // update the HTML with the new reports
-  renderZoneReports();
+  badge.append(icon, text);
+  return badge;
 }
 
-function renderZoneReports() {
-  renderZoneReportsView({
-    elements,
-    expandedZoneReportCodes,
-    fightEventDetails,
-    openFightEventKeys,
-    reportPhaseFilters,
-    onClearFightCache: clearFightCache,
-    onClearReportCache: clearReportCache,
-    onLoadFight: loadFightEventDetails,
-    onRefreshReportFights: refreshReportFights,
-    onSelectReportPhase: selectReportPhase,
-    onToggleReport: toggleZoneReport,
-    zoneReports,
-  });
+function getPullColorClass(pull) {
+  if (!pull) {
+    return 'phase-unknown';
+  }
+
+  if (pull.kill) {
+    return 'phase-clear';
+  }
+
+  if (pull.lastPhaseIsIntermission) {
+    return 'phase-intermission';
+  }
+
+  const phase = Number(pull.lastPhase);
+  return phase > 0 ? `phase-${((phase - 1) % 6) + 1}` : 'phase-unknown';
 }
 
-function selectReportPhase(reportCode, phase) {
-  if (phase === 'all') {
-    reportPhaseFilters.delete(reportCode);
-  } else {
-    reportPhaseFilters.set(reportCode, phase);
-  }
-
-  renderZoneReports();
+function formatFightDuration(durationMs) {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
-async function toggleZoneReport(reportCode) {
-  if (expandedZoneReportCodes.has(reportCode)) {
-    expandedZoneReportCodes.delete(reportCode);
-    renderZoneReports();
-    return;
-  }
-
-  expandedZoneReportCodes.add(reportCode);
-
-  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
-  if (!report || report.fightsLoading || report.testData) {
-    renderZoneReports();
-    return;
-  }
-
-  await refreshReportFights(reportCode);
+function formatReportDate(timestamp) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date(timestamp));
 }
 
-async function loadReportFights(reportCode, { forceRefresh = false } = {}) {
-  const reportIndex = zoneReports.findIndex((candidate) => candidate.reportCode === reportCode);
-  const report = zoneReports[reportIndex];
-
-  if (!report?.reportCode) {
-    return;
-  }
-
-  zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
-    ? { ...candidate, fightsLoading: true, hydrationError: null }
-    : candidate);
-  renderZoneReports();
-
-  try {
-    const hydrated = await fetchReportFights(report, {
-      endpoint: getGraphqlEndpoint(),
-      forceRefresh,
-      onExpired: updateAuthUi,
-    });
-    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
-      ? { ...hydrated, fightsLoaded: true, fightsLoading: false }
-      : candidate);
-  } catch (error) {
-    console.warn(`Could not hydrate fights for report ${report.reportCode}`, error);
-    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
-      ? { ...candidate, fightsLoading: false, hydrationError: error.message }
-      : candidate);
-    setStatus(formatLoadError(`Could not load fights for ${report.reportCode}`, error), true);
-  }
-
-  renderZoneReports();
+function renderAccount() {
+  const isLoggedIn = isLoggedInToFflogs();
+  elements.accountName.textContent = currentUser?.name || 'FFLogs account';
+  elements.authState.textContent = isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
+  elements.authButton.textContent = isLoggedIn ? 'Log out' : 'Log in to FFLogs';
 }
 
-async function refreshReportFights(reportCode) {
-  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
-
-  if (!report || report.testData) {
-    setStatus('Use live data to check FFLogs for new fights.', true);
-    return;
-  }
-
-  expandedZoneReportCodes.add(reportCode);
-  [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.reportCode}:`))
-    .forEach((key) => fightEventDetails.delete(key));
-
-  openFightEventKeys = new Set(
-    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
-  );
-
-  setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
-  await loadReportFights(reportCode, { forceRefresh: true });
-}
-
-async function loadFightEventDetails(reportCode, fightId) {
-  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
-  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
-
-  if (!report || !fight) {
-    return;
-  }
-
-  const eventKey = getFightEventKey(report, fight);
-  if (openFightEventKeys.has(eventKey)) {
-    openFightEventKeys.delete(eventKey);
-    renderZoneReports();
-    return;
-  }
-
-  openFightEventKeys.add(eventKey);
-
-  if (fightEventDetails.has(eventKey)) {
-    renderZoneReports();
-    return;
-  }
-
-  fightEventDetails.set(eventKey, { status: 'loading', events: [] });
-  renderZoneReports();
-
-  try {
-    const detail = isEmbeddedReport(report)
-      ? getEmbeddedFightEventDetails(report, fight)
-      : await fetchFightEventDetails(report, fight, {
-        endpoint: getGraphqlEndpoint(),
-        onExpired: updateAuthUi,
-      });
-    fightEventDetails.set(eventKey, { status: 'ready', ...detail });
-  } catch (error) {
-    console.warn(error);
-    fightEventDetails.set(eventKey, {
-      status: 'error',
-      error: error.message,
-      events: [],
-    });
-    setStatus(formatLoadError(`Could not load events for fight ${fight.id}`, error), true);
-  }
-
-  renderZoneReports();
-}
-
-function clearReportCache(reportCode) {
-  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
-
-  if (!report) {
-    return;
-  }
-
-  const cleared = clearCacheEntries((entry) => {
-    const variables = entry.inputs?.variables;
-    return variables?.code === report.reportCode;
-  });
-
-  [...fightEventDetails.keys()]
-    .filter((key) => key.startsWith(`${report.reportCode}:`))
-    .forEach((key) => fightEventDetails.delete(key));
-
-  openFightEventKeys = new Set(
-    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
-  );
-
-  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for ${report.reportCode ?? report.title ?? 'this report'}.`);
-  renderZoneReports();
-}
-
-function clearFightCache(reportCode, fightId) {
-  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
-  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
-
-  if (!report || !fight) {
-    return;
-  }
-
-  const fightNumber = Number(fight.id);
-  const cleared = clearCacheEntries((entry) => {
-    const variables = entry.inputs?.variables;
-    return entry.queryName === 'FightEvents'
-      && variables?.code === report.reportCode
-      && Array.isArray(variables.fightIDs)
-      && variables.fightIDs.map(Number).includes(fightNumber);
-  });
-  const eventKey = getFightEventKey(report, fight);
-  fightEventDetails.delete(eventKey);
-
-  openFightEventKeys.delete(eventKey);
-
-  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for fight ${fight.id}.`);
-  renderZoneReports();
-}
-
-function isEmbeddedReport(report) {
-  return report.testData || report.reportCode?.startsWith('TEST') || currentUserName === 'Test Data' || isUsingTestData();
+function setBusy(isBusy) {
+  elements.authButton.disabled = isBusy;
 }
 
 function setStatus(message, isError = false) {
@@ -489,63 +647,38 @@ function setStatus(message, isError = false) {
   elements.statusLine.classList.toggle('error', isError);
 }
 
-function applyStoredTheme() {
-  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark');
+function setReportsStatus(message, isError = false) {
+  elements.reportsStatus.textContent = message;
+  elements.reportsStatus.classList.toggle('error', isError);
+  elements.reportsStatus.hidden = !message;
 }
 
-function toggleTheme() {
-  const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
-  localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
-  applyTheme(nextTheme);
+function formatReportDateRange(startTimestamp, endTimestamp) {
+  const start = new Date(startTimestamp);
+  const end = new Date(endTimestamp);
+  const date = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' });
+  const time = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+  const endLabel = start.toDateString() === end.toDateString()
+    ? time.format(end)
+    : `${date.format(end)}, ${time.format(end)}`;
+  return `${date.format(start)}, ${time.format(start)} - ${endLabel}`;
 }
 
-function applyTheme(theme) {
-  const isDark = theme === 'dark';
-  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
-  elements.themeToggleButton.textContent = isDark ? 'Light mode' : 'Dark mode';
-  elements.themeToggleButton.setAttribute('aria-pressed', String(isDark));
+function formatFightStartTime(reportStartTime, fightStartTime) {
+  const rawStart = Number(fightStartTime);
+  const timestamp = rawStart < 1_700_000_000
+    ? Number(reportStartTime) + rawStart
+    : rawStart;
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(timestamp));
 }
 
-function formatLoadError(prefix, error) {
-  const message = error?.message ?? String(error);
-
-  if (looksLikeFflogsThrottling(message)) {
-    return `${prefix}. FFLogs may be throttling or returning partial data right now; try again in a minute. (${message})`;
-  }
-
-  return `${prefix} (${message}).`;
-}
-
-function looksLikeFflogsThrottling(message) {
-  return [
-    '429',
-    'rate limit',
-    'ratelimit',
-    'throttle',
-    'throttling',
-    'returned no graphql data',
-    'returned an empty graphql payload',
-    'did not return a report list',
-    'did not return fight data',
-    'did not return event data',
-  ].some((pattern) => message.toLowerCase().includes(pattern));
-}
-
-function setAppLoading(isLoading) {
-  elements.loginButton.disabled = isLoading;
-  elements.logoutButton.disabled = isLoading;
-  elements.refreshReportsButton.disabled = isLoading || !getStoredToken() || isUsingTestData();
-  elements.loadTestDataButton.disabled = isLoading;
-  if (!isLoading) {
-    updateAuthUi();
-  }
-}
-
-function setTestDataLoading(isLoading) {
-  elements.loadTestDataButton.disabled = isLoading;
-  elements.loadTestDataButton.textContent = isLoading ? 'Loading...' : isUsingTestData() ? 'Use live data' : 'Use test data';
-}
-
-function getGraphqlEndpoint() {
-  return GRAPHQL_ENDPOINT;
+function setLookupStatus(message, isError = false) {
+  elements.lookupStatus.textContent = message;
+  elements.lookupStatus.classList.toggle('error', isError);
+  elements.lookupStatus.hidden = !message;
 }

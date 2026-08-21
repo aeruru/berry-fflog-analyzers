@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Berry FFLogs Companion</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="workspace">
+        <header class="masthead">
+          <div>
+            <p class="eyebrow">Berry FFLogs Companion</p>
+            <h1>FFLogs Analyzer for DMU</h1>
+          </div>
+          <button class="ghost-button theme-toggle-button" id="themeToggleButton" type="button" aria-pressed="false">Dark mode</button>
+        </header>
+
+        <section class="user-panel" aria-labelledby="userPanelTitle">
+          <div>
+            <p class="eyebrow">User data</p>
+            <h2 class="account-title" id="userPanelTitle">FFLogs account</h2>
+            <p class="user-summary">
+              <span id="authState">Not logged in</span>
+            </p>
+            <p class="status-line" id="statusLine">Log in with FFLogs to load your latest reports.</p>
+          </div>
+          <div class="user-actions">
+            <button id="loginButton" type="button">Log in to FFLogs</button>
+            <button class="ghost-button hidden" id="logoutButton" type="button">Log out</button>
+            <button class="ghost-button" id="clearCacheButton" type="button">Clear local cache</button>
+            <button class="ghost-button" id="loadTestDataButton" type="button">Use test data</button>
+          </div>
+        </section>
+
+        <section class="panel zone-report-panel">
+          <div class="panel-header">
+            <div>
+              <h2 id="zoneReportTitle">Dancing Mad reports</h2>
+              <p>Matching reports from the last 7 days.</p>
+            </div>
+            <div class="panel-actions">
+              <button class="ghost-button" id="refreshReportsButton" type="button">Check for new reports</button>
+              <span id="zoneReportCount">0 reports</span>
+            </div>
+          </div>
+          <div class="zone-report-list" id="zoneReportList"></div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

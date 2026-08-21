@@ -1,0 +1,551 @@
+import {
+  GRAPHQL_ENDPOINT,
+  TARGET_ZONE_REPORT_LIMIT,
+  TEST_DATA_URL,
+} from './src/config.js';
+import {
+  clearStoredToken,
+  clearStoredUser,
+  getStoredToken,
+  getStoredUser,
+  handleOAuthCallback,
+  isUsingTestData,
+  startFflogsLogin,
+  storeUser,
+} from './src/auth.js';
+import { clearCacheEntries } from './src/cache.js';
+import {
+  fetchCurrentUser,
+  fetchMyRecentSessions,
+  fetchReportFights,
+} from './src/fflogs.js';
+import {
+  fetchFightEventDetails,
+  getEmbeddedFightEventDetails,
+  getFightEventKey,
+} from './src/fight-events.js';
+import {
+  normalizeReportList,
+  normalizeSession,
+} from './src/normalize.js';
+import { renderZoneReports as renderZoneReportsView } from './src/render.js';
+
+const THEME_STORAGE_KEY = 'berry.fflogs.theme';
+
+let zoneReports = [];
+let expandedZoneReportCodes = new Set();
+let reportPhaseFilters = new Map();
+let openFightEventKeys = new Set();
+let fightEventDetails = new Map();
+let currentUserId = null;
+let currentUserName = null;
+
+const elements = {
+  statusLine: document.querySelector('#statusLine'),
+  zoneReportTitle: document.querySelector('#zoneReportTitle'),
+  zoneReportList: document.querySelector('#zoneReportList'),
+  zoneReportCount: document.querySelector('#zoneReportCount'),
+  refreshReportsButton: document.querySelector('#refreshReportsButton'),
+  authState: document.querySelector('#authState'),
+  userPanelTitle: document.querySelector('#userPanelTitle'),
+  loginButton: document.querySelector('#loginButton'),
+  logoutButton: document.querySelector('#logoutButton'),
+  clearCacheButton: document.querySelector('#clearCacheButton'),
+  loadTestDataButton: document.querySelector('#loadTestDataButton'),
+  themeToggleButton: document.querySelector('#themeToggleButton'),
+};
+
+applyStoredTheme();
+elements.loginButton.addEventListener('click', startFflogsLogin);
+elements.logoutButton.addEventListener('click', () => {
+  clearStoredToken();
+  clearStoredUser();
+  currentUserId = null;
+  currentUserName = null;
+  setZoneReports([]);
+  updateAuthUi();
+  setStatus('Logged out of FFLogs.');
+});
+
+elements.loadTestDataButton.addEventListener('click', toggleTestData);
+elements.themeToggleButton.addEventListener('click', toggleTheme);
+elements.refreshReportsButton.addEventListener('click', () => {
+  loadMyRecentReports({ forceRefresh: true });
+});
+elements.clearCacheButton.addEventListener('click', () => {
+  const cleared = clearCacheEntries();
+  setStatus(`Cleared ${cleared} cached FFLogs ${cleared === 1 ? 'response' : 'responses'}.`);
+});
+
+setZoneReports([]);
+handleOAuthCallback({
+  refreshCurrentUserProfile,
+  setStatus,
+}).finally(async () => {
+  updateAuthUi();
+  if (getStoredToken() && !isUsingTestData()) {
+    await loadMyRecentReports();
+  }
+});
+
+async function toggleTestData() {
+  if (isUsingTestData()) {
+    clearStoredUser();
+    currentUserId = null;
+    currentUserName = null;
+    setZoneReports([]);
+    updateAuthUi();
+
+    if (getStoredToken()) {
+      await loadMyRecentReports();
+      return;
+    }
+
+    setStatus('Switched back to live data. Log in with FFLogs to load your latest reports.');
+    return;
+  }
+
+  await loadTestData();
+}
+
+async function loadTestData() {
+  setTestDataLoading(true);
+
+  try {
+    const response = await fetch(TEST_DATA_URL);
+
+    if (!response.ok) {
+      throw new Error(`test data returned ${response.status}`);
+    }
+
+    const payload = await response.json();
+    const report = payload.report ?? payload?.data?.reportData?.report;
+    const normalized = normalizeSession(report);
+
+    if (!normalized) {
+      throw new Error('sample report was missing report data');
+    }
+
+    normalized.testData = true;
+    currentUserId = payload.user?.id ?? 'test-data';
+    currentUserName = 'Test Data';
+    storeUser({
+      id: currentUserId,
+      name: currentUserName,
+      testData: true,
+    });
+    updateAuthUi();
+    setZoneReports([normalized]);
+    setStatus('Loaded test data from the local JSON file.');
+  } catch (error) {
+    console.warn(error);
+    setStatus(`Could not load local test data (${error.message}).`, true);
+  } finally {
+    setTestDataLoading(false);
+  }
+}
+
+async function loadMyRecentReports({ forceRefresh = false } = {}) {
+  if (!getStoredToken()) {
+    setStatus('Log in to FFLogs to load your latest reports.', true);
+    return;
+  }
+
+  setAppLoading(true);
+  setStatus(forceRefresh ? 'Checking FFLogs for new reports...' : 'Looking up your FFLogs account and latest reports...');
+
+  try {
+    const { normalized, targetZoneReports, user } = await fetchMyRecentSessions({
+      endpoint: getGraphqlEndpoint(),
+      forceRefresh,
+      onExpired: updateAuthUi,
+    });
+
+    if (normalized.length === 0) {
+      throw new Error('No known-zone reports were found for your account.');
+    }
+
+    setZoneReports(targetZoneReports, { preserveFightData: true });
+    setCurrentUser(user);
+
+    const latest = normalized[0];
+    const latestText = latest.reportCode ? ` Latest report: ${latest.reportCode}.` : '';
+    setStatus(`Loaded ${normalized.length} Dancing Mad reports from the last 7 days${currentUserName ? ` for ${currentUserName}` : ''}.${latestText}`);
+  } catch (error) {
+    console.warn(error);
+    setStatus(formatLoadError('Could not load your latest reports', error), true);
+  } finally {
+    setAppLoading(false);
+  }
+}
+
+async function refreshCurrentUserProfile() {
+  try {
+    const user = await fetchCurrentUser({
+      endpoint: getGraphqlEndpoint(),
+      onExpired: updateAuthUi,
+    });
+    setCurrentUser(user);
+  } catch (error) {
+    console.info('Could not load current FFLogs user profile yet.', error);
+  }
+}
+
+function updateAuthUi() {
+  const token = getStoredToken();
+  const storedUser = getStoredUser();
+  const isTestData = isUsingTestData();
+  const isLoggedIn = Boolean(token);
+
+  if (storedUser && (isLoggedIn || isTestData)) {
+    currentUserId = storedUser.id;
+    currentUserName = storedUser.name;
+  } else if (isLoggedIn) {
+    currentUserId = Number.isFinite(Number(currentUserId)) ? currentUserId : null;
+    currentUserName = null;
+    clearStoredUser();
+  } else if (!isLoggedIn) {
+    currentUserId = null;
+    currentUserName = null;
+    clearStoredUser();
+  }
+
+  elements.userPanelTitle.textContent = currentUserName || 'FFLogs account';
+  elements.authState.textContent = isTestData ? 'Using test data' : isLoggedIn ? 'Logged in to FFLogs' : 'Not logged in';
+  elements.loginButton.classList.toggle('hidden', Boolean(token));
+  elements.logoutButton.classList.toggle('hidden', !token);
+  elements.refreshReportsButton.disabled = !isLoggedIn || isTestData;
+  if (!elements.loadTestDataButton.disabled) {
+    elements.loadTestDataButton.textContent = isTestData ? 'Use live data' : 'Use test data';
+  }
+}
+
+function setCurrentUser(user) {
+  if (!user?.id && !user?.name) {
+    return;
+  }
+
+  currentUserId = Number.isFinite(Number(user.id)) ? Number(user.id) : user.id;
+  currentUserName = user.name ?? currentUserName;
+  storeUser({
+    id: currentUserId,
+    name: currentUserName,
+  });
+  updateAuthUi();
+}
+
+// takes an FFLogs query response, extracts relevant reports and fights, optionally keeps any expanded fight and details logs, and then updates the display
+function setZoneReports(nextReports, { preserveFightData = false } = {}) {
+  const existingReportsByCode = new Map(
+    zoneReports.map((report) => [report.reportCode, report]),
+  );
+
+  zoneReports = normalizeReportList(nextReports)
+    .slice(0, TARGET_ZONE_REPORT_LIMIT)
+    .map((report) => {
+      // return the raw report if the fight data shouldn't be preserved or the report's fights aren't loaded
+      if (!preserveFightData) {
+        return report;
+      }
+
+      const existingReport = existingReportsByCode.get(report.reportCode);
+      if (!existingReport?.fightsLoaded) {
+        return report;
+      }
+
+      // return an expanded report if the fight data should be preserved and the report already exists
+      return {
+        ...report,
+        fightsLoaded: true,
+        players: existingReport.players,
+        pulls: existingReport.pulls,
+      };
+    });
+  // removes the report code and phase filter if a report disappeared from the list (timeout or report removal)
+  expandedZoneReportCodes = new Set([...expandedZoneReportCodes].filter((code) => zoneReports.some((report) => report.reportCode === code)));
+  reportPhaseFilters = new Map([...reportPhaseFilters].filter(([code]) => zoneReports.some((report) => report.reportCode === code)));
+
+  if (preserveFightData) {
+    // close detail panels and erase fights if the fight was removed
+    const availableFightEventKeys = new Set(
+      zoneReports.flatMap((report) => report.pulls.map((fight) => getFightEventKey(report, fight))),
+    );
+    fightEventDetails = new Map(
+      [...fightEventDetails].filter(([key]) => availableFightEventKeys.has(key)),
+    );
+    openFightEventKeys = new Set(
+      [...openFightEventKeys].filter((key) => availableFightEventKeys.has(key)),
+    );
+  } else {
+    // fully clear details when preservation is disabled
+    openFightEventKeys = new Set();
+    fightEventDetails = new Map();
+  }
+
+  // update the HTML with the new reports
+  renderZoneReports();
+}
+
+function renderZoneReports() {
+  renderZoneReportsView({
+    elements,
+    expandedZoneReportCodes,
+    fightEventDetails,
+    openFightEventKeys,
+    reportPhaseFilters,
+    onClearFightCache: clearFightCache,
+    onClearReportCache: clearReportCache,
+    onLoadFight: loadFightEventDetails,
+    onRefreshReportFights: refreshReportFights,
+    onSelectReportPhase: selectReportPhase,
+    onToggleReport: toggleZoneReport,
+    zoneReports,
+  });
+}
+
+function selectReportPhase(reportCode, phase) {
+  if (phase === 'all') {
+    reportPhaseFilters.delete(reportCode);
+  } else {
+    reportPhaseFilters.set(reportCode, phase);
+  }
+
+  renderZoneReports();
+}
+
+async function toggleZoneReport(reportCode) {
+  if (expandedZoneReportCodes.has(reportCode)) {
+    expandedZoneReportCodes.delete(reportCode);
+    renderZoneReports();
+    return;
+  }
+
+  expandedZoneReportCodes.add(reportCode);
+
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
+  if (!report || report.fightsLoading || report.testData) {
+    renderZoneReports();
+    return;
+  }
+
+  await refreshReportFights(reportCode);
+}
+
+async function loadReportFights(reportCode, { forceRefresh = false } = {}) {
+  const reportIndex = zoneReports.findIndex((candidate) => candidate.reportCode === reportCode);
+  const report = zoneReports[reportIndex];
+
+  if (!report?.reportCode) {
+    return;
+  }
+
+  zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
+    ? { ...candidate, fightsLoading: true, hydrationError: null }
+    : candidate);
+  renderZoneReports();
+
+  try {
+    const hydrated = await fetchReportFights(report, {
+      endpoint: getGraphqlEndpoint(),
+      forceRefresh,
+      onExpired: updateAuthUi,
+    });
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
+      ? { ...hydrated, fightsLoaded: true, fightsLoading: false }
+      : candidate);
+  } catch (error) {
+    console.warn(`Could not hydrate fights for report ${report.reportCode}`, error);
+    zoneReports = zoneReports.map((candidate) => candidate.reportCode === reportCode
+      ? { ...candidate, fightsLoading: false, hydrationError: error.message }
+      : candidate);
+    setStatus(formatLoadError(`Could not load fights for ${report.reportCode}`, error), true);
+  }
+
+  renderZoneReports();
+}
+
+async function refreshReportFights(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
+
+  if (!report || report.testData) {
+    setStatus('Use live data to check FFLogs for new fights.', true);
+    return;
+  }
+
+  expandedZoneReportCodes.add(reportCode);
+  [...fightEventDetails.keys()]
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
+    .forEach((key) => fightEventDetails.delete(key));
+
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
+
+  setStatus(`Checking FFLogs for new fights in ${report.reportCode ?? report.title ?? 'this report'}...`);
+  await loadReportFights(reportCode, { forceRefresh: true });
+}
+
+async function loadFightEventDetails(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
+  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
+
+  if (!report || !fight) {
+    return;
+  }
+
+  const eventKey = getFightEventKey(report, fight);
+  if (openFightEventKeys.has(eventKey)) {
+    openFightEventKeys.delete(eventKey);
+    renderZoneReports();
+    return;
+  }
+
+  openFightEventKeys.add(eventKey);
+
+  if (fightEventDetails.has(eventKey)) {
+    renderZoneReports();
+    return;
+  }
+
+  fightEventDetails.set(eventKey, { status: 'loading', events: [] });
+  renderZoneReports();
+
+  try {
+    const detail = isEmbeddedReport(report)
+      ? getEmbeddedFightEventDetails(report, fight)
+      : await fetchFightEventDetails(report, fight, {
+        endpoint: getGraphqlEndpoint(),
+        onExpired: updateAuthUi,
+      });
+    fightEventDetails.set(eventKey, { status: 'ready', ...detail });
+  } catch (error) {
+    console.warn(error);
+    fightEventDetails.set(eventKey, {
+      status: 'error',
+      error: error.message,
+      events: [],
+    });
+    setStatus(formatLoadError(`Could not load events for fight ${fight.id}`, error), true);
+  }
+
+  renderZoneReports();
+}
+
+function clearReportCache(reportCode) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
+
+  if (!report) {
+    return;
+  }
+
+  const cleared = clearCacheEntries((entry) => {
+    const variables = entry.inputs?.variables;
+    return variables?.code === report.reportCode;
+  });
+
+  [...fightEventDetails.keys()]
+    .filter((key) => key.startsWith(`${report.reportCode}:`))
+    .forEach((key) => fightEventDetails.delete(key));
+
+  openFightEventKeys = new Set(
+    [...openFightEventKeys].filter((key) => !key.startsWith(`${report.reportCode}:`)),
+  );
+
+  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for ${report.reportCode ?? report.title ?? 'this report'}.`);
+  renderZoneReports();
+}
+
+function clearFightCache(reportCode, fightId) {
+  const report = zoneReports.find((candidate) => candidate.reportCode === reportCode);
+  const fight = report?.pulls.find((candidate) => String(candidate.id) === String(fightId));
+
+  if (!report || !fight) {
+    return;
+  }
+
+  const fightNumber = Number(fight.id);
+  const cleared = clearCacheEntries((entry) => {
+    const variables = entry.inputs?.variables;
+    return entry.queryName === 'FightEvents'
+      && variables?.code === report.reportCode
+      && Array.isArray(variables.fightIDs)
+      && variables.fightIDs.map(Number).includes(fightNumber);
+  });
+  const eventKey = getFightEventKey(report, fight);
+  fightEventDetails.delete(eventKey);
+
+  openFightEventKeys.delete(eventKey);
+
+  setStatus(`Cleared ${cleared} cached ${cleared === 1 ? 'entry' : 'entries'} for fight ${fight.id}.`);
+  renderZoneReports();
+}
+
+function isEmbeddedReport(report) {
+  return report.testData || report.reportCode?.startsWith('TEST') || currentUserName === 'Test Data' || isUsingTestData();
+}
+
+function setStatus(message, isError = false) {
+  elements.statusLine.textContent = message;
+  elements.statusLine.classList.toggle('error', isError);
+}
+
+function applyStoredTheme() {
+  applyTheme(localStorage.getItem(THEME_STORAGE_KEY) === 'light' ? 'light' : 'dark');
+}
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem(THEME_STORAGE_KEY, nextTheme);
+  applyTheme(nextTheme);
+}
+
+function applyTheme(theme) {
+  const isDark = theme === 'dark';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+  elements.themeToggleButton.textContent = isDark ? 'Light mode' : 'Dark mode';
+  elements.themeToggleButton.setAttribute('aria-pressed', String(isDark));
+}
+
+function formatLoadError(prefix, error) {
+  const message = error?.message ?? String(error);
+
+  if (looksLikeFflogsThrottling(message)) {
+    return `${prefix}. FFLogs may be throttling or returning partial data right now; try again in a minute. (${message})`;
+  }
+
+  return `${prefix} (${message}).`;
+}
+
+function looksLikeFflogsThrottling(message) {
+  return [
+    '429',
+    'rate limit',
+    'ratelimit',
+    'throttle',
+    'throttling',
+    'returned no graphql data',
+    'returned an empty graphql payload',
+    'did not return a report list',
+    'did not return fight data',
+    'did not return event data',
+  ].some((pattern) => message.toLowerCase().includes(pattern));
+}
+
+function setAppLoading(isLoading) {
+  elements.loginButton.disabled = isLoading;
+  elements.logoutButton.disabled = isLoading;
+  elements.refreshReportsButton.disabled = isLoading || !getStoredToken() || isUsingTestData();
+  elements.loadTestDataButton.disabled = isLoading;
+  if (!isLoading) {
+    updateAuthUi();
+  }
+}
+
+function setTestDataLoading(isLoading) {
+  elements.loadTestDataButton.disabled = isLoading;
+  elements.loadTestDataButton.textContent = isLoading ? 'Loading...' : isUsingTestData() ? 'Use live data' : 'Use test data';
+}
+
+function getGraphqlEndpoint() {
+  return GRAPHQL_ENDPOINT;
+}

@@ -1,26 +1,26 @@
 import {
   FFLOGS_AUTH_URL,
   FFLOGS_CLIENT_ID,
+  FFLOGS_PKCE_STORAGE_KEY,
+  FFLOGS_TOKEN_STORAGE_KEY,
   FFLOGS_TOKEN_URL,
-  PKCE_STORAGE_KEY,
-  TOKEN_STORAGE_KEY,
-  USER_STORAGE_KEY,
 } from './config.js';
 
+const TOKEN_EXPIRY_BUFFER_MS = 30_000;
+
 export async function startFflogsLogin() {
-  localStorage.removeItem(USER_STORAGE_KEY);
   const codeVerifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(64)));
-  const codeChallenge = await sha256Base64Url(codeVerifier);
+  const codeChallenge = await createCodeChallenge(codeVerifier);
   const state = base64UrlEncode(crypto.getRandomValues(new Uint8Array(32)));
   const redirectUri = getRedirectUri();
 
-  sessionStorage.setItem(PKCE_STORAGE_KEY, JSON.stringify({
+  sessionStorage.setItem(FFLOGS_PKCE_STORAGE_KEY, JSON.stringify({
     codeVerifier,
     redirectUri,
     state,
   }));
 
-  const params = new URLSearchParams({
+  const parameters = new URLSearchParams({
     client_id: FFLOGS_CLIENT_ID,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
@@ -29,124 +29,114 @@ export async function startFflogsLogin() {
     state,
   });
 
-  window.location.assign(`${FFLOGS_AUTH_URL}?${params.toString()}`);
+  window.location.assign(`${FFLOGS_AUTH_URL}?${parameters.toString()}`);
 }
 
-export async function handleOAuthCallback({ refreshCurrentUserProfile, setStatus }) {
-  const params = new URLSearchParams(window.location.search);
-  const code = params.get('code');
-  const returnedState = params.get('state');
-  const error = params.get('error');
+export async function completeFflogsLogin() {
+  const parameters = new URLSearchParams(window.location.search);
+  const code = parameters.get('code');
+  const oauthError = parameters.get('error');
 
-  if (error) {
-    setStatus(`FFLogs login failed: ${error}`, true);
+  if (oauthError) {
     cleanCallbackUrl();
-    return;
+    throw new Error(`FFLogs login failed: ${oauthError}`);
   }
 
   if (!code) {
-    return;
+    return null;
   }
 
-  const pending = JSON.parse(sessionStorage.getItem(PKCE_STORAGE_KEY) || 'null');
-  if (!pending || pending.state !== returnedState) {
-    setStatus('FFLogs login state did not match. Please try logging in again.', true);
+  const pendingLogin = readPendingLogin();
+  if (!pendingLogin || pendingLogin.state !== parameters.get('state')) {
     cleanCallbackUrl();
-    return;
+    throw new Error('FFLogs login state did not match. Start the login again.');
   }
-
-  setStatus('Completing FFLogs login...');
 
   try {
-    const body = new URLSearchParams({
-      client_id: FFLOGS_CLIENT_ID,
-      code,
-      code_verifier: pending.codeVerifier,
-      grant_type: 'authorization_code',
-      redirect_uri: pending.redirectUri,
-    });
-
     const response = await fetch(FFLOGS_TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body,
+      body: new URLSearchParams({
+        client_id: FFLOGS_CLIENT_ID,
+        code,
+        code_verifier: pendingLogin.codeVerifier,
+        grant_type: 'authorization_code',
+        redirect_uri: pendingLogin.redirectUri,
+      }),
     });
 
     if (!response.ok) {
-      throw new Error(`token endpoint returned ${response.status}`);
+      throw new Error(`FFLogs token endpoint returned ${response.status}.`);
     }
 
     const token = await response.json();
-    localStorage.setItem(TOKEN_STORAGE_KEY, JSON.stringify({
+    const storedToken = {
       ...token,
       expires_at: Date.now() + ((token.expires_in ?? 3600) * 1000),
-    }));
-    sessionStorage.removeItem(PKCE_STORAGE_KEY);
-    await refreshCurrentUserProfile();
-    setStatus('Logged in to FFLogs. Loading your latest reports...');
-  } catch (tokenError) {
-    console.warn(tokenError);
-    setStatus(`Could not complete FFLogs login (${tokenError.message}).`, true);
+    };
+
+    localStorage.setItem(FFLOGS_TOKEN_STORAGE_KEY, JSON.stringify(storedToken));
+    return storedToken;
   } finally {
+    sessionStorage.removeItem(FFLOGS_PKCE_STORAGE_KEY);
     cleanCallbackUrl();
   }
 }
 
-export function getStoredToken() {
+export function getFflogsAccessToken() {
+  const token = readStoredToken();
+
+  if (!token?.access_token || Date.now() >= token.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
+    clearFflogsSession();
+    return null;
+  }
+
+  return token.access_token;
+}
+
+export function isLoggedInToFflogs() {
+  return Boolean(getFflogsAccessToken());
+}
+
+export function clearFflogsSession() {
+  localStorage.removeItem(FFLOGS_TOKEN_STORAGE_KEY);
+  sessionStorage.removeItem(FFLOGS_PKCE_STORAGE_KEY);
+}
+
+function readStoredToken() {
   try {
-    const token = JSON.parse(localStorage.getItem(TOKEN_STORAGE_KEY) || 'null');
-    return token && !isExpired(token) ? token : null;
+    return JSON.parse(localStorage.getItem(FFLOGS_TOKEN_STORAGE_KEY) || 'null');
   } catch {
     return null;
   }
 }
 
-export function isExpired(token) {
-  return !token?.access_token || Date.now() > (token.expires_at - 30_000);
-}
-
-export function getStoredUser() {
+function readPendingLogin() {
   try {
-    return JSON.parse(localStorage.getItem(USER_STORAGE_KEY) || 'null');
+    return JSON.parse(sessionStorage.getItem(FFLOGS_PKCE_STORAGE_KEY) || 'null');
   } catch {
     return null;
   }
-}
-
-export function storeUser(user) {
-  localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(user));
-}
-
-export function clearStoredUser() {
-  localStorage.removeItem(USER_STORAGE_KEY);
-}
-
-export function clearStoredToken() {
-  localStorage.removeItem(TOKEN_STORAGE_KEY);
-}
-
-export function isUsingTestData() {
-  return Boolean(getStoredUser()?.testData);
 }
 
 function getRedirectUri() {
-  return window.location.href.split('?')[0].split('#')[0];
+  return `${window.location.origin}${window.location.pathname}`;
 }
 
 function cleanCallbackUrl() {
   window.history.replaceState({}, document.title, window.location.pathname + window.location.hash);
 }
 
-async function sha256Base64Url(value) {
-  const bytes = new TextEncoder().encode(value);
+async function createCodeChallenge(codeVerifier) {
+  const bytes = new TextEncoder().encode(codeVerifier);
   const digest = await crypto.subtle.digest('SHA-256', bytes);
   return base64UrlEncode(new Uint8Array(digest));
 }
 
 function base64UrlEncode(bytes) {
-  const binary = String.fromCharCode(...bytes);
-  return btoa(binary)
+  return btoa(String.fromCharCode(...bytes))
     .replaceAll('+', '-')
     .replaceAll('/', '_')
     .replaceAll('=', '');
 }
+
