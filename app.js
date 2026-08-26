@@ -83,7 +83,7 @@ async function initialize() {
       setReportsStatus('Loading every nonempty report from the last week...');
       reports = await fetchWeeklyReports(currentUser.id);
       setStatus('Ready to query FFLogs.');
-      setReportsStatus(reports.length > 0 ? '' : 'No nonempty reports found in the last week.');
+      setReportsStatus(formatLoadedReportsStatus(reports.length));
     }
   } catch (error) {
     setStatus(error.message, true);
@@ -135,7 +135,7 @@ async function toggleTestData() {
 
     setReportsStatus('Restoring live reports...');
     reports = await fetchWeeklyReports(currentUser.id);
-    setReportsStatus(reports.length > 0 ? '' : 'No nonempty reports found in the last week.');
+    setReportsStatus(formatLoadedReportsStatus(reports.length));
   } catch (error) {
     setReportsStatus(error.message, true);
   } finally {
@@ -235,6 +235,11 @@ function createDetailedReportView(report) {
 
   const actions = document.createElement('div');
   actions.className = 'detailed-report-actions';
+  const reloadButton = document.createElement('button');
+  reloadButton.className = 'report-reload-button';
+  reloadButton.type = 'button';
+  reloadButton.textContent = 'Reload report';
+  reloadButton.addEventListener('click', () => reloadSelectedReport(reloadButton));
   const phaseFilter = document.createElement('select');
   phaseFilter.className = 'report-phase-select';
   phaseFilter.setAttribute('aria-label', 'Filter fights by phase');
@@ -253,9 +258,10 @@ function createDetailedReportView(report) {
   const fightCount = document.createElement('span');
   fightCount.className = 'fight-count-pill';
   fightCount.textContent = `${fights.length} ${fights.length === 1 ? 'fight' : 'fights'}`;
-  actions.append(phaseFilter, fightCount);
+  actions.append(reloadButton, phaseFilter, fightCount);
   summary.append(info, actions);
 
+  const highlightedFight = getBestDmuPull(fights);
   const visibleFights = selectedReportPhase === 'all'
     ? fights
     : fights.filter((fight) => String(Number(fight.lastPhase) || 1) === selectedReportPhase);
@@ -269,19 +275,19 @@ function createDetailedReportView(report) {
       : `No fights reached Phase ${selectedReportPhase} in this report.`;
     fightList.append(empty);
   } else {
-    fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight)));
+    fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
   }
 
   article.append(summary, fightList);
   return article;
 }
 
-function createDetailedFightCard(report, fight) {
+function createDetailedFightCard(report, fight, highlightedFight) {
   const bossRemaining = fight.kill ? 0 : normalizeBossHealth(fight);
   const bossDamageDone = Math.min(100, Math.max(0, 100 - bossRemaining));
-  const isLowBossRemaining = !fight.kill && bossRemaining < 15;
+  const isHighlighted = fight === highlightedFight;
   const card = document.createElement('article');
-  card.className = `detailed-fight-card${isLowBossRemaining ? ' low-boss-remaining' : ''}`;
+  card.className = `detailed-fight-card${isHighlighted ? ' highlighted' : ''}`;
 
   const top = document.createElement('div');
   top.className = 'detailed-fight-top';
@@ -295,18 +301,19 @@ function createDetailedFightCard(report, fight) {
   const heading = document.createElement('h4');
   const phaseName = fight.kill ? 'Clear' : fight.lastPhaseIsIntermission
     ? `Intermission ${Number(fight.lastPhase) || 1}`
-    : `Phase${Number(fight.lastPhase) || 1}`;
+    : `Phase ${Number(fight.lastPhase) || 1}`;
   heading.textContent = `${fight.id} - ${fight.name || 'Dancing Mad'}: ${phaseName}`;
   titleRow.append(phaseTag, heading);
 
   const links = document.createElement('div');
   links.className = 'detailed-fight-links';
   const detailKey = `${report.code}:${fight.id}`;
+  const detailsOpen = openFightDetailKeys.has(detailKey);
   const detailsButton = document.createElement('button');
   detailsButton.className = 'fight-details-button';
   detailsButton.type = 'button';
-  detailsButton.textContent = openFightDetailKeys.has(detailKey) ? 'Hide details' : 'Details';
-  detailsButton.setAttribute('aria-expanded', String(openFightDetailKeys.has(detailKey)));
+  detailsButton.textContent = detailsOpen ? 'Hide details' : 'Details';
+  detailsButton.setAttribute('aria-expanded', String(detailsOpen));
   detailsButton.addEventListener('click', () => toggleFightDetails(report, fight));
   const fflogsLink = document.createElement('a');
   fflogsLink.href = `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}`;
@@ -314,24 +321,26 @@ function createDetailedFightCard(report, fight) {
   fflogsLink.rel = 'noreferrer';
   fflogsLink.textContent = 'FFLogs';
   links.append(detailsButton, fflogsLink);
+  const analyzerLinks = document.createElement('div');
+  analyzerLinks.className = 'detailed-fight-analyzer-links';
   const durationMs = getFightDuration(fight);
-  if (!fight.kill && !fight.lastPhaseIsIntermission && durationMs > 150_000) {
-    links.append(createExternalLink(
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 150_000) {
+    analyzerLinks.append(createExternalLink(
       'Arrows analyzer',
       `https://analyzer.wtfdig.info/arrows?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
     ));
   }
-  if (!fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) === 2) {
-    links.append(createExternalLink(
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) === 2) {
+    analyzerLinks.append(createExternalLink(
       'P2 analyzer',
       `https://analyzer.wtfdig.info/forsaken?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
     ));
   }
-  if (!fight.kill && !fight.lastPhaseIsIntermission && durationMs > 330_000) {
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 330_000) {
     const startOffset = Number(fight.startTime);
-    links.append(createExternalLink(
+    analyzerLinks.append(createExternalLink(
       'P2 DPS',
-      `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 221_000}&end=${startOffset + 331_000}`,
+      `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 211_000}&end=${startOffset + 331_000}`,
     ));
   }
   top.append(titleRow, links);
@@ -343,20 +352,55 @@ function createDetailedFightCard(report, fight) {
   const duration = document.createElement('span');
   duration.textContent = formatFightDuration(getFightDuration(fight));
   const health = document.createElement('strong');
-  health.className = isLowBossRemaining ? 'low' : '';
+  health.className = isHighlighted ? 'highlighted' : '';
   health.textContent = `${bossRemaining.toFixed(1)}% remaining`;
   meta.append(start, duration, health);
 
   const bar = document.createElement('div');
-  bar.className = `boss-health-bar${isLowBossRemaining ? ' low' : ''}`;
+  bar.className = `boss-health-bar${isHighlighted ? ' highlighted' : ''}`;
   const fill = document.createElement('div');
   fill.style.width = `${bossDamageDone}%`;
   bar.append(fill);
   card.append(top, meta, bar);
-  if (openFightDetailKeys.has(detailKey)) {
+  if (analyzerLinks.childElementCount > 0) {
+    card.append(analyzerLinks);
+  }
+  if (detailsOpen) {
     card.append(createFightDetailsPanel(report, fight, fightDetails.get(detailKey)));
   }
   return card;
+}
+
+async function reloadSelectedReport(button) {
+  if (!selectedReport) {
+    return;
+  }
+
+  button.disabled = true;
+  const reportCode = selectedReport.code;
+  setLookupStatus(`Reloading report ${reportCode}...`);
+
+  try {
+    if (usingTestData) {
+      selectedReport = reports.find((report) => report.code === reportCode) ?? selectedReport;
+    } else {
+      const refreshedReport = await fetchReportByCode(reportCode);
+      if (!refreshedReport) {
+        throw new Error(`FFLogs could not find report ${reportCode}.`);
+      }
+      selectedReport = refreshedReport;
+      reports = reports.map((report) => report.code === reportCode ? refreshedReport : report);
+      renderReports();
+    }
+
+    fightDetails = new Map();
+    openFightDetailKeys = new Set();
+    renderLookupResult();
+    setLookupStatus(`Reloaded report ${reportCode}.`);
+  } catch (error) {
+    setLookupStatus(error.message, true);
+    button.disabled = false;
+  }
 }
 
 function createExternalLink(label, href) {
@@ -486,14 +530,19 @@ function createReportCard(report) {
   const bestPull = getBestDmuPull(dmuPulls);
   const article = document.createElement('article');
   article.className = 'report-card';
-
-  const loadButton = document.createElement('button');
-  loadButton.className = 'report-load-button';
-  loadButton.type = 'button';
-  loadButton.setAttribute('aria-label', `Load report ${report.code}`);
-  loadButton.title = 'Load this report below';
-  loadButton.textContent = '↓';
-  loadButton.addEventListener('click', () => loadKnownReport(report));
+  article.tabIndex = 0;
+  article.setAttribute('aria-label', `Load report ${report.code}`);
+  article.addEventListener('click', (event) => {
+    if (!event.target.closest('a')) {
+      loadKnownReport(report);
+    }
+  });
+  article.addEventListener('keydown', (event) => {
+    if (event.target === article && (event.key === 'Enter' || event.key === ' ')) {
+      event.preventDefault();
+      loadKnownReport(report);
+    }
+  });
 
   const identity = document.createElement('div');
   identity.className = 'report-identity';
@@ -511,12 +560,30 @@ function createReportCard(report) {
   const date = document.createElement('time');
   date.className = 'report-date';
   date.dateTime = new Date(report.startTime).toISOString();
-  date.textContent = formatReportDate(report.startTime);
+  const reportDate = new Date(report.startTime);
+  const dateMonth = document.createElement('span');
+  dateMonth.textContent = new Intl.DateTimeFormat(undefined, { month: 'short' }).format(reportDate);
+  const dateDay = document.createElement('span');
+  dateDay.textContent = new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(reportDate);
+  date.append(dateMonth, ' ', dateDay);
 
-  const pullCount = createMetric('DMU pulls', String(dmuPulls.length), 'report-pull-count');
-  const best = createMetric('Best DMU pull', createBestPullBadge(bestPull), 'report-best-pull');
+  const pullCount = document.createElement('div');
+  pullCount.className = 'report-pull-summary';
+  const dmuLabel = document.createElement('span');
+  dmuLabel.textContent = 'DMU';
+  const pullCountValue = document.createElement('strong');
+  pullCountValue.textContent = String(dmuPulls.length);
+  pullCount.append(dmuLabel, ': ', pullCountValue, ` ${dmuPulls.length === 1 ? 'pull' : 'pulls'}`);
 
-  article.append(loadButton, identity, pullCount, best, date);
+  const best = document.createElement('div');
+  best.className = 'report-metric report-best-pull';
+  best.append(createBestPullBadge(bestPull));
+
+  const footer = document.createElement('div');
+  footer.className = 'report-card-footer';
+  footer.append(pullCount, best, date);
+
+  article.append(identity, footer);
   return article;
 }
 
@@ -651,6 +718,10 @@ function setReportsStatus(message, isError = false) {
   elements.reportsStatus.textContent = message;
   elements.reportsStatus.classList.toggle('error', isError);
   elements.reportsStatus.hidden = !message;
+}
+
+function formatLoadedReportsStatus(count) {
+  return `Loaded ${count} nonempty ${count === 1 ? 'report' : 'reports'} from the last 7 days.`;
 }
 
 function formatReportDateRange(startTimestamp, endTimestamp) {
