@@ -357,7 +357,7 @@ function createDetailedFightCard(report, fight, highlightedFight) {
     arrowsLink.title = 'Arrows analyzer';
     analyzerItems.push(arrowsLink);
   }
-  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) > 2) {
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) >= 2) {
     const forsakenLink = createExternalLink(
       'FT',
       `https://analyzer.wtfdig.info/forsaken?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
