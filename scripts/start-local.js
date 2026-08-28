@@ -29,6 +29,8 @@ const server = http.createServer((request, response) => {
   const isInsideRoot = requestedPath === rootDirectory
     || requestedPath.startsWith(`${rootDirectory}${path.sep}`);
 
+  // Resolving before this check prevents encoded parent paths from exposing files outside
+  // the project when this intentionally small server handles local development requests.
   if (!isInsideRoot) {
     response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
     response.end('Forbidden');
