@@ -341,15 +341,37 @@ h2 {
 }
 
 .detailed-fight-link-group {
-  align-items: baseline;
+  align-items: center;
   display: inline-flex;
   gap: 6px;
 }
 
 .detailed-fight-analyzer-links a {
+  align-items: center;
+  background: rgba(120, 174, 232, 0.1);
+  border: 1px solid rgba(120, 174, 232, 0.38);
+  border-radius: 4px;
   color: var(--link);
+  display: inline-flex;
   font-size: 0.72rem;
   font-weight: 800;
+  height: 18px;
+  justify-content: center;
+  padding: 0 3px;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.detailed-fight-analyzer-links a:hover,
+.detailed-fight-analyzer-links a:focus-visible {
+  background: rgba(120, 174, 232, 0.22);
+  border-color: var(--link);
+  outline: none;
+}
+
+.detailed-fight-analyzer-links .analyzer-icon-link {
+  padding: 0;
+  width: 20px;
 }
 
 .fight-details-button {

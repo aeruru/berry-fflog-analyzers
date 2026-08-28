@@ -353,6 +353,7 @@ function createDetailedFightCard(report, fight, highlightedFight) {
       '🔃',
       `https://analyzer.wtfdig.info/arrows?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
     );
+    arrowsLink.className = 'analyzer-icon-link';
     arrowsLink.setAttribute('aria-label', 'Arrows analyzer');
     arrowsLink.title = 'Arrows analyzer';
     analyzerItems.push(arrowsLink);
@@ -374,6 +375,15 @@ function createDetailedFightCard(report, fight, highlightedFight) {
     limitCutLink.setAttribute('aria-label', 'Limit Cut analyzer');
     limitCutLink.title = 'Limit Cut analyzer';
     analyzerItems.push(limitCutLink);
+  }
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 580_000) {
+    const blackHoleLink = createExternalLink(
+        'BH',
+        `https://analyzer.wtfdig.info/black-hole?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
+    );
+    blackHoleLink.setAttribute('aria-label', 'Black Hole analyzer');
+    blackHoleLink.title = 'Black Hole analyzer';
+    analyzerItems.push(blackHoleLink);
   }
   if (analyzerItems.length > 0) {
     analyzerLinks.append(createLinkGroup('Analyzers:', analyzerItems));
