@@ -159,6 +159,8 @@ export async function fetchWeeklyReports(userId, options) {
   const reports = [];
   let page = 1;
 
+  // FFLogs paginates the user's report index separately from the full fight data.
+  // Gather every index page first so the UI never silently omits older reports.
   while (true) {
     const data = await queryFflogs(REPORT_LIST_QUERY, {
       userId: Number(userId),
@@ -177,6 +179,8 @@ export async function fetchWeeklyReports(userId, options) {
     page += 1;
   }
 
+  // Report-list records do not contain fights, so hydrate them with a small concurrency
+  // cap before filtering and rendering the weekly cards.
   const hydratedReports = await mapWithConcurrency(reports, 4, async (report) => {
     const data = await queryFflogs(REPORT_FIGHTS_QUERY, { code: report.code }, options);
     return data.reportData.report;
@@ -191,6 +195,8 @@ async function mapWithConcurrency(items, concurrency, mapper) {
   const results = new Array(items.length);
   let nextIndex = 0;
 
+  // Workers share the next index rather than creating every request at once; this keeps
+  // FFLogs traffic bounded while preserving the input order in the result array.
   async function worker() {
     while (nextIndex < items.length) {
       const index = nextIndex;

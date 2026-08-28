@@ -38,6 +38,8 @@ let selectedReport = null;
 let selectedReportPhase = 'all';
 let usingTestData = false;
 
+// The app is intentionally state-driven: user actions update these module-level values,
+// then the relevant render function rebuilds its section from that single source of truth.
 elements.authButton.addEventListener('click', async () => {
   if (isLoggedInToFflogs()) {
     clearFflogsSession();
@@ -68,6 +70,8 @@ elements.reportSearchForm.addEventListener('submit', searchForReport);
 
 initialize();
 
+// Restores an FFLogs login when possible, then supplies the first complete report list
+// before handing control to the normal account/report render loop.
 async function initialize() {
   setBusy(true);
 
@@ -95,6 +99,8 @@ async function initialize() {
   }
 }
 
+// Rebuilds the weekly strip and its lookup suggestions together so both surfaces always
+// expose the same current live/test report collection.
 function renderReports() {
   elements.reportCount.textContent = `${reports.length} ${reports.length === 1 ? 'report' : 'reports'}`;
   elements.reportsList.replaceChildren(...reports.map(createReportCard));
@@ -106,6 +112,8 @@ function renderReports() {
   }));
 }
 
+// Test data replaces the live report collection, but uses the same render and selection
+// paths so UI work exercises the production display logic rather than a parallel mock UI.
 async function toggleTestData() {
   elements.testDataButton.disabled = true;
 
@@ -144,6 +152,8 @@ async function toggleTestData() {
   }
 }
 
+// Report selection has two entry points—the weekly cards and free-form lookup—but both
+// converge on selectedReport so the detailed viewer has one rendering path.
 async function searchForReport(event) {
   event.preventDefault();
   const reportCode = parseFflogsReportCode(elements.reportSearchInput.value);
@@ -200,6 +210,8 @@ function renderLookupResult() {
   elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
 }
 
+// Selecting a known weekly/test report avoids another network request while still
+// resetting viewer-only state that belongs to the previously selected report.
 function loadKnownReport(report) {
   selectedReport = report;
   selectedReportPhase = 'all';
@@ -211,9 +223,18 @@ function loadKnownReport(report) {
   setLookupStatus(`Loaded report ${report.code}.`);
 }
 
+// Builds the detailed viewer from selected report state. Phase selection filters only
+// the displayed fights; it does not alter the report used for highlighting or reloads.
 function createDetailedReportView(report) {
   const article = document.createElement('article');
   article.className = 'detailed-report-card';
+
+  const fights = report.fights.filter(isDmuPull)
+    .sort((first, second) => Number(second.startTime) - Number(first.startTime));
+  const visibleFights = selectedReportPhase === 'all'
+    ? fights
+    : fights.filter((fight) => String(Number(fight.lastPhase) || 1) === selectedReportPhase);
+  const highlightedFight = getBestDmuPull(visibleFights);
 
   const summary = document.createElement('div');
   summary.className = 'detailed-report-summary';
@@ -253,18 +274,18 @@ function createDetailedReportView(report) {
     renderLookupResult();
   });
 
-  const fights = report.fights.filter(isDmuPull)
-    .sort((first, second) => Number(second.startTime) - Number(first.startTime));
   const fightCount = document.createElement('span');
   fightCount.className = 'fight-count-pill';
-  fightCount.textContent = `${fights.length} ${fights.length === 1 ? 'fight' : 'fights'}`;
-  actions.append(reloadButton, phaseFilter, fightCount);
+  fightCount.textContent = `${visibleFights.length} ${visibleFights.length === 1 ? 'pull' : 'pulls'}`;
+  const pullSummary = document.createElement('div');
+  pullSummary.className = 'detailed-report-pull-summary';
+  const emptyPullLabel = selectedReportPhase === 'all'
+    ? 'No DMU pulls'
+    : `No P${selectedReportPhase} pulls`;
+  pullSummary.append(fightCount, createBestPullBadge(highlightedFight, emptyPullLabel));
+  actions.append(reloadButton, phaseFilter, pullSummary);
   summary.append(info, actions);
 
-  const highlightedFight = getBestDmuPull(fights);
-  const visibleFights = selectedReportPhase === 'all'
-    ? fights
-    : fights.filter((fight) => String(Number(fight.lastPhase) || 1) === selectedReportPhase);
   const fightList = document.createElement('div');
   fightList.className = 'detailed-fight-list';
   if (visibleFights.length === 0) {
@@ -272,7 +293,7 @@ function createDetailedReportView(report) {
     empty.className = 'detailed-empty-state';
     empty.textContent = selectedReportPhase === 'all'
       ? 'This report does not include DMU fight data.'
-      : `No fights reached Phase ${selectedReportPhase} in this report.`;
+      : `No fights ended during Phase ${selectedReportPhase} in this report.`;
     fightList.append(empty);
   } else {
     fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
@@ -282,6 +303,8 @@ function createDetailedReportView(report) {
   return article;
 }
 
+// Each fight card owns only summary UI. Expansion state and fetched event data live in
+// keyed maps so several details panels can remain open across a viewer re-render.
 function createDetailedFightCard(report, fight, highlightedFight) {
   const bossRemaining = fight.kill ? 0 : normalizeBossHealth(fight);
   const bossDamageDone = Math.min(100, Math.max(0, 100 - bossRemaining));
@@ -324,24 +347,80 @@ function createDetailedFightCard(report, fight, highlightedFight) {
   const analyzerLinks = document.createElement('div');
   analyzerLinks.className = 'detailed-fight-analyzer-links';
   const durationMs = getFightDuration(fight);
+  let analyzerItems = [];
   if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 150_000) {
-    analyzerLinks.append(createExternalLink(
-      'Arrows analyzer',
+    const arrowsLink = createExternalLink(
+      '🔃',
       `https://analyzer.wtfdig.info/arrows?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
-    ));
+    );
+    arrowsLink.setAttribute('aria-label', 'Arrows analyzer');
+    arrowsLink.title = 'Arrows analyzer';
+    analyzerItems.push(arrowsLink);
   }
-  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) === 2) {
-    analyzerLinks.append(createExternalLink(
-      'P2 analyzer',
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && Number(fight.lastPhase) >= 2) {
+    const forsakenLink = createExternalLink(
+      'FT',
       `https://analyzer.wtfdig.info/forsaken?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
-    ));
+    );
+    forsakenLink.setAttribute('aria-label', 'Forsaken analyzer');
+    forsakenLink.title = 'Forsaken analyzer';
+    analyzerItems.push(forsakenLink);
   }
-  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 330_000) {
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 525_000) {
+    const limitCutLink = createExternalLink(
+        'LC',
+        `https://analyzer.wtfdig.info/kefka-lc?report=${encodeURIComponent(report.code)}&fight=${encodeURIComponent(fight.id)}`,
+    );
+    limitCutLink.setAttribute('aria-label', 'Limit Cut analyzer');
+    limitCutLink.title = 'Limit Cut analyzer';
+    analyzerItems.push(limitCutLink);
+  }
+  if (analyzerItems.length > 0) {
+    analyzerLinks.append(createLinkGroup('Analyzers:', analyzerItems));
+  }
+  analyzerItems = [];
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 197_000) {
     const startOffset = Number(fight.startTime);
-    analyzerLinks.append(createExternalLink(
-      'P2 DPS',
+    const P1dpsLink = createExternalLink(
+        'P1',
+        `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 1_000}&end=${startOffset + 198_000}`,
+    );
+    P1dpsLink.setAttribute('aria-label', 'P1 DPS (0:00-3:10)');
+    P1dpsLink.title = 'P1 DPS';
+    analyzerItems.push(P1dpsLink);
+  }
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 331_000) {
+    const startOffset = Number(fight.startTime);
+    const FTdpsLink = createExternalLink(
+      'FT',
       `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 211_000}&end=${startOffset + 331_000}`,
-    ));
+    );
+    FTdpsLink.setAttribute('aria-label', 'Forsaken DPS (3:30-5:30)');
+    FTdpsLink.title = 'Forsaken DPS';
+    analyzerItems.push(FTdpsLink);
+  }
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 381_000) {
+    const startOffset = Number(fight.startTime);
+    const P2dpsLink = createExternalLink(
+        'P2',
+        `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 211_000}&end=${startOffset + 381_000}`,
+    );
+    P2dpsLink.setAttribute('aria-label', 'P2 DPS (3:30-6:20)');
+    P2dpsLink.title = 'P2 DPS';
+    analyzerItems.push(P2dpsLink);
+  }
+  if (detailsOpen && !fight.kill && !fight.lastPhaseIsIntermission && durationMs > 735_000) {
+    const startOffset = Number(fight.startTime);
+    const P3dpsLink = createExternalLink(
+        'P3',
+        `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}?fight=${encodeURIComponent(fight.id)}&type=damage-done&start=${startOffset + 428_000}&end=${startOffset + 736_000}`,
+    );
+    P3dpsLink.setAttribute('aria-label', 'P3 DPS (7:07-12:20)');
+    P3dpsLink.title = 'P3 DPS';
+    analyzerItems.push(P3dpsLink);
+  }
+  if (analyzerItems.length > 0) {
+    analyzerLinks.append(createLinkGroup('DPS:', analyzerItems));
   }
   top.append(titleRow, links);
 
@@ -371,6 +450,8 @@ function createDetailedFightCard(report, fight, highlightedFight) {
   return card;
 }
 
+// Reloading replaces the selected report's fight snapshot and invalidates event details;
+// those details are tied to the previous snapshot and must be fetched again on demand.
 async function reloadSelectedReport(button) {
   if (!selectedReport) {
     return;
@@ -401,6 +482,15 @@ async function reloadSelectedReport(button) {
     setLookupStatus(error.message, true);
     button.disabled = false;
   }
+}
+
+// Groups related tools under a plain-language label while leaving every destination
+// as an independently focusable link.
+function createLinkGroup(label, links) {
+  const group = document.createElement('span');
+  group.className = 'detailed-fight-link-group';
+  group.append(`${label} `, ...links);
+  return group;
 }
 
 function createExternalLink(label, href) {
@@ -443,6 +533,8 @@ async function toggleFightDetails(report, fight) {
   renderLookupResult();
 }
 
+// FFLogs event responses reference actor IDs, so normalize them into display-ready rows
+// once and keep the rendering code independent of the GraphQL response shape.
 function normalizeFightDetails(rawDetails) {
   const actors = rawDetails?.masterData?.actors ?? [];
   const actorNames = new Map(actors.map((actor) => [Number(actor.id), actor.name]));
@@ -525,6 +617,8 @@ function createFightDetailsPanel(report, fight, state) {
   return panel;
 }
 
+// Weekly cards are deliberately self-contained controls: their visible summary comes
+// from report data, while activation feeds the shared detailed-report selection flow.
 function createReportCard(report) {
   const dmuPulls = report.fights.filter(isDmuPull);
   const bestPull = getBestDmuPull(dmuPulls);
@@ -551,21 +645,23 @@ function createReportCard(report) {
   title.textContent = report.title || 'Untitled report';
 
   const codeLink = document.createElement('a');
+  codeLink.className = 'report-code';
   codeLink.href = `https://www.fflogs.com/reports/${encodeURIComponent(report.code)}`;
   codeLink.target = '_blank';
   codeLink.rel = 'noreferrer';
   codeLink.textContent = report.code;
-  identity.append(title, codeLink);
+  identity.append(title);
 
   const date = document.createElement('time');
   date.className = 'report-date';
   date.dateTime = new Date(report.startTime).toISOString();
   const reportDate = new Date(report.startTime);
-  const dateMonth = document.createElement('span');
-  dateMonth.textContent = new Intl.DateTimeFormat(undefined, { month: 'short' }).format(reportDate);
-  const dateDay = document.createElement('span');
-  dateDay.textContent = new Intl.DateTimeFormat(undefined, { day: 'numeric' }).format(reportDate);
-  date.append(dateMonth, ' ', dateDay);
+  date.textContent = new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(reportDate);
 
   const pullCount = document.createElement('div');
   pullCount.className = 'report-pull-summary';
@@ -579,11 +675,7 @@ function createReportCard(report) {
   best.className = 'report-metric report-best-pull';
   best.append(createBestPullBadge(bestPull));
 
-  const footer = document.createElement('div');
-  footer.className = 'report-card-footer';
-  footer.append(pullCount, best, date);
-
-  article.append(identity, footer);
+  article.append(identity, codeLink, pullCount, date, best);
   return article;
 }
 
@@ -611,6 +703,8 @@ function getBestDmuPull(pulls) {
     return null;
   }
 
+  // The weekly summary treats progression as phase-first. Health and duration only
+  // break ties within that phase; clears instead use the fastest completion.
   return [...pulls].sort((first, second) => {
     if (first.kill !== second.kill) {
       return first.kill ? -1 : 1;
@@ -643,7 +737,7 @@ function getFightDuration(fight) {
   return Math.max(0, Number(fight.endTime) - Number(fight.startTime));
 }
 
-function createBestPullBadge(pull) {
+function createBestPullBadge(pull, emptyLabel = 'No DMU pulls') {
   const badge = document.createElement('span');
   badge.className = `best-pull-badge ${getPullColorClass(pull)}`;
 
@@ -654,7 +748,7 @@ function createBestPullBadge(pull) {
   const text = document.createElement('span');
   text.className = 'best-pull-text';
   if (!pull) {
-    text.textContent = 'No DMU pulls';
+    text.textContent = emptyLabel;
   } else if (pull.kill) {
     text.textContent = formatFightDuration(getFightDuration(pull));
   } else {

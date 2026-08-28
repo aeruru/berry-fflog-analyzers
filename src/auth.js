@@ -8,6 +8,8 @@ import {
 
 const TOKEN_EXPIRY_BUFFER_MS = 30_000;
 
+// FFLogs uses Authorization Code + PKCE for this browser-only client. The verifier stays
+// in session storage only long enough to validate and complete the redirect round trip.
 export async function startFflogsLogin() {
   const codeVerifier = base64UrlEncode(crypto.getRandomValues(new Uint8Array(64)));
   const codeChallenge = await createCodeChallenge(codeVerifier);
@@ -84,6 +86,8 @@ export async function completeFflogsLogin() {
 }
 
 export function getFflogsAccessToken() {
+  // Treat nearly-expired tokens as logged out so a query cannot begin with a token that
+  // is likely to expire while FFLogs is processing it.
   const token = readStoredToken();
 
   if (!token?.access_token || Date.now() >= token.expires_at - TOKEN_EXPIRY_BUFFER_MS) {
