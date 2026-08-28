@@ -279,7 +279,10 @@ function createDetailedReportView(report) {
   fightCount.textContent = `${visibleFights.length} ${visibleFights.length === 1 ? 'pull' : 'pulls'}`;
   const pullSummary = document.createElement('div');
   pullSummary.className = 'detailed-report-pull-summary';
-  pullSummary.append(fightCount, createBestPullBadge(highlightedFight));
+  const emptyPullLabel = selectedReportPhase === 'all'
+    ? 'No DMU pulls'
+    : `No P${selectedReportPhase} pulls`;
+  pullSummary.append(fightCount, createBestPullBadge(highlightedFight, emptyPullLabel));
   actions.append(reloadButton, phaseFilter, pullSummary);
   summary.append(info, actions);
 
@@ -734,7 +737,7 @@ function getFightDuration(fight) {
   return Math.max(0, Number(fight.endTime) - Number(fight.startTime));
 }
 
-function createBestPullBadge(pull) {
+function createBestPullBadge(pull, emptyLabel = 'No DMU pulls') {
   const badge = document.createElement('span');
   badge.className = `best-pull-badge ${getPullColorClass(pull)}`;
 
@@ -745,7 +748,7 @@ function createBestPullBadge(pull) {
   const text = document.createElement('span');
   text.className = 'best-pull-text';
   if (!pull) {
-    text.textContent = 'No DMU pulls';
+    text.textContent = emptyLabel;
   } else if (pull.kill) {
     text.textContent = formatFightDuration(getFightDuration(pull));
   } else {
