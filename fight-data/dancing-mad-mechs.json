@@ -1,0 +1,149 @@
+[
+  {
+    "eventNumber": 1,
+    "time": "00:10.171",
+    "elapsedSeconds": 10.171,
+    "phase": 1,
+    "mechanic": "RR1"
+  },
+  {
+    "eventNumber": 2,
+    "time": "00:37.389",
+    "elapsedSeconds": 37.389,
+    "phase": 1,
+    "mechanic": "GI1 (MM1)"
+  },
+  {
+    "eventNumber": 3,
+    "time": "00:42.438",
+    "elapsedSeconds": 42.438,
+    "phase": 1,
+    "mechanic": "GI1 (Towers)"
+  },
+  {
+    "eventNumber": 4,
+    "time": "00:53.652",
+    "elapsedSeconds": 53.652,
+    "phase": 1,
+    "mechanic": "GI1 (MM2)"
+  },
+  {
+    "eventNumber": 5,
+    "time": "01:02.723",
+    "elapsedSeconds": 62.723,
+    "phase": 1,
+    "mechanic": "LJ1"
+  },
+  {
+    "eventNumber": 6,
+    "time": "01:20.321",
+    "elapsedSeconds": 80.321,
+    "phase": 1,
+    "mechanic": "GI2"
+  },
+  {
+    "eventNumber": 7,
+    "time": "02:43.899",
+    "elapsedSeconds": 163.899,
+    "phase": 1,
+    "mechanic": "GI3"
+  },
+  {
+    "eventNumber": 8,
+    "time": "03:06.701",
+    "elapsedSeconds": 186.701,
+    "phase": 1,
+    "mechanic": "GI3 (MM3)"
+  },
+  {
+    "eventNumber": 9,
+    "time": "03:40.601",
+    "elapsedSeconds": 220.601,
+    "phase": 2,
+    "mechanic": "UE1"
+  },
+  {
+    "eventNumber": 10,
+    "time": "03:55.787",
+    "elapsedSeconds": 235.787,
+    "phase": 2,
+    "mechanic": "For"
+  },
+  {
+    "eventNumber": 11,
+    "time": "04:09.013",
+    "elapsedSeconds": 249.013,
+    "phase": 2,
+    "mechanic": "FT1"
+  },
+  {
+    "eventNumber": 12,
+    "time": "04:19.023",
+    "elapsedSeconds": 259.023,
+    "phase": 2,
+    "mechanic": "FT2"
+  },
+  {
+    "eventNumber": 13,
+    "time": "04:30.064",
+    "elapsedSeconds": 270.064,
+    "phase": 2,
+    "mechanic": "FT3"
+  },
+  {
+    "eventNumber": 14,
+    "time": "04:40.078",
+    "elapsedSeconds": 280.078,
+    "phase": 2,
+    "mechanic": "FT4"
+  },
+  {
+    "eventNumber": 15,
+    "time": "04:51.118",
+    "elapsedSeconds": 291.118,
+    "phase": 2,
+    "mechanic": "FT5"
+  },
+  {
+    "eventNumber": 16,
+    "time": "05:01.130",
+    "elapsedSeconds": 301.13,
+    "phase": 2,
+    "mechanic": "FT6"
+  },
+  {
+    "eventNumber": 17,
+    "time": "05:12.170",
+    "elapsedSeconds": 312.17,
+    "phase": 2,
+    "mechanic": "FT7"
+  },
+  {
+    "eventNumber": 18,
+    "time": "05:22.180",
+    "elapsedSeconds": 322.18,
+    "phase": 2,
+    "mechanic": "FT8"
+  },
+  {
+    "eventNumber": 19,
+    "time": "06:06.231",
+    "elapsedSeconds": 366.231,
+    "phase": 2,
+    "mechanic": "Tri"
+  },
+  {
+    "eventNumber": 20,
+    "time": "06:17.940",
+    "elapsedSeconds": 377.94,
+    "phase": 2,
+    "mechanic": "UE2"
+  },
+  {
+    "eventNumber": 21,
+    "time": "06:27.451",
+    "elapsedSeconds": 387.451,
+    "phase": 2,
+    "mechanic": "Enr"
+  }
+]
