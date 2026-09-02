@@ -457,6 +457,10 @@ h2 {
   text-transform: uppercase;
 }
 
+.fight-details-table .fight-mechanic {
+  white-space: nowrap;
+}
+
 .fight-details-table .fight-event-icon {
   font-size: 1.1rem;
   text-align: center;
