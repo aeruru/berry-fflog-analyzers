@@ -31,6 +31,7 @@ const elements = {
 };
 
 let currentUser = null;
+let dancingMadMechanics = [];
 let fightDetails = new Map();
 let openFightDetailKeys = new Set();
 let reports = [];
@@ -76,6 +77,7 @@ async function initialize() {
   setBusy(true);
 
   try {
+    await loadDancingMadMechanics();
     const token = await completeFflogsLogin();
     if (token) {
       setStatus('FFLogs login complete. Loading your account...');
@@ -97,6 +99,18 @@ async function initialize() {
     renderAccount();
     renderReports();
   }
+}
+
+async function loadDancingMadMechanics() {
+  const response = await fetch('./fight-data/dancing-mad-mechs.json');
+  if (!response.ok) {
+    throw new Error(`Dancing Mad mechanic data returned ${response.status}.`);
+  }
+
+  const mechanics = await response.json();
+  dancingMadMechanics = mechanics
+    .filter((entry) => Number.isFinite(Number(entry.elapsedSeconds)))
+    .sort((first, second) => Number(first.elapsedSeconds) - Number(second.elapsedSeconds));
 }
 
 // Rebuilds the weekly strip and its lookup suggestions together so both surfaces always
@@ -455,7 +469,7 @@ function createDetailedFightCard(report, fight, highlightedFight) {
     card.append(analyzerLinks);
   }
   if (detailsOpen) {
-    card.append(createFightDetailsPanel(report, fight, fightDetails.get(detailKey)));
+    card.append(createFightDetailsPanel(fight, fightDetails.get(detailKey)));
   }
   return card;
 }
@@ -574,7 +588,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
   return { status: 'ready', events };
 }
 
-function createFightDetailsPanel(report, fight, state) {
+function createFightDetailsPanel(fight, state) {
   const panel = document.createElement('div');
   panel.className = 'fight-details-panel';
   if (!state || state.status === 'loading') {
@@ -593,7 +607,7 @@ function createFightDetailsPanel(report, fight, state) {
   const table = document.createElement('table');
   table.className = 'fight-details-table';
   const head = table.createTHead().insertRow();
-  for (const label of ['Time', 'Player', 'Event']) {
+  for (const label of ['Time', 'Mechanic', 'Player', 'Event']) {
     const cell = document.createElement('th');
     cell.textContent = label;
     head.append(cell);
@@ -602,9 +616,10 @@ function createFightDetailsPanel(report, fight, state) {
   for (const event of state.events) {
     const row = body.insertRow();
     const elapsedMs = Math.max(0, event.timestamp - Number(fight.startTime));
-    const absoluteMs = Number(report.startTime) + event.timestamp;
-    const time = new Date(absoluteMs).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    row.insertCell().textContent = `${time} (${formatFightDuration(elapsedMs)})`;
+    row.insertCell().textContent = formatFightDuration(elapsedMs);
+    const mechanicCell = row.insertCell();
+    mechanicCell.className = 'fight-mechanic';
+    mechanicCell.textContent = getDancingMadMechanicLabel(elapsedMs);
     row.insertCell().textContent = event.player;
     const eventCell = row.insertCell();
     eventCell.className = 'fight-event-icon';
@@ -625,6 +640,18 @@ function createFightDetailsPanel(report, fight, state) {
   }
   panel.replaceChildren(table);
   return panel;
+}
+
+function getDancingMadMechanicLabel(elapsedMs) {
+  let latestMechanic = null;
+  for (const mechanic of dancingMadMechanics) {
+    if (Number(mechanic.elapsedSeconds) * 1000 >= elapsedMs) {
+      break;
+    }
+    latestMechanic = mechanic;
+  }
+
+  return latestMechanic ? `P${latestMechanic.phase}.${latestMechanic.mechanic}` : '—';
 }
 
 // Weekly cards are deliberately self-contained controls: their visible summary comes
