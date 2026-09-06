@@ -9,7 +9,29 @@
   --link: #78aee8;
   --muted: #9aa8bb;
   --panel: rgba(31, 41, 55, 0.94);
+  --surface: rgba(17, 24, 39, 0.62);
+  --surface-strong: rgba(17, 24, 39, 0.8);
+  --track: #374151;
+  --wash-secondary: rgba(148, 163, 184, 0.1);
   --shadow: 0 18px 45px rgba(0, 0, 0, 0.34);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --accent: #1f4e79;
+  --accent-dark: #173a5c;
+  --background: #f4f1ea;
+  --background-wash: rgba(31, 78, 121, 0.14);
+  --ink: #23201b;
+  --line: #d9d1c3;
+  --link: #1f4e79;
+  --muted: #68625a;
+  --panel: rgba(255, 250, 240, 0.92);
+  --surface: #fffaf0;
+  --surface-strong: #fffdf8;
+  --track: #ece4d8;
+  --wash-secondary: rgba(178, 75, 91, 0.12);
+  --shadow: 0 18px 45px rgba(52, 42, 27, 0.12);
 }
 
 * {
@@ -19,7 +41,7 @@
 body {
   background:
     linear-gradient(135deg, var(--background-wash), transparent 38%),
-    linear-gradient(315deg, rgba(148, 163, 184, 0.1), transparent 32%),
+    linear-gradient(315deg, var(--wash-secondary), transparent 32%),
     var(--background);
   color: var(--ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -60,7 +82,29 @@ button:disabled {
 }
 
 .masthead {
+  align-items: end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   margin-bottom: 22px;
+}
+
+.masthead h1 {
+  grid-column: 1 / -1;
+}
+
+.theme-toggle-button {
+  align-self: start;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 0.8rem;
+  min-height: 36px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.theme-toggle-button:hover {
+  background: var(--background-wash);
 }
 
 .eyebrow {
@@ -133,7 +177,7 @@ h2 {
 }
 
 .report-search-controls input {
-  background: rgba(17, 24, 39, 0.62);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
@@ -191,7 +235,7 @@ h2 {
 }
 
 .detailed-report-card {
-  background: rgba(17, 24, 39, 0.62);
+  background: var(--surface);
   border: 1px solid var(--accent);
   border-radius: 8px;
   box-shadow: 0 8px 22px rgba(79, 143, 214, 0.16);
@@ -239,7 +283,7 @@ h2 {
 }
 
 .report-phase-select {
-  background: rgba(17, 24, 39, 0.8);
+  background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--ink);
@@ -251,7 +295,8 @@ h2 {
   width: 94px;
 }
 
-.report-reload-button {
+.report-reload-button,
+.report-details-view-button {
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -261,7 +306,8 @@ h2 {
   white-space: nowrap;
 }
 
-.report-reload-button:hover {
+.report-reload-button:hover,
+.report-details-view-button:hover {
   background: rgba(96, 165, 250, 0.1);
 }
 
@@ -291,7 +337,7 @@ h2 {
 }
 
 .detailed-fight-card {
-  background: rgba(17, 24, 39, 0.78);
+  background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px 12px;
@@ -402,7 +448,7 @@ h2 {
 }
 
 .boss-health-bar {
-  background: #374151;
+  background: var(--track);
   border-radius: 999px;
   height: 13px;
   margin-top: 7px;
@@ -433,38 +479,432 @@ h2 {
   color: var(--muted);
   font-size: 0.8rem;
   margin-top: 14px;
-  overflow-x: auto;
+  overflow: visible;
   padding-top: 12px;
 }
 
 .fight-details-table {
   border-collapse: collapse;
   color: var(--ink);
-  font-size: 0.78rem;
+  table-layout: fixed;
   width: 100%;
 }
 
 .fight-details-table th,
 .fight-details-table td {
   border-bottom: 1px solid var(--line);
-  padding: 7px 6px;
+  padding: 9px 7px;
   text-align: left;
 }
 
 .fight-details-table th {
   color: var(--muted);
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
 }
 
-.fight-details-table .fight-mechanic {
+.fight-details-table th:nth-child(1),
+.fight-details-table td:nth-child(1) {
+  width: 14%;
+}
+
+.fight-details-table th:nth-child(2),
+.fight-details-table td:nth-child(2) {
+  width: 22%;
+}
+
+.fight-details-table th:last-child,
+.fight-details-table td:last-child {
+  text-align: right;
+  width: 10%;
+}
+
+.fight-timeline {
+  display: grid;
+  gap: 8px;
+}
+
+.fight-timeline-row {
+  align-items: end;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  min-height: 48px;
+}
+
+.fight-timeline-phase {
+  align-self: end;
+  color: var(--ink);
+  font-size: 0.72rem;
+  line-height: 1;
+  padding-bottom: 38px;
+}
+
+.fight-timeline-canvas {
+  height: 48px;
+  min-width: 0;
+  position: relative;
+}
+
+.fight-timeline-row.has-events,
+.fight-timeline-row.has-events .fight-timeline-canvas {
+  min-height: 82px;
+}
+
+.fight-timeline-row.crowded-end,
+.fight-timeline-row.crowded-end .fight-timeline-canvas {
+  min-height: 62px;
+}
+
+.fight-timeline-row.has-events.crowded-end,
+.fight-timeline-row.has-events.crowded-end .fight-timeline-canvas {
+  min-height: 96px;
+}
+
+.fight-timeline-track {
+  border-radius: 999px;
+  bottom: 38px;
+  height: 10px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.fight-timeline-tick {
+  background: rgba(255, 255, 255, 0.82);
+  bottom: -2px;
+  height: 14px;
+  position: absolute;
+  transform: translateX(-1px);
+  width: 2px;
+}
+
+.fight-timeline-tick.boundary {
+  height: 16px;
+}
+
+.fight-timeline-tick.boundary-start {
+  transform: none;
+}
+
+.fight-timeline-tick.boundary-end {
+  transform: translateX(-100%);
+}
+
+.fight-timeline-time {
+  color: var(--muted);
+  font-size: 0.56rem;
+  font-weight: 700;
+  left: 50%;
+  line-height: 1;
+  position: absolute;
+  top: calc(100% + 5px);
+  transform: translateX(-50%);
   white-space: nowrap;
 }
 
-.fight-details-table .fight-event-icon {
-  font-size: 1.1rem;
+.fight-timeline-tick.boundary-start .fight-timeline-time,
+.fight-timeline-tick.boundary-start .fight-timeline-mechanic {
+  left: 0;
+  text-align: left;
+  transform: none;
+}
+
+.fight-timeline-tick.boundary-end .fight-timeline-time,
+.fight-timeline-tick.boundary-end .fight-timeline-mechanic {
+  left: auto;
+  right: 0;
+  text-align: right;
+  transform: none;
+}
+
+.fight-timeline-tick.boundary-end.crowded .fight-timeline-time {
+  top: calc(100% + 28px);
+}
+
+.fight-timeline-tick.boundary-end.crowded .fight-timeline-mechanic {
+  top: calc(100% + 39px);
+}
+
+.fight-timeline-mechanic {
+  color: var(--muted);
+  font-size: 0.38rem;
+  font-weight: 600;
+  left: 50%;
+  line-height: 1;
+  position: absolute;
   text-align: center;
-  width: 64px;
+  top: calc(100% + 16px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  width: max-content;
+}
+
+.fight-timeline-event {
+  align-items: center;
+  cursor: help;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  width: 22px;
+  z-index: 2;
+}
+
+/* Raise the marker's whole stacking context, not just its tooltip child. Otherwise
+   equal-z-index markers appended later can paint their boxes over an open panel. */
+.fight-timeline-event:hover,
+.fight-timeline-event:focus,
+.fight-timeline-event:focus-within,
+.fight-timeline-event.pinned {
+  z-index: 30;
+}
+
+.fight-timeline-event > .death-icon {
+  font-size: 1rem;
+  line-height: 1;
+  transition: opacity 120ms ease;
+}
+
+.fight-timeline-event > .damage-down-icon {
+  height: 18px;
+  transition: opacity 120ms ease;
+}
+
+.fight-timeline-event.grouped {
+  height: auto;
+  width: auto;
+}
+
+.fight-timeline-event-box {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  display: inline-flex;
+  gap: 5px;
+  min-height: 27px;
+  padding: 2px 5px;
+  transition: opacity 120ms ease;
+}
+
+.fight-timeline-event.grouped:hover .fight-timeline-event-box,
+.fight-timeline-event.grouped:focus .fight-timeline-event-box,
+.fight-timeline-event.grouped.pinned .fight-timeline-event-box {
+  opacity: 0.5;
+}
+
+.fight-timeline-event-member-preview {
+  align-items: center;
+  display: inline-flex;
+  height: 22px;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  /* These previews are direct canvas children, so use the same vertical origin
+     as an ordinary timeline marker instead of the old group-relative origin. */
+  top: 4px;
+  transform: translateX(-50%);
+  transition: opacity 120ms ease;
+  width: 22px;
+  z-index: 3;
+}
+
+.fight-timeline-event-member-preview.visible {
+  opacity: 1;
+  /* Reconstructed markers must paint over the faded summary box. Their 22px
+     band ends before the adjacent hover table begins. */
+  z-index: 40;
+}
+
+.fight-timeline-event-member-preview .damage-down-icon {
+  /* Match an ordinary timeline event exactly; only its grouping state differs. */
+  height: 18px;
+}
+
+.fight-timeline-event-member-preview .death-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fight-timeline-group-icon {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 20px;
+  position: relative;
+}
+
+.fight-timeline-group-icon > .damage-down-icon {
+  height: 18px;
+}
+
+.fight-timeline-group-icon > .death-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.fight-timeline-event-count {
+  color: #fff;
+  font-size: 0.58rem;
+  font-weight: 900;
+  line-height: 1;
+  position: absolute;
+  right: -4px;
+  text-shadow: 0 1px 2px #000;
+  top: -5px;
+}
+
+.fight-timeline-event:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.fight-timeline-tooltip {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  display: grid;
+  gap: 6px;
+  left: 50%;
+  min-width: 190px;
+  opacity: 0;
+  padding: 9px 11px;
+  pointer-events: none;
+  position: absolute;
+  top: 27px;
+  transform: translateX(-50%) translateY(-3px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  visibility: hidden;
+  z-index: 20;
+}
+
+.fight-timeline-tooltip.align-start {
+  left: 0;
+  transform: translateY(-3px);
+}
+
+.fight-timeline-tooltip.align-end {
+  left: auto;
+  right: 0;
+  transform: translateY(-3px);
+}
+
+.fight-timeline-tooltip.above {
+  bottom: 27px;
+  top: auto;
+  transform: translateX(-50%) translateY(3px);
+}
+
+.fight-timeline-tooltip.above.align-start,
+.fight-timeline-tooltip.above.align-end {
+  transform: translateY(3px);
+}
+
+.fight-timeline-event:hover .fight-timeline-tooltip,
+.fight-timeline-event:focus .fight-timeline-tooltip,
+.fight-timeline-event.pinned .fight-timeline-tooltip {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+  visibility: visible;
+}
+
+.fight-timeline-event:hover .fight-timeline-tooltip.align-start,
+.fight-timeline-event:focus .fight-timeline-tooltip.align-start,
+.fight-timeline-event:hover .fight-timeline-tooltip.align-end,
+.fight-timeline-event:focus .fight-timeline-tooltip.align-end,
+.fight-timeline-event.pinned .fight-timeline-tooltip.align-start,
+.fight-timeline-event.pinned .fight-timeline-tooltip.align-end {
+  transform: translateY(0);
+}
+
+.fight-timeline-tooltip > span {
+  display: grid;
+  gap: 1px;
+}
+
+.fight-timeline-tooltip small {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.fight-timeline-tooltip strong {
+  font-size: 0.74rem;
+  line-height: 1.2;
+}
+
+.fight-timeline-tooltip .fight-timeline-tooltip-icon {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  justify-self: end;
+}
+
+.fight-timeline-group-tooltip {
+  min-width: min(380px, calc(100vw - 32px));
+}
+
+.fight-timeline-group-table {
+  border-collapse: collapse;
+  /* Use the regular details table's compact four-column proportions so moving
+     between table view and a group preview retains the same reading pattern. */
+  table-layout: fixed;
+  width: 100%;
+}
+
+.fight-timeline-group-table th:nth-child(1),
+.fight-timeline-group-table td:nth-child(1) {
+  width: 14%;
+}
+
+.fight-timeline-group-table th:nth-child(2),
+.fight-timeline-group-table td:nth-child(2) {
+  width: 22%;
+}
+
+.fight-timeline-group-table th:nth-child(3),
+.fight-timeline-group-table td:nth-child(3) {
+  width: 54%;
+}
+
+.fight-timeline-group-table th:nth-child(4),
+.fight-timeline-group-table td:nth-child(4) {
+  text-align: right;
+  width: 10%;
+}
+
+.fight-timeline-group-table th,
+.fight-timeline-group-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 7px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.fight-timeline-group-table th {
+  color: var(--muted);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+}
+
+.fight-timeline-group-table td {
+  color: var(--ink);
+  font-size: 0.7rem;
+}
+
+.fight-timeline-group-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.fight-timeline-group-table .damage-down-icon {
+  height: 15px;
 }
 
 .damage-down-icon {
@@ -594,7 +1034,7 @@ h2 {
 
 .report-card {
   align-items: flex-start;
-  background: rgba(17, 24, 39, 0.62);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 7px;
   box-sizing: border-box;

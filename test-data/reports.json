@@ -1,8 +1,13 @@
 {
   "actors": [
-    { "id": 1, "name": "Kiwi Berry", "type": "Player" },
-    { "id": 2, "name": "Cody Berry", "type": "Player" },
-    { "id": 3, "name": "Winry Berry", "type": "Player" }
+    { "id": 1, "name": "Berry Blue", "type": "Player" },
+    { "id": 2, "name": "Maple Mint", "type": "Player" },
+    { "id": 3, "name": "Juniper Jam", "type": "Player" },
+    { "id": 4, "name": "Peach Parfait", "type": "Player" },
+    { "id": 5, "name": "Cocoa Crumble", "type": "Player" },
+    { "id": 6, "name": "Lemon Lassi", "type": "Player" },
+    { "id": 7, "name": "Kiwi Fizz", "type": "Player" },
+    { "id": 8, "name": "Cherry Choux", "type": "Player" }
   ],
   "reports": [
     {
@@ -21,7 +26,7 @@
       "endTime": 1787157000000,
       "fights": [
         { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 82000, "kill": false, "bossPercentage": 72.4, "lastPhase": 1 },
-        { "id": 2, "encounterID": 1085, "startTime": 100000, "endTime": 241000, "kill": false, "bossPercentage": 38.6, "lastPhase": 1, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 185000 }, { "type": "death", "targetID": 2, "timestamp": 226000 }, { "type": "death", "targetID": 1, "timestamp": 232000 }] }
+        { "id": 2, "encounterID": 1085, "startTime": 100000, "endTime": 241000, "kill": false, "bossPercentage": 38.6, "lastPhase": 1, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 185000 }, { "type": "death", "targetID": 2, "timestamp": 192000 }] }
       ]
     },
     {
@@ -31,7 +36,7 @@
       "endTime": 1787071000000,
       "fights": [
         { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 145000, "kill": false, "bossPercentage": 21.5, "lastPhase": 1 },
-        { "id": 2, "encounterID": 1085, "startTime": 170000, "endTime": 422000, "kill": false, "bossPercentage": 64.2, "lastPhase": 2, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 355000 }, { "type": "death", "targetID": 3, "timestamp": 401000 }, { "type": "death", "targetID": 2, "timestamp": 409000 }] }
+        { "id": 2, "encounterID": 1085, "startTime": 170000, "endTime": 422000, "kill": false, "bossPercentage": 64.2, "lastPhase": 2, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 270000 }, { "type": "death", "targetID": 1, "timestamp": 276000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 400000 }, { "type": "death", "targetID": 3, "timestamp": 406000 }] }
       ]
     },
     {
@@ -42,7 +47,7 @@
       "fights": [
         { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 130000, "kill": false, "bossPercentage": 30.1, "lastPhase": 1 },
         { "id": 2, "encounterID": 1085, "startTime": 150000, "endTime": 390000, "kill": false, "bossPercentage": 48.8, "lastPhase": 2 },
-        { "id": 3, "encounterID": 1085, "startTime": 420000, "endTime": 785000, "kill": false, "bossPercentage": 18.9, "lastPhase": 3, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 694000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 711000 }, { "type": "death", "targetID": 1, "timestamp": 771000 }, { "type": "death", "targetID": 2, "timestamp": 775000 }] }
+        { "id": 3, "encounterID": 1085, "startTime": 420000, "endTime": 1070000, "kill": false, "bossPercentage": 18.9, "lastPhase": 3, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 810000 }, { "type": "death", "targetID": 1, "timestamp": 816000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 1030000 }, { "type": "death", "targetID": 2, "timestamp": 1036000 }] }
       ]
     },
     {
@@ -53,8 +58,8 @@
       "fights": [
         { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 130000, "kill": false, "bossPercentage": 25, "lastPhase": 1 },
         { "id": 2, "encounterID": 1085, "startTime": 150000, "endTime": 390000, "kill": false, "bossPercentage": 50, "lastPhase": 2 },
-        { "id": 3, "encounterID": 1085, "startTime": 410000, "endTime": 760000, "kill": false, "bossPercentage": 22, "lastPhase": 3 },
-        { "id": 4, "encounterID": 1085, "startTime": 780000, "endTime": 1260000, "kill": false, "bossPercentage": 81.3, "lastPhase": 4, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 1120000 }, { "type": "death", "targetID": 3, "timestamp": 1240000 }, { "type": "death", "targetID": 1, "timestamp": 1248000 }] }
+        { "id": 3, "encounterID": 1085, "startTime": 410000, "endTime": 1011000, "kill": false, "bossPercentage": 22, "lastPhase": 3 },
+        { "id": 4, "encounterID": 1085, "startTime": 1100000, "endTime": 1920000, "kill": false, "bossPercentage": 81.3, "lastPhase": 4, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 1820000 }, { "type": "death", "targetID": 1, "timestamp": 1828000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 1890000 }, { "type": "death", "targetID": 3, "timestamp": 1898000 }] }
       ]
     },
     {
@@ -63,11 +68,11 @@
       "startTime": 1786809600000,
       "endTime": 1786814200000,
       "fights": [
-        { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 130000, "kill": false, "bossPercentage": 20, "lastPhase": 1 },
-        { "id": 2, "encounterID": 1085, "startTime": 150000, "endTime": 390000, "kill": false, "bossPercentage": 44, "lastPhase": 2 },
-        { "id": 3, "encounterID": 1085, "startTime": 410000, "endTime": 760000, "kill": false, "bossPercentage": 16, "lastPhase": 3 },
-        { "id": 4, "encounterID": 1085, "startTime": 780000, "endTime": 1260000, "kill": false, "bossPercentage": 70, "lastPhase": 4 },
-        { "id": 5, "encounterID": 1085, "startTime": 1280000, "endTime": 1850000, "kill": false, "bossPercentage": 93.7, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 1690000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 1715000 }, { "type": "death", "targetID": 2, "timestamp": 1830000 }, { "type": "death", "targetID": 3, "timestamp": 1835000 }] }
+        { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 130000, "kill": false, "bossPercentage": 20, "lastPhase": 1, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 90000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 90000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 90000 }, { "type": "death", "targetID": 1, "timestamp": 110000 }, { "type": "death", "targetID": 2, "timestamp": 110000 }, { "type": "death", "targetID": 3, "timestamp": 110000 }] },
+        { "id": 2, "encounterID": 1085, "startTime": 150000, "endTime": 390000, "kill": false, "bossPercentage": 44, "lastPhase": 2, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 350000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 350000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 350000 }, { "type": "death", "targetID": 1, "timestamp": 350000 }, { "type": "death", "targetID": 2, "timestamp": 350000 }, { "type": "death", "targetID": 3, "timestamp": 350000 }] },
+        { "id": 3, "encounterID": 1085, "startTime": 410000, "endTime": 1009000, "kill": false, "bossPercentage": 16, "lastPhase": 3, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 950000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 950000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 950000 }, { "type": "death", "targetID": 1, "timestamp": 970000 }, { "type": "death", "targetID": 2, "timestamp": 970000 }, { "type": "death", "targetID": 3, "timestamp": 970000 }] },
+        { "id": 4, "encounterID": 1085, "startTime": 1080000, "endTime": 1900000, "kill": false, "bossPercentage": 70, "lastPhase": 4, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 1870000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 1870000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 1870000 }, { "type": "death", "targetID": 1, "timestamp": 1870000 }, { "type": "death", "targetID": 2, "timestamp": 1870000 }, { "type": "death", "targetID": 3, "timestamp": 1870000 }] },
+        { "id": 5, "encounterID": 1085, "startTime": 1920000, "endTime": 2970000, "kill": false, "bossPercentage": 93.7, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 2770000 }, { "type": "death", "targetID": 2, "timestamp": 2780000 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 3, "timestamp": 2930000 }, { "type": "death", "targetID": 3, "timestamp": 2940000 }] }
       ]
     },
     {
@@ -76,9 +81,9 @@
       "startTime": 1786723200000,
       "endTime": 1786728000000,
       "fights": [
-        { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 340000, "kill": false, "bossPercentage": 35, "lastPhase": 3 },
-        { "id": 2, "encounterID": 1085, "startTime": 400000, "endTime": 940000, "kill": true, "bossPercentage": 0, "lastPhase": 5 },
-        { "id": 3, "encounterID": 1085, "startTime": 1000000, "endTime": 1600000, "kill": true, "bossPercentage": 0, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 1440000 }] }
+        { "id": 1, "encounterID": 1085, "startTime": 0, "endTime": 650000, "kill": false, "bossPercentage": 35, "lastPhase": 3 },
+        { "id": 2, "encounterID": 1085, "startTime": 700000, "endTime": 1800000, "kill": true, "bossPercentage": 0, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 1770000 }, { "type": "death", "targetID": 1, "timestamp": 1778000 }] },
+        { "id": 3, "encounterID": 1085, "startTime": 1900000, "endTime": 3020000, "kill": true, "bossPercentage": 0, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 2990000 }, { "type": "death", "targetID": 2, "timestamp": 2998000 }] }
       ]
     }
   ]
