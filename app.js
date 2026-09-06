@@ -12,6 +12,7 @@ import {
   fetchWeeklyReports,
 } from './src/fflogs.js';
 import { parseFflogsReportCode } from './src/report-search.js';
+import { createGroupingScenarioReport } from './test-data/grouping-scenarios.js';
 
 const elements = {
   accountName: document.querySelector('#accountName'),
@@ -28,6 +29,7 @@ const elements = {
   reportsStatus: document.querySelector('#reportsStatus'),
   statusLine: document.querySelector('#statusLine'),
   testDataButton: document.querySelector('#testDataButton'),
+  themeToggleButton: document.querySelector('#themeToggleButton'),
 };
 
 let currentUser = null;
@@ -35,9 +37,25 @@ let dancingMadMechanics = [];
 let fightDetails = new Map();
 let openFightDetailKeys = new Set();
 let reports = [];
+let selectedDetailsView = 'timeline';
 let selectedReport = null;
 let selectedReportPhase = 'all';
 let usingTestData = false;
+let timelineCollisionFrame = null;
+
+// Phase boundaries are encounter timings, rather than inferred from the first named
+// mechanic. Keeping them explicit also lets timelines render phases with sparse data.
+const DANCING_MAD_PHASE_STARTS = new Map([
+  [1, 0],
+  [2, 207_000],
+  [3, 421_000],
+  [4, 745_000],
+  [5, 900_000],
+]);
+
+// Timeline positions travel through percentages before returning to pixels. Treat
+// sub-hundredth-pixel drift as exact contact so a designed 22px gap stays ungrouped.
+const TIMELINE_GROUP_EPSILON_PX = 0.01;
 
 // The app is intentionally state-driven: user actions update these module-level values,
 // then the relevant render function rebuilds its section from that single source of truth.
@@ -67,9 +85,34 @@ elements.authButton.addEventListener('click', async () => {
 });
 
 elements.testDataButton.addEventListener('click', toggleTestData);
+elements.themeToggleButton.addEventListener('click', toggleTheme);
 elements.reportSearchForm.addEventListener('submit', searchForReport);
+window.addEventListener('resize', scheduleTimelineCollisionCheck);
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('.fight-timeline-event.grouped')) {
+    closePinnedTimelineGroups();
+  }
+});
 
+renderThemeButton();
 initialize();
+
+function toggleTheme() {
+  const nextTheme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light';
+  document.documentElement.dataset.theme = nextTheme;
+  try {
+    localStorage.setItem('berry-theme', nextTheme);
+  } catch {
+    // The selected theme still applies for this page when storage is unavailable.
+  }
+  renderThemeButton();
+}
+
+function renderThemeButton() {
+  const isLight = document.documentElement.dataset.theme === 'light';
+  elements.themeToggleButton.textContent = isLight ? 'Dark mode' : 'Light mode';
+  elements.themeToggleButton.setAttribute('aria-label', `Switch to ${isLight ? 'dark' : 'light'} mode`);
+}
 
 // Restores an FFLogs login when possible, then supplies the first complete report list
 // before handing control to the normal account/report render loop.
@@ -140,7 +183,7 @@ async function toggleTestData() {
       }
 
       const payload = await response.json();
-      reports = payload.reports
+      reports = [...payload.reports, createGroupingScenarioReport()]
         .filter((report) => report?.fights?.length > 0)
         .map((report) => ({ ...report, testActors: payload.actors ?? [] }));
       usingTestData = true;
@@ -205,7 +248,6 @@ async function searchForReport(event) {
     if (!selectedReport) {
       throw new Error(`FFLogs could not find report ${reportCode}.`);
     }
-    selectedReportPhase = 'all';
     fightDetails = new Map();
     openFightDetailKeys = new Set();
     renderLookupResult();
@@ -222,13 +264,142 @@ async function searchForReport(event) {
 
 function renderLookupResult() {
   elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
+  scheduleTimelineCollisionCheck();
+}
+
+// Timeline labels vary enough that elapsed-time thresholds are unreliable. Measure the
+// rendered label boxes and move only end labels that overlap their neighbor by 2px+.
+function scheduleTimelineCollisionCheck() {
+  cancelAnimationFrame(timelineCollisionFrame);
+  timelineCollisionFrame = requestAnimationFrame(() => {
+    renderTimelineEventGroups();
+    for (const row of document.querySelectorAll('.fight-timeline-row.last-phase-row')) {
+      row.classList.remove('crowded-end');
+      const endTick = row.querySelector('.fight-timeline-tick.boundary-end');
+      endTick?.classList.remove('crowded');
+      if (!endTick) {
+        continue;
+      }
+
+      const endBounds = getTimelineTickLabelBounds(endTick);
+      const precedingTick = [...row.querySelectorAll('.fight-timeline-tick')]
+        .filter((tick) => tick !== endTick)
+        .sort((first, second) => second.getBoundingClientRect().left - first.getBoundingClientRect().left)[0];
+      const precedingBounds = getTimelineTickLabelBounds(precedingTick);
+      if (endBounds && precedingBounds && precedingBounds.right - endBounds.left > 1) {
+        endTick.classList.add('crowded');
+        row.classList.add('crowded-end');
+      }
+    }
+  });
+}
+
+// Grouping is based on the canvas's rendered width so it reflects real icon overlap,
+// including after responsive layout changes. Same event types collapse before mixed
+// candidates are checked, which keeps DD and death groups separate whenever possible.
+function renderTimelineEventGroups() {
+  for (const canvas of document.querySelectorAll('.fight-timeline-canvas')) {
+    const sourceItems = canvas.timelineEventItems ?? [];
+    canvas.querySelectorAll('.fight-timeline-event, .fight-timeline-event-member-preview')
+      .forEach((marker) => marker.remove());
+    if (sourceItems.length === 0 || canvas.clientWidth === 0) {
+      continue;
+    }
+
+    const items = sourceItems;
+
+    const candidates = [];
+    for (const kind of ['Damage down', 'Death']) {
+      const kindItems = items
+        .filter((item) => item.event.kind === kind)
+        .sort((first, second) => first.position - second.position);
+      let cluster = [];
+      for (const item of kindItems) {
+        const itemX = item.position / 100 * canvas.clientWidth;
+        const previousX = cluster.length > 0
+          ? cluster.at(-1).position / 100 * canvas.clientWidth
+          : null;
+        if (previousX !== null && itemX - previousX >= 22 - TIMELINE_GROUP_EPSILON_PX) {
+          candidates.push(createTimelineGroupCandidate(kind, cluster, canvas.clientWidth));
+          cluster = [];
+        }
+        cluster.push(item);
+      }
+      if (cluster.length > 0) {
+        candidates.push(createTimelineGroupCandidate(kind, cluster, canvas.clientWidth));
+      }
+    }
+
+    const remaining = new Set(candidates);
+    while (remaining.size > 0) {
+      const component = [remaining.values().next().value];
+      remaining.delete(component[0]);
+      for (let index = 0; index < component.length; index += 1) {
+        const current = component[index];
+        for (const candidate of [...remaining]) {
+          const differentKinds = candidate.kind !== current.kind;
+          const collisionDistance = (candidate.width + current.width) / 2;
+          const overlaps = Math.abs(candidate.x - current.x)
+            < collisionDistance - TIMELINE_GROUP_EPSILON_PX;
+          if (differentKinds && overlaps) {
+            component.push(candidate);
+            remaining.delete(candidate);
+          }
+        }
+      }
+
+      const componentItems = component.flatMap((candidate) => candidate.items);
+      const position = componentItems.reduce((sum, item) => sum + item.position, 0) / componentItems.length;
+      if (component.length > 1) {
+        const groups = ['Damage down', 'Death']
+          .map((kind) => ({ kind, items: componentItems.filter((item) => item.event.kind === kind) }))
+          .filter((group) => group.items.length > 0);
+        canvas.append(createTimelineEventGroupMarker(groups, position, canvas));
+      } else if (component[0].items.length > 1) {
+        const groups = [{ kind: component[0].kind, items: component[0].items }];
+        canvas.append(createTimelineEventGroupMarker(groups, position, canvas));
+      } else {
+        const item = component[0].items[0];
+        canvas.append(createTimelineEventMarker(item.event, item.mechanic, item.elapsedMs, item.position));
+      }
+    }
+  }
+}
+
+function createTimelineGroupCandidate(kind, items, canvasWidth) {
+  const firstX = items[0].position / 100 * canvasWidth;
+  const lastX = items.at(-1).position / 100 * canvasWidth;
+  // Preserve the cluster's real occupied span for mixed-type collision checks.
+  // Each outer marker contributes an 11px radius around its center.
+  const x = (firstX + lastX) / 2;
+  return {
+    kind,
+    items,
+    position: x / canvasWidth * 100,
+    width: lastX - firstX + 22,
+    x,
+  };
+}
+
+function getTimelineTickLabelBounds(tick) {
+  if (!tick) {
+    return null;
+  }
+  const labels = [...tick.querySelectorAll('.fight-timeline-time, .fight-timeline-mechanic')];
+  if (labels.length === 0) {
+    return null;
+  }
+  const rectangles = labels.map((label) => label.getBoundingClientRect());
+  return {
+    left: Math.min(...rectangles.map((rectangle) => rectangle.left)),
+    right: Math.max(...rectangles.map((rectangle) => rectangle.right)),
+  };
 }
 
 // Selecting a known weekly/test report avoids another network request while still
 // resetting viewer-only state that belongs to the previously selected report.
 function loadKnownReport(report) {
   selectedReport = report;
-  selectedReportPhase = 'all';
   fightDetails = new Map();
   openFightDetailKeys = new Set();
   elements.reportSearchInput.value = report.code;
@@ -288,6 +459,18 @@ function createDetailedReportView(report) {
     renderLookupResult();
   });
 
+  const detailsViewButton = document.createElement('button');
+  detailsViewButton.className = 'report-details-view-button';
+  detailsViewButton.type = 'button';
+  detailsViewButton.textContent = selectedDetailsView === 'timeline'
+    ? 'Switch to table view'
+    : 'Switch to timeline view';
+  detailsViewButton.setAttribute('aria-label', `Switch to ${selectedDetailsView === 'timeline' ? 'table' : 'timeline'} view`);
+  detailsViewButton.addEventListener('click', () => {
+    selectedDetailsView = selectedDetailsView === 'timeline' ? 'table' : 'timeline';
+    renderLookupResult();
+  });
+
   const fightCount = document.createElement('span');
   fightCount.className = 'fight-count-pill';
   fightCount.textContent = `${visibleFights.length} ${visibleFights.length === 1 ? 'pull' : 'pulls'}`;
@@ -297,7 +480,7 @@ function createDetailedReportView(report) {
     ? 'No DMU pulls'
     : `No P${selectedReportPhase} pulls`;
   pullSummary.append(fightCount, createBestPullBadge(highlightedFight, emptyPullLabel));
-  actions.append(reloadButton, phaseFilter, pullSummary);
+  actions.append(reloadButton, phaseFilter, detailsViewButton, pullSummary);
   summary.append(info, actions);
 
   const fightList = document.createElement('div');
@@ -599,59 +782,393 @@ function createFightDetailsPanel(fight, state) {
     panel.textContent = `Could not load fight events: ${state.error}`;
     return panel;
   }
-  if (state.events.length === 0) {
-    panel.textContent = 'No death or damage down events found for this fight.';
-    return panel;
+  panel.replaceChildren(selectedDetailsView === 'table'
+    ? createFightDetailsTable(fight, state.events)
+    : createFightTimeline(fight, state.events));
+  return panel;
+}
+
+function createFightDetailsTable(fight, events) {
+  if (events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detailed-empty-state';
+    empty.textContent = 'No deaths or damage downs in this fight.';
+    return empty;
   }
 
   const table = document.createElement('table');
   table.className = 'fight-details-table';
-  const head = table.createTHead().insertRow();
-  for (const label of ['Time', 'Mechanic', 'Player', 'Event']) {
+  const head = document.createElement('thead');
+  const headingRow = document.createElement('tr');
+  for (const heading of ['Time', 'Mechanic', 'Player', 'Event']) {
     const cell = document.createElement('th');
-    cell.textContent = label;
-    head.append(cell);
+    cell.scope = 'col';
+    cell.textContent = heading;
+    headingRow.append(cell);
   }
-  const body = table.createTBody();
-  for (const event of state.events) {
-    const row = body.insertRow();
-    const elapsedMs = Math.max(0, event.timestamp - Number(fight.startTime));
-    row.insertCell().textContent = formatFightDuration(elapsedMs);
-    const mechanicCell = row.insertCell();
-    mechanicCell.className = 'fight-mechanic';
-    mechanicCell.textContent = getDancingMadMechanicLabel(elapsedMs);
-    row.insertCell().textContent = event.player;
-    const eventCell = row.insertCell();
-    eventCell.className = 'fight-event-icon';
-    if (event.kind === 'Death') {
-      const deathIcon = document.createElement('span');
-      deathIcon.setAttribute('aria-label', 'Death');
-      deathIcon.title = 'Death';
-      deathIcon.textContent = '💀';
-      eventCell.append(deathIcon);
-    } else {
-      const damageDownIcon = document.createElement('img');
-      damageDownIcon.className = 'damage-down-icon';
-      damageDownIcon.src = 'assets/damage-down.png';
-      damageDownIcon.alt = 'Damage down';
-      damageDownIcon.title = 'Damage down';
-      eventCell.append(damageDownIcon);
-    }
+  head.append(headingRow);
+
+  const body = document.createElement('tbody');
+  for (const event of events) {
+    const elapsedMs = Math.max(0, Number(event.timestamp) - Number(fight.startTime));
+    const eventPhase = getDancingMadPhase(elapsedMs);
+    const mechanic = getDancingMadMechanic(elapsedMs, eventPhase);
+    const row = document.createElement('tr');
+    const timeCell = document.createElement('td');
+    timeCell.textContent = formatFightDuration(elapsedMs);
+    const mechanicCell = document.createElement('td');
+    mechanicCell.textContent = mechanic ? `P${mechanic.phase}.${mechanic.mechanic}` : '—';
+    const playerCell = document.createElement('td');
+    playerCell.textContent = event.player;
+    const eventCell = document.createElement('td');
+    eventCell.append(createFightEventIcon(event.kind));
+    row.append(timeCell, mechanicCell, playerCell, eventCell);
+    body.append(row);
   }
-  panel.replaceChildren(table);
-  return panel;
+
+  table.append(head, body);
+  return table;
 }
 
-function getDancingMadMechanicLabel(elapsedMs) {
+function createFightTimeline(fight, events) {
+  const timeline = document.createElement('div');
+  timeline.className = 'fight-timeline';
+  const durationMs = getFightDuration(fight);
+  const endingPhase = Math.max(1, Number(fight.lastPhase) || 1);
+  const eqMechanic = dancingMadMechanics.find((mechanic) => mechanic.mechanic.startsWith('EQ'));
+  const eqTimestampMs = Number(eqMechanic?.elapsedSeconds) * 1000;
+  const splitLongPhaseThree = durationMs >= 600_000 && Number.isFinite(eqTimestampMs);
+  const phaseSegments = [];
+
+  for (let phase = 1; phase <= endingPhase; phase += 1) {
+    const phaseStart = Math.min(durationMs, DANCING_MAD_PHASE_STARTS.get(phase) ?? durationMs);
+    const nextKnownStart = DANCING_MAD_PHASE_STARTS.get(phase + 1);
+    const phaseEnd = Math.max(phaseStart, Math.min(durationMs, nextKnownStart ?? durationMs));
+    if (phase === 3 && splitLongPhaseThree && eqTimestampMs > phaseStart && eqTimestampMs < phaseEnd) {
+      phaseSegments.push(
+        { phase, phaseStart, phaseEnd: eqTimestampMs, isFirstSegment: true, isLastSegment: false },
+        { phase, phaseStart: eqTimestampMs, phaseEnd, isFirstSegment: false, isLastSegment: true },
+      );
+    } else {
+      phaseSegments.push({ phase, phaseStart, phaseEnd, isFirstSegment: true, isLastSegment: true });
+    }
+  }
+
+  for (const { phase, phaseStart, phaseEnd, isFirstSegment, isLastSegment } of phaseSegments) {
+    const phaseDuration = Math.max(1, phaseEnd - phaseStart);
+    const row = document.createElement('div');
+    row.className = 'fight-timeline-row';
+    if (phase === endingPhase && isLastSegment) {
+      row.classList.add('last-phase-row');
+    }
+
+    const label = document.createElement('strong');
+    label.className = 'fight-timeline-phase';
+    label.textContent = `P${phase}`;
+
+    const canvas = document.createElement('div');
+    canvas.className = 'fight-timeline-canvas';
+    canvas.timelineEventItems = [];
+    const track = document.createElement('div');
+    track.className = `fight-timeline-track phase-${((phase - 1) % 6) + 1}`;
+
+    const timelineTicks = new Map();
+    const addTimelineTick = (timestampMs, title, mechanicLabel = '', boundary = '') => {
+      const position = ((timestampMs - phaseStart) / phaseDuration) * 100;
+      const mergeToleranceMs = boundary === 'end' ? 100 : 1_000;
+      const nearbyTick = [...timelineTicks.entries()]
+        .find(([tickTime]) => Math.abs(tickTime - timestampMs) < mergeToleranceMs);
+      const tickKey = nearbyTick?.[0] ?? Math.round(timestampMs);
+      let tick = nearbyTick?.[1];
+      if (!tick) {
+        tick = document.createElement('span');
+        tick.className = 'fight-timeline-tick';
+        tick.style.left = `${position}%`;
+        const timestamp = document.createElement('span');
+        timestamp.className = 'fight-timeline-time';
+        timestamp.textContent = formatFightDuration(timestampMs);
+        tick.append(timestamp);
+        timelineTicks.set(tickKey, tick);
+        track.append(tick);
+      }
+      if (boundary) {
+        tick.classList.add('boundary', `boundary-${boundary}`);
+      }
+      if (mechanicLabel) {
+        let mechanicName = tick.querySelector('.fight-timeline-mechanic');
+        if (!mechanicName) {
+          mechanicName = document.createElement('span');
+          mechanicName.className = 'fight-timeline-mechanic';
+          tick.append(mechanicName);
+        }
+        const words = mechanicLabel.split(/\s+/);
+        mechanicName.replaceChildren(words.shift());
+        if (words.length > 0) {
+          mechanicName.append(document.createElement('br'), words.join(' '));
+        }
+      }
+      if (title) {
+        tick.title = title;
+      }
+      return tick;
+    };
+
+    addTimelineTick(
+      phaseStart,
+      `Phase ${phase} timeline ${isFirstSegment ? 'begins' : 'continues'}`,
+      phase === 1 ? 'START' : '',
+      'start',
+    );
+
+    for (const mechanic of dancingMadMechanics.filter((entry) => Number(entry.phase) === phase)) {
+      const mechanicMs = Number(mechanic.elapsedSeconds) * 1000;
+      if (mechanicMs < phaseStart || mechanicMs > phaseEnd) {
+        continue;
+      }
+      addTimelineTick(mechanicMs, mechanic.mechanic || `Phase ${phase} begins`, mechanic.mechanic);
+    }
+
+    addTimelineTick(
+      phaseEnd,
+      `Phase ${phase} timeline ${isLastSegment ? 'ends' : 'continues'}`,
+      isLastSegment ? 'END' : '',
+      'end',
+    );
+
+    for (const event of events) {
+      const elapsedMs = Math.max(0, Number(event.timestamp) - Number(fight.startTime));
+      const eventPhase = getDancingMadPhase(elapsedMs);
+      const mechanic = getDancingMadMechanic(elapsedMs, eventPhase);
+      if (eventPhase !== phase || elapsedMs < phaseStart || elapsedMs > phaseEnd
+        || (!isLastSegment && elapsedMs === phaseEnd)) {
+        continue;
+      }
+      const position = Math.max(0, Math.min(100, ((elapsedMs - phaseStart) / phaseDuration) * 100));
+      row.classList.add('has-events');
+      canvas.timelineEventItems.push({
+        event,
+        mechanic,
+        elapsedMs,
+        position,
+      });
+    }
+
+    if (canvas.timelineEventItems.length === 0) {
+      continue;
+    }
+
+    canvas.append(track);
+    row.append(label, canvas);
+    timeline.append(row);
+  }
+
+  if (timeline.childElementCount === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detailed-empty-state';
+    empty.textContent = 'No deaths or damage downs in this fight.';
+    timeline.append(empty);
+  }
+
+  return timeline;
+}
+
+function createTimelineEventMarker(event, mechanic, elapsedMs, position) {
+  const marker = document.createElement('span');
+  marker.className = 'fight-timeline-event';
+  marker.tabIndex = 0;
+  marker.style.left = `${position}%`;
+  marker.setAttribute('aria-label', `${event.kind}: ${event.player} at ${formatFightDuration(elapsedMs)}`);
+  marker.append(createFightEventIcon(event.kind));
+
+  const tooltip = document.createElement('span');
+  tooltip.className = `fight-timeline-tooltip${position < 18 ? ' align-start' : position > 82 ? ' align-end' : ''}`;
+  const tooltipIcon = createFightEventIcon(event.kind);
+  tooltipIcon.classList.add('fight-timeline-tooltip-icon');
+  tooltip.append(
+    createTimelineTooltipItem('Time', formatFightDuration(elapsedMs)),
+    createTimelineTooltipItem('Mechanic', mechanic?.mechanic || 'Before first mechanic'),
+    createTimelineTooltipItem('Player', event.player),
+    tooltipIcon,
+  );
+  marker.append(tooltip);
+  enableAdaptiveTimelineTooltip(marker);
+  return marker;
+}
+
+function createTimelineEventGroupMarker(groups, position, canvas) {
+  const marker = document.createElement('span');
+  marker.className = 'fight-timeline-event grouped';
+  marker.tabIndex = 0;
+  marker.style.left = `${position}%`;
+  marker.setAttribute('aria-label', groups
+    .map((group) => `${group.items.length} ${group.kind.toLowerCase()} events`)
+    .join(' and '));
+
+  const box = document.createElement('span');
+  box.className = `fight-timeline-event-box${groups.length > 1 ? ' mixed' : ''}`;
+  for (const group of groups) {
+    const iconWrap = document.createElement('span');
+    iconWrap.className = 'fight-timeline-group-icon';
+    iconWrap.append(createFightEventIcon(group.kind));
+    const count = document.createElement('span');
+    count.className = 'fight-timeline-event-count';
+    count.textContent = String(group.items.length);
+    iconWrap.append(count);
+    box.append(iconWrap);
+  }
+
+  const previewItems = groups
+    .flatMap((group) => group.items.map((item) => ({ kind: group.kind, item })))
+    .sort((first, second) => first.item.elapsedMs - second.item.elapsedMs);
+  const previews = [];
+  for (const { kind, item } of previewItems) {
+    const preview = document.createElement('span');
+    preview.className = 'fight-timeline-event-member-preview';
+    // Anchor previews to the canvas using the source event's original percentage.
+    // This is identical to an ungrouped marker and remains exact after a resize.
+    preview.style.left = `${item.position}%`;
+    preview.setAttribute('aria-hidden', 'true');
+    preview.append(createFightEventIcon(kind));
+    previews.push(preview);
+    canvas.append(preview);
+  }
+
+  marker.timelineMemberPreviews = previews;
+  const showPreviews = () => previews.forEach((preview) => preview.classList.add('visible'));
+  const hidePreviews = () => {
+    if (!marker.classList.contains('pinned')) {
+      previews.forEach((preview) => preview.classList.remove('visible'));
+    }
+  };
+  marker.addEventListener('mouseenter', showPreviews);
+  marker.addEventListener('mouseleave', hidePreviews);
+  marker.addEventListener('focusin', showPreviews);
+  marker.addEventListener('focusout', hidePreviews);
+  marker.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const shouldPin = !marker.classList.contains('pinned');
+    closePinnedTimelineGroups();
+    if (shouldPin) {
+      marker.classList.add('pinned');
+      showPreviews();
+    } else {
+      marker.blur();
+    }
+  });
+
+  const tooltip = document.createElement('span');
+  tooltip.className = `fight-timeline-tooltip fight-timeline-group-tooltip${position < 18 ? ' align-start' : position > 82 ? ' align-end' : ''}`;
+  const table = document.createElement('table');
+  table.className = 'fight-timeline-group-table';
+  const head = document.createElement('thead');
+  const headingRow = document.createElement('tr');
+  // Mirror the regular details table so the compact hover view preserves the
+  // same reading order and does not merge the event icon into the player cell.
+  for (const label of ['Time', 'Mechanic', 'Player', 'Event']) {
+    const heading = document.createElement('th');
+    heading.scope = 'col';
+    heading.textContent = label;
+    headingRow.append(heading);
+  }
+  head.append(headingRow);
+  const body = document.createElement('tbody');
+  const tableItems = groups
+    .flatMap((group) => group.items.map((item) => ({ kind: group.kind, item })))
+    .sort((first, second) => first.item.elapsedMs - second.item.elapsedMs);
+  for (const { kind, item } of tableItems) {
+    const row = document.createElement('tr');
+    const time = document.createElement('td');
+    time.textContent = formatFightDuration(item.elapsedMs);
+    const mechanic = document.createElement('td');
+    mechanic.textContent = item.mechanic?.mechanic || 'Before first mechanic';
+    const player = document.createElement('td');
+    player.textContent = item.event.player;
+    const event = document.createElement('td');
+    event.append(createFightEventIcon(kind));
+    row.append(time, mechanic, player, event);
+    body.append(row);
+  }
+  table.append(head, body);
+  tooltip.append(table);
+
+  marker.append(box, tooltip);
+  enableAdaptiveTimelineTooltip(marker);
+  return marker;
+}
+
+// Group previews are canvas siblings so they can sit at their exact source positions.
+// Keep their visibility tied to the marker when a click pins its contents panel.
+function closePinnedTimelineGroups() {
+  for (const marker of document.querySelectorAll('.fight-timeline-event.grouped.pinned')) {
+    marker.classList.remove('pinned');
+    marker.timelineMemberPreviews?.forEach((preview) => preview.classList.remove('visible'));
+    marker.blur();
+  }
+}
+
+function enableAdaptiveTimelineTooltip(marker) {
+  const placeTooltip = () => {
+    const tooltip = marker.querySelector('.fight-timeline-tooltip');
+    if (!tooltip) {
+      return;
+    }
+    const markerBounds = marker.getBoundingClientRect();
+    const requiredBottom = markerBounds.bottom + tooltip.offsetHeight + 8;
+    tooltip.classList.toggle('above', requiredBottom > window.innerHeight);
+  };
+  marker.addEventListener('mouseenter', placeTooltip);
+  marker.addEventListener('focusin', placeTooltip);
+}
+
+function createTimelineTooltipItem(label, value) {
+  const item = document.createElement('span');
+  const heading = document.createElement('small');
+  heading.textContent = label;
+  const content = document.createElement('strong');
+  content.textContent = value;
+  item.append(heading, content);
+  return item;
+}
+
+function createFightEventIcon(kind) {
+  if (kind === 'Death') {
+    const deathIcon = document.createElement('span');
+    deathIcon.className = 'death-icon';
+    deathIcon.setAttribute('aria-label', 'Death');
+    deathIcon.textContent = '💀';
+    return deathIcon;
+  }
+
+  const damageDownIcon = document.createElement('img');
+  damageDownIcon.className = 'damage-down-icon';
+  damageDownIcon.src = 'assets/damage-down.png';
+  damageDownIcon.alt = 'Damage down';
+  return damageDownIcon;
+}
+
+function getDancingMadPhase(elapsedMs) {
+  let phase = 1;
+  for (const [candidatePhase, startMs] of DANCING_MAD_PHASE_STARTS) {
+    if (startMs > elapsedMs) {
+      break;
+    }
+    phase = candidatePhase;
+  }
+  return phase;
+}
+
+function getDancingMadMechanic(elapsedMs, phase = null) {
   let latestMechanic = null;
   for (const mechanic of dancingMadMechanics) {
     if (Number(mechanic.elapsedSeconds) * 1000 >= elapsedMs) {
       break;
     }
-    latestMechanic = mechanic;
+    if (phase === null || Number(mechanic.phase) === phase) {
+      latestMechanic = mechanic;
+    }
   }
 
-  return latestMechanic ? `P${latestMechanic.phase}.${latestMechanic.mechanic}` : '—';
+  return latestMechanic;
 }
 
 // Weekly cards are deliberately self-contained controls: their visible summary comes

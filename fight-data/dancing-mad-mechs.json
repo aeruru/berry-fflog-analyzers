@@ -1,149 +1,314 @@
 [
   {
-    "eventNumber": 1,
     "time": "00:10.171",
     "elapsedSeconds": 10.171,
     "phase": 1,
     "mechanic": "RR1"
   },
   {
-    "eventNumber": 2,
     "time": "00:37.389",
     "elapsedSeconds": 37.389,
     "phase": 1,
     "mechanic": "GI1 (MM1)"
   },
   {
-    "eventNumber": 3,
     "time": "00:42.438",
     "elapsedSeconds": 42.438,
     "phase": 1,
     "mechanic": "GI1 (Towers)"
   },
   {
-    "eventNumber": 4,
     "time": "00:53.652",
     "elapsedSeconds": 53.652,
     "phase": 1,
     "mechanic": "GI1 (MM2)"
   },
   {
-    "eventNumber": 5,
     "time": "01:02.723",
     "elapsedSeconds": 62.723,
     "phase": 1,
     "mechanic": "LJ1"
   },
   {
-    "eventNumber": 6,
     "time": "01:20.321",
     "elapsedSeconds": 80.321,
     "phase": 1,
     "mechanic": "GI2"
   },
   {
-    "eventNumber": 7,
     "time": "02:43.899",
     "elapsedSeconds": 163.899,
     "phase": 1,
     "mechanic": "GI3"
   },
   {
-    "eventNumber": 8,
     "time": "03:06.701",
     "elapsedSeconds": 186.701,
     "phase": 1,
     "mechanic": "GI3 (MM3)"
   },
   {
-    "eventNumber": 9,
+    "time": "03:27.00",
+    "elapsedSeconds": 207.000,
+    "phase": 2,
+    "mechanic": "Begin"
+  },
+  {
     "time": "03:40.601",
     "elapsedSeconds": 220.601,
     "phase": 2,
     "mechanic": "UE1"
   },
   {
-    "eventNumber": 10,
     "time": "03:55.787",
     "elapsedSeconds": 235.787,
     "phase": 2,
     "mechanic": "For"
   },
   {
-    "eventNumber": 11,
     "time": "04:09.013",
     "elapsedSeconds": 249.013,
     "phase": 2,
     "mechanic": "FT1"
   },
   {
-    "eventNumber": 12,
     "time": "04:19.023",
     "elapsedSeconds": 259.023,
     "phase": 2,
     "mechanic": "FT2"
   },
   {
-    "eventNumber": 13,
     "time": "04:30.064",
     "elapsedSeconds": 270.064,
     "phase": 2,
     "mechanic": "FT3"
   },
   {
-    "eventNumber": 14,
     "time": "04:40.078",
     "elapsedSeconds": 280.078,
     "phase": 2,
     "mechanic": "FT4"
   },
   {
-    "eventNumber": 15,
     "time": "04:51.118",
     "elapsedSeconds": 291.118,
     "phase": 2,
     "mechanic": "FT5"
   },
   {
-    "eventNumber": 16,
     "time": "05:01.130",
     "elapsedSeconds": 301.13,
     "phase": 2,
     "mechanic": "FT6"
   },
   {
-    "eventNumber": 17,
     "time": "05:12.170",
     "elapsedSeconds": 312.17,
     "phase": 2,
     "mechanic": "FT7"
   },
   {
-    "eventNumber": 18,
     "time": "05:22.180",
     "elapsedSeconds": 322.18,
     "phase": 2,
     "mechanic": "FT8"
   },
   {
-    "eventNumber": 19,
     "time": "06:06.231",
     "elapsedSeconds": 366.231,
     "phase": 2,
     "mechanic": "Tri"
   },
   {
-    "eventNumber": 20,
     "time": "06:17.940",
     "elapsedSeconds": 377.94,
     "phase": 2,
     "mechanic": "UE2"
   },
   {
-    "eventNumber": 21,
     "time": "06:27.451",
     "elapsedSeconds": 387.451,
     "phase": 2,
     "mechanic": "Enr"
+  },
+  {
+    "time": "07:01.054",
+    "elapsedSeconds": 421.054,
+    "phase": 3,
+    "mechanic": "Begin"
+  },
+  {
+    "time": "07:25.722",
+    "elapsedSeconds": 445.722,
+    "phase": 3,
+    "mechanic": "BoA"
+  },
+  {
+    "time": "07:49.778",
+    "elapsedSeconds": 469.778,
+    "phase": 3,
+    "mechanic": "BoA (1st debuff)"
+  },
+  {
+    "time": "07:59.075",
+    "elapsedSeconds": 479.075,
+    "phase": 3,
+    "mechanic": "TB1"
+  },
+  {
+    "time": "08:10.743",
+    "elapsedSeconds": 490.743,
+    "phase": 3,
+    "mechanic": "BoA (2nd debuff)"
+  },
+  {
+    "time": "08:27.274",
+    "elapsedSeconds": 507.274,
+    "phase": 3,
+    "mechanic": "BoA (Wind)"
+  },
+  {
+    "time": "08:50.170",
+    "elapsedSeconds": 530.17,
+    "phase": 3,
+    "mechanic": "LC"
+  },
+  {
+    "time": "08:57.683",
+    "elapsedSeconds": 537.683,
+    "phase": 3,
+    "mechanic": "TB2"
+  },
+  {
+    "time": "09:14.891",
+    "elapsedSeconds": 554.891,
+    "phase": 3,
+    "mechanic": "TB3"
+  },
+  {
+    "time": "09:19.942",
+    "elapsedSeconds": 559.942,
+    "phase": 3,
+    "mechanic": "EQ (Accretions)"
+  },
+  {
+    "time": "09:35.360",
+    "elapsedSeconds": 575.36,
+    "phase": 3,
+    "mechanic": "SH1"
+  },
+  {
+    "time": "09:46.175",
+    "elapsedSeconds": 586.175,
+    "phase": 3,
+    "mechanic": "BH1"
+  },
+  {
+    "time": "09:53.236",
+    "elapsedSeconds": 593.236,
+    "phase": 3,
+    "mechanic": "BH2"
+  },
+  {
+    "time": "09:56.455",
+    "elapsedSeconds": 596.455,
+    "phase": 3,
+    "mechanic": "TB4"
+  },
+  {
+    "time": "10:04.636",
+    "elapsedSeconds": 604.636,
+    "phase": 3,
+    "mechanic": "SH2"
+  },
+  {
+    "time": "10:16.689",
+    "elapsedSeconds": 616.689,
+    "phase": 3,
+    "mechanic": "BH3"
+  },
+  {
+    "time": "10:21.782",
+    "elapsedSeconds": 621.782,
+    "phase": 3,
+    "mechanic": "BH4"
+  },
+  {
+    "time": "10:26.873",
+    "elapsedSeconds": 626.873,
+    "phase": 3,
+    "mechanic": "BH5"
+  },
+  {
+    "time": "10:32.060",
+    "elapsedSeconds": 632.06,
+    "phase": 3,
+    "mechanic": "HotTail"
+  },
+  {
+    "time": "10:37.694",
+    "elapsedSeconds": 637.694,
+    "phase": 3,
+    "mechanic": "TB5"
+  },
+  {
+    "time": "10:50.937",
+    "elapsedSeconds": 650.937,
+    "phase": 3,
+    "mechanic": "BH6"
+  },
+  {
+    "time": "10:56.034",
+    "elapsedSeconds": 656.034,
+    "phase": 3,
+    "mechanic": "BH7"
+  },
+  {
+    "time": "11:01.134",
+    "elapsedSeconds": 661.134,
+    "phase": 3,
+    "mechanic": "BH8"
+  },
+  {
+    "time": "11:12.483",
+    "elapsedSeconds": 672.483,
+    "phase": 3,
+    "mechanic": "SH3"
+  },
+  {
+    "time": "11:24.723",
+    "elapsedSeconds": 684.723,
+    "phase": 3,
+    "mechanic": "BH9"
+  },
+  {
+    "time": "11:31.333",
+    "elapsedSeconds": 691.333,
+    "phase": 3,
+    "mechanic": "BH10"
+  },
+  {
+    "time": "11:39.553",
+    "elapsedSeconds": 699.553,
+    "phase": 3,
+    "mechanic": "SaM"
+  },
+  {
+    "time": "12:08.197",
+    "elapsedSeconds": 728.197,
+    "phase": 3,
+    "mechanic": "Enr"
+  },
+  {
+    "time": "12:25.702",
+    "elapsedSeconds": 745.702,
+    "phase": 4,
+    "mechanic": "Begin"
+  },
+  {
+    "time": "15:00.000",
+    "elapsedSeconds": 900,
+    "phase": 5,
+    "mechanic": "Begin"
   }
 ]
