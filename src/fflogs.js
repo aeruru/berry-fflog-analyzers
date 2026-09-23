@@ -69,7 +69,9 @@ const REPORT_FIGHTS_QUERY = `
   }
 `;
 
-const FIGHT_EVENT_FILTER = 'type = "death" OR (type = "applydebuff" AND ability.id = 1002911)';
+// Kefka Says anchors Dancing Mad's pull-specific P4/P5 mechanic timings. Fetch its
+// cast start with the visible failure events so phase alignment needs no second query.
+const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "begincast" AND ability.name = "Kefka Says")';
 const FIGHT_EVENTS_QUERY = `
   query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
     reportData {
@@ -144,11 +146,15 @@ export async function fetchReportByCode(code, options) {
   return data.reportData.report;
 }
 
-export async function fetchFightEventDetails(code, fightId, options) {
+export async function fetchFightEventDetails(code, fightId, mitigationAbilityIds = [], options) {
+  const mitigationFilters = mitigationAbilityIds
+    .filter(Number.isFinite)
+    .map((abilityId) => `(type = "cast" AND ability.id = ${abilityId})`);
+  const filterExpression = [BASE_FIGHT_EVENT_FILTER, ...mitigationFilters].join(' OR ');
   const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
     code,
     fightIDs: [Number(fightId)],
-    filterExpression: FIGHT_EVENT_FILTER,
+    filterExpression,
   }, options);
   return data.reportData.report;
 }

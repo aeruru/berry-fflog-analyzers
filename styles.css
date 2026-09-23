@@ -340,6 +340,7 @@ h2 {
   background: var(--surface-strong);
   border: 1px solid var(--line);
   border-radius: 8px;
+  container-type: inline-size;
   padding: 10px 12px;
 }
 
@@ -431,11 +432,30 @@ h2 {
 .detailed-fight-meta {
   align-items: center;
   color: var(--muted);
-  display: grid;
+  display: flex;
   font-size: 0.76rem;
   gap: 12px;
-  grid-template-columns: max-content max-content 1fr;
   margin-top: 10px;
+}
+
+.detailed-fight-meta > strong {
+  margin-left: auto;
+}
+
+.fight-best-pull-badge {
+  align-items: center;
+  background: radial-gradient(circle at 35% 30%, #a7f3d0, #10b981 58%, #047857);
+  border: 1px solid rgba(167, 243, 208, 0.9);
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+  color: #073b2c;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.84rem;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  width: 20px;
 }
 
 .detailed-fight-meta strong {
@@ -474,7 +494,8 @@ h2 {
   text-align: center;
 }
 
-.fight-details-panel {
+.fight-details-panel,
+.fight-mitigation-panel {
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 0.8rem;
@@ -483,11 +504,40 @@ h2 {
   padding-top: 12px;
 }
 
+.fight-details-panel > .fight-details-table,
+.fight-mitigation-panel > .mitigation-tracker {
+  margin-inline: auto;
+  width: max-content;
+}
+
+.fight-panels.side-by-side {
+  align-items: stretch;
+  border-top: 1px solid var(--line);
+  column-gap: 24px;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  justify-content: center;
+  margin-top: 14px;
+  padding-top: 12px;
+}
+
+.fight-panels.side-by-side > .fight-details-panel,
+.fight-panels.side-by-side > .fight-mitigation-panel {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.fight-panels.side-by-side > .fight-mitigation-panel {
+  border-left: 1px solid var(--line);
+  padding-left: 24px;
+}
+
 .fight-details-table {
   border-collapse: collapse;
   color: var(--ink);
-  table-layout: fixed;
-  width: 100%;
+  table-layout: auto;
+  width: auto;
 }
 
 .fight-details-table th,
@@ -495,6 +545,7 @@ h2 {
   border-bottom: 1px solid var(--line);
   padding: 9px 7px;
   text-align: left;
+  white-space: nowrap;
 }
 
 .fight-details-table th {
@@ -503,20 +554,158 @@ h2 {
   text-transform: uppercase;
 }
 
-.fight-details-table th:nth-child(1),
-.fight-details-table td:nth-child(1) {
-  width: 14%;
+.mitigation-header {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
 }
 
-.fight-details-table th:nth-child(2),
-.fight-details-table td:nth-child(2) {
-  width: 22%;
+.mitigation-header h4 {
+  white-space: nowrap;
 }
 
-.fight-details-table th:last-child,
-.fight-details-table td:last-child {
-  text-align: right;
-  width: 10%;
+.mitigation-tracker h4 {
+  color: var(--ink);
+  font-size: 0.88rem;
+  margin: 0 0 10px;
+}
+
+.mitigation-filter-select {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  font-size: 0.7rem;
+  height: 26px;
+  margin-bottom: 10px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.mitigation-filter-select[hidden] {
+  display: none;
+}
+
+.mitigation-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.mitigation-tab {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: 800;
+  min-height: 22px;
+  padding: 0 7px;
+}
+
+.mitigation-tab[aria-selected='true'] {
+  background: rgba(120, 174, 232, 0.14);
+  border-color: rgba(120, 174, 232, 0.5);
+  color: var(--link);
+}
+
+.mitigation-tab:hover {
+  background: rgba(120, 174, 232, 0.1);
+}
+
+.mitigation-slot-select {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  display: none;
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 700;
+  height: 26px;
+  margin-bottom: 10px;
+  padding: 0 6px;
+  width: 76px;
+}
+
+.mitigation-panel[hidden] {
+  display: none;
+}
+
+.mitigation-table {
+  border-collapse: collapse;
+  color: var(--ink);
+  table-layout: auto;
+  width: auto;
+}
+
+.mitigation-table th,
+.mitigation-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 8px 7px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mitigation-table th {
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.mitigation-ability-content {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.mitigation-ability-icon {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 16px;
+  justify-content: center;
+  width: 16px;
+}
+
+.mitigation-ability-icon img {
+  border-radius: 2px;
+  display: block;
+  height: 16px;
+  object-fit: contain;
+  width: 16px;
+}
+
+.mitigation-result-status {
+  color: var(--timing-color);
+  font-weight: 800;
+}
+
+.mitigation-filter-empty {
+  color: #34d399;
+  margin: 8px 0 0;
+}
+
+.mitigation-filter-empty[hidden] {
+  display: none;
+}
+
+.mitigation-empty-state {
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+
+@container (max-width: 420px) {
+  .mitigation-tabs {
+    display: none;
+  }
+
+  .mitigation-slot-select {
+    display: block;
+  }
 }
 
 .fight-timeline {
@@ -685,6 +874,9 @@ h2 {
   border-radius: 5px;
   display: inline-flex;
   gap: 5px;
+  /* Expanded group borders can be much wider than their summary contents; keep
+     the DD/death icons and counts centered within that collision footprint. */
+  justify-content: center;
   min-height: 27px;
   padding: 2px 5px;
   transition: opacity 120ms ease;
@@ -853,31 +1045,8 @@ h2 {
 
 .fight-timeline-group-table {
   border-collapse: collapse;
-  /* Use the regular details table's compact four-column proportions so moving
-     between table view and a group preview retains the same reading pattern. */
-  table-layout: fixed;
-  width: 100%;
-}
-
-.fight-timeline-group-table th:nth-child(1),
-.fight-timeline-group-table td:nth-child(1) {
-  width: 14%;
-}
-
-.fight-timeline-group-table th:nth-child(2),
-.fight-timeline-group-table td:nth-child(2) {
-  width: 22%;
-}
-
-.fight-timeline-group-table th:nth-child(3),
-.fight-timeline-group-table td:nth-child(3) {
-  width: 54%;
-}
-
-.fight-timeline-group-table th:nth-child(4),
-.fight-timeline-group-table td:nth-child(4) {
-  text-align: right;
-  width: 10%;
+  table-layout: auto;
+  width: auto;
 }
 
 .fight-timeline-group-table th,

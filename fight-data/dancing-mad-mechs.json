@@ -300,14 +300,14 @@
     "mechanic": "Enr"
   },
   {
-    "time": "12:25.702",
-    "elapsedSeconds": 745.702,
+    "time": "00:00.000",
+    "elapsedSeconds": 0,
     "phase": 4,
     "mechanic": "Begin"
   },
   {
-    "time": "15:00.000",
-    "elapsedSeconds": 900,
+    "time": "02:30.000",
+    "elapsedSeconds": 150,
     "phase": 5,
     "mechanic": "Begin"
   }

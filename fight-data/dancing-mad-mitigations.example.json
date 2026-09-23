@@ -1,0 +1,35 @@
+[
+  {
+    "minAllowedTime": "00:07.000",
+    "maxAllowedTime": "00:15.000",
+    "minAllowedElapsedSeconds": 7,
+    "maxAllowedElapsedSeconds": 15,
+    "abilityId": 7535,
+    "ability": "Reprisal",
+    "role": "Tank",
+    "class": null,
+    "assignedTo": "MT"
+  },
+  {
+    "minAllowedTime": "00:34.000",
+    "maxAllowedTime": "00:42.000",
+    "minAllowedElapsedSeconds": 34,
+    "maxAllowedElapsedSeconds": 42,
+    "abilityId": 7535,
+    "ability": "Reprisal",
+    "role": "Tank",
+    "class": null,
+    "assignedTo": "OT"
+  },
+  {
+    "minAllowedTime": "01:16.000",
+    "maxAllowedTime": "01:24.000",
+    "minAllowedElapsedSeconds": 76,
+    "maxAllowedElapsedSeconds": 84,
+    "abilityId": 7385,
+    "ability": "Passage of Arms",
+    "role": "Tank",
+    "class": "Paladin",
+    "assignedTo": "MT"
+  }
+]
