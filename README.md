@@ -44,11 +44,15 @@ For GitHub Pages, add the deployed page URL as another redirect URL. FFLogs requ
 
 After logging in, the app looks up the current FFLogs user, loads that user's Dancing Mad reports from the last 7 days, and renders report cards. Report cards are initially lightweight; fight data is fetched only when a report is expanded. Fight event data is fetched only when a fight's **Details** button is opened.
 
-The event query is filtered to death events and damage down debuff applications:
+The event query is filtered to death events, damage down debuff applications, the
+Kefka Says cast start used to anchor Dancing Mad phases 4 and 5, and casts for every
+ability ID configured in `fight-data/dancing-mad-mitigations.json`:
 
 ```text
-type = "death" OR (type = "applydebuff" AND ability.id = 1002911)
+type = "death" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "begincast" AND ability.name = "Kefka Says")
 ```
+
+The mitigation cast clauses are appended dynamically when fight details are loaded.
 
 Results are cached client-side in local storage. Cache entries include the GraphQL endpoint, query hash, and variables. Use the app's clear-cache buttons to clear all cached data, a report's cached data, or a fight's cached event data.
 

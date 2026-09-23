@@ -1,8 +1,9 @@
 const DAMAGE_DOWN_ID = 1002911;
 const PLAYER_IDS = [1, 2, 3, 4, 5, 6, 7, 8];
 const REFERENCE_TIMELINE_WIDTH_PX = 937;
+const TEST_COLLISION_WIDTH_PX = { 'Damage down': 13, Death: 16 };
 const P1_DURATION_MS = 207_000;
-const P4_DURATION_MS = 155_000;
+const P4_DURATION_MS = 150_000;
 const P3_AFTER_EQ_DURATION_MS = 185_000;
 
 // Each pull contains 20 isolated scenarios. P3 gets an extra scenario because it is
@@ -45,6 +46,15 @@ function createGroupingFight(id, startTime, endTime, scenarioOffset, kill) {
         centerSeconds,
       );
     }));
+
+  // P4/P5 entries exist only when this pull contains the exact transition cast.
+  events.push({
+    eventType: 'Begin Cast',
+    ability: 'Kefka Says',
+    source: 'Kefka',
+    // Exercise opposite sides of the allowed 12:10-12:30 transition window.
+    timestamp: startTime + (id === 1 ? 731_618 : 748_342),
+  });
 
   return {
     id,
@@ -141,7 +151,7 @@ function createScenarioEvents(centerMs, scenarioIndex, phaseIndex, centerSeconds
 
 function createAlternatingChain(centerMs, scenarioIndex) {
   // First-pull science case: preserve this exact 12-marker order while deriving its
-  // 21px separation from the P1 timeline duration instead of synthetic positions.
+  // edge-touching separation from the P1 timeline instead of synthetic positions.
   const kinds = [
     'Death', 'Death',
     'Damage down', 'Damage down', 'Damage down',
@@ -151,8 +161,9 @@ function createAlternatingChain(centerMs, scenarioIndex) {
     'Damage down',
     'Death',
   ];
-  const eventStepMs = 21 * P1_DURATION_MS / REFERENCE_TIMELINE_WIDTH_PX;
-  const firstTimestamp = centerMs - (kinds.length - 1) * eventStepMs / 2;
+  const pixelOffsets = createCollisionPixelOffsets(kinds, 0);
+  const millisecondsPerPixel = P1_DURATION_MS / REFERENCE_TIMELINE_WIDTH_PX;
+  const midpointPixels = pixelOffsets.at(-1) / 2;
   let damageDownIndex = 0;
   let deathIndex = 0;
 
@@ -161,7 +172,7 @@ function createAlternatingChain(centerMs, scenarioIndex) {
     // same DD or death twice within this grouping scenario.
     const kindIndex = kind === 'Death' ? deathIndex++ : damageDownIndex++;
     const targetID = PLAYER_IDS[(scenarioIndex + kindIndex) % PLAYER_IDS.length];
-    const timestamp = firstTimestamp + index * eventStepMs;
+    const timestamp = centerMs + (pixelOffsets[index] - midpointPixels) * millisecondsPerPixel;
     return kind === 'Death' ? death(timestamp, targetID) : damageDown(timestamp, targetID);
   });
 }
@@ -179,13 +190,9 @@ function createFlippedBoundaryChain(centerMs, scenarioIndex) {
     'Damage down',
   ];
   const millisecondsPerPixel = P4_DURATION_MS / REFERENCE_TIMELINE_WIDTH_PX;
-  const pixelOffsets = [0];
-  for (let index = 1; index < kinds.length; index += 1) {
-    // Same-kind markers remain groupable at 21px; a type transition lands exactly
-    // on the 22px boundary so the mixed-candidate collision path decides the result.
-    const gapPixels = kinds[index] === kinds[index - 1] ? 21 : 22;
-    pixelOffsets.push(pixelOffsets.at(-1) + gapPixels);
-  }
+  // One extra pixel beyond the adjacent hitbox radii keeps every engineered
+  // single/multi transition separate under the asymmetric DD/death widths.
+  const pixelOffsets = createCollisionPixelOffsets(kinds, 1, true);
 
   const midpointPixels = pixelOffsets.at(-1) / 2;
   let damageDownIndex = 0;
@@ -199,25 +206,40 @@ function createFlippedBoundaryChain(centerMs, scenarioIndex) {
 }
 
 function createOverlappingLongStrings(centerMs, scenarioIndex) {
-  // At the fixture's normal width, both same-type strings use 21px-equivalent
+  // At the fixture's normal width, each same-type string uses its own exact
+  // collision width (13px for DD, 16px for death).
   // timeline gaps while their centers are 100px apart. Their true spans overlap,
   // verifying that footprint-aware mixed grouping joins the two strings.
   const millisecondsPerPixel = P3_AFTER_EQ_DURATION_MS / REFERENCE_TIMELINE_WIDTH_PX;
-  const eventStepMs = 21 * millisecondsPerPixel;
   const centerSeparationMs = 100 * millisecondsPerPixel;
   return [
-    ...createEventRun('Damage down', 8, centerMs, scenarioIndex, eventStepMs, 0),
+    ...createEventRun('Damage down', 8, centerMs, scenarioIndex,
+      TEST_COLLISION_WIDTH_PX['Damage down'] * millisecondsPerPixel, 0),
     ...createEventRun('Death', 7, centerMs + centerSeparationMs,
-      scenarioIndex + 3, eventStepMs, 0),
+      scenarioIndex + 3, TEST_COLLISION_WIDTH_PX.Death * millisecondsPerPixel, 0),
   ];
+}
+
+function createCollisionPixelOffsets(kinds, extraGapPixels, onlyAcrossKinds = false) {
+  const offsets = [0];
+  for (let index = 1; index < kinds.length; index += 1) {
+    const firstRadius = TEST_COLLISION_WIDTH_PX[kinds[index - 1]] / 2;
+    const secondRadius = TEST_COLLISION_WIDTH_PX[kinds[index]] / 2;
+    const crossesKinds = kinds[index - 1] !== kinds[index];
+    const extra = !onlyAcrossKinds || crossesKinds ? extraGapPixels : 0;
+    offsets.push(offsets.at(-1) + firstRadius + secondRadius + extra);
+  }
+  return offsets;
 }
 
 function getBarelyUngroupedGapMs(phaseIndex, centerSeconds) {
   const phaseThreeIsAfterEq = phaseIndex === 2 && centerSeconds >= 560;
   if (phaseThreeIsAfterEq) {
-    return 4_100;
+    return 3_365;
   }
-  return [5_000, 5_100, 3_350, 3_700, 4_800][phaseIndex];
+  // The DD near-misses sit one pixel beyond their new 13px collision width. The
+  // lone death near-miss remains one pixel beyond its 16px collision width.
+  return [3_094, 3_200, 2_077, 2_721, 2_987][phaseIndex];
 }
 
 function createBarelyUngroupedScenario(centerMs, scenarioIndex, count, gapMs) {
