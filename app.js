@@ -38,6 +38,7 @@ const DETAILS_VIEW_STORAGE_KEY = 'berry-details-view';
 const MITIGATION_FILTER_MODES = new Set(['more-than-one', 'off-time', 'all']);
 const DETAILS_VIEW_MODES = new Set(['timeline', 'table']);
 const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
+const DANCING_MAD_ENCOUNTER_NAME = 'Dancing Mad';
 const MITIGATION_ABILITY_ICON_URLS = new Map([
   [25862, './assets/ability-icons/002649_hr1.png'],
   [16536, './assets/ability-icons/002645_hr1.png'],
@@ -52,6 +53,7 @@ const MITIGATION_ABILITY_ICON_URLS = new Map([
 const UNKNOWN_MITIGATION_ABILITY_ICON_URL = './assets/ability-icons/question-mark-status.png';
 
 let currentUser = null;
+let encounterPhaseDefinitions = new Map();
 let dancingMadMechanics = [];
 let dancingMadMitigations = [];
 let mitigationCooldowns = new Map();
@@ -69,14 +71,6 @@ let timelineCollisionFrame = null;
 let fightPanelLayoutFrame = null;
 const mitigationHistoryPromises = new Map();
 
-// P1-P3 use stable encounter timings. P4 begins at a pull-specific cast, and the
-// relative P4/P5 mechanic data is added only after that anchor has been observed.
-const DANCING_MAD_FIXED_PHASE_STARTS = new Map([
-  [1, 0],
-  [2, 207_000],
-  [3, 421_000],
-]);
-const DANCING_MAD_PHASE_FIVE_OFFSET_MS = 150_000;
 const MITIGATION_GRACE_SECONDS = 20;
 const JOB_ROLES = new Map([
   ['PLD', 'Tank'], ['WAR', 'Tank'], ['DRK', 'Tank'], ['GNB', 'Tank'],
@@ -166,6 +160,7 @@ async function initialize() {
   setBusy(true);
 
   try {
+    await loadEncounterPhaseDefinitions();
     await loadDancingMadMechanics();
     await loadDancingMadMitigations();
     await loadMitigationCooldowns();
@@ -192,6 +187,16 @@ async function initialize() {
   }
 }
 
+async function loadEncounterPhaseDefinitions() {
+  const response = await fetch('./fight-data/encounter-phases.json');
+  if (!response.ok) {
+    throw new Error(`Encounter phase data returned ${response.status}.`);
+  }
+
+  const definitions = await response.json();
+  encounterPhaseDefinitions = new Map(Object.entries(definitions));
+}
+
 async function loadDancingMadMechanics() {
   const response = await fetch('./fight-data/dancing-mad-mechs.json');
   if (!response.ok) {
@@ -201,7 +206,7 @@ async function loadDancingMadMechanics() {
   const mechanics = await response.json();
   dancingMadMechanics = mechanics
     .filter((entry) => Number.isFinite(Number(entry.elapsedSeconds)))
-    .sort((first, second) => Number(first.elapsedSeconds) - Number(second.elapsedSeconds));
+    .sort(comparePhaseRelativeEntries);
 }
 
 // Rebuilds the weekly strip and its lookup suggestions together so both surfaces always
@@ -335,16 +340,16 @@ function addTestMitigationCasts(report, actors, reportIndex) {
       const abilityId = Number(event.abilityId ?? event.abilityGameID ?? event.ability?.id);
       return eventType !== 'cast' || !trackedAbilityIds.has(abilityId);
     });
-    const phaseFourStartTimestamp = findDancingMadPhaseFourStart(retainedEvents, actorNames);
-    const phaseFourOffsetMs = Number.isFinite(phaseFourStartTimestamp)
-      ? phaseFourStartTimestamp - Number(fight.startTime)
-      : null;
+    const phaseStarts = resolveEncounterPhaseStarts(
+      DANCING_MAD_ENCOUNTER_NAME,
+      fight,
+      extractPhaseReferenceEvents(retainedEvents, actorNames),
+    );
     const mitigationEvents = dancingMadMitigations.flatMap((mitigation, mitigationIndex) => {
       const sourcePlayer = playerByJob.get(normalizeJobAbbreviation(mitigation.class));
       if (!sourcePlayer) return [];
-      const isPhaseFourRelative = mitigation.afterPhaseThree === true || Number(mitigation.phase) >= 4;
-      if (isPhaseFourRelative && !Number.isFinite(phaseFourOffsetMs)) return [];
-      const relativeAnchorMs = isPhaseFourRelative ? phaseFourOffsetMs : 0;
+      const relativeAnchorMs = phaseStarts.get(Number(mitigation.phase));
+      if (!Number.isFinite(relativeAnchorMs)) return [];
       const startMs = relativeAnchorMs + Number(mitigation.startElapsedSeconds) * 1000;
       const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > durationMs) return [];
@@ -627,15 +632,17 @@ async function loadDancingMadMitigations() {
   const mitigations = await response.json();
   dancingMadMitigations = mitigations
     .filter((entry) => Number.isFinite(Number(entry.abilityId))
+      && Number.isFinite(Number(entry.phase))
       && Number.isFinite(Number(entry.startElapsedSeconds))
       && Number.isFinite(Number(entry.endElapsedSeconds))
       && PARTY_SLOT_ORDER.includes(entry.assignedTo))
-    .sort((first, second) => {
-      const phaseGroupDifference = Number(first.afterPhaseThree === true)
-        - Number(second.afterPhaseThree === true);
-      if (phaseGroupDifference !== 0) return phaseGroupDifference;
-      return Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds);
-    });
+    .sort(comparePhaseRelativeEntries);
+}
+
+function comparePhaseRelativeEntries(first, second) {
+  return Number(first.phase) - Number(second.phase)
+    || Number(first.startElapsedSeconds ?? first.elapsedSeconds)
+      - Number(second.startElapsedSeconds ?? second.elapsedSeconds);
 }
 
 async function loadMitigationCooldowns() {
@@ -1133,7 +1140,12 @@ async function toggleFightPanelWithLoadedState(report, fight, openPanelKeys) {
   renderLookupResult();
   try {
     const mitigationAbilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
-    const rawDetails = await fetchFightEventDetails(report.code, fight.id, mitigationAbilityIds);
+    const rawDetails = await fetchFightEventDetails(
+      report.code,
+      fight.id,
+      mitigationAbilityIds,
+      getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME),
+    );
     fightDetails.set(key, normalizeFightDetails(rawDetails));
   } catch (error) {
     fightDetails.set(key, { status: 'error', error: error.message });
@@ -1149,7 +1161,7 @@ function normalizeFightDetails(rawDetails) {
   const friendlyPlayers = rawDetails?.fights?.[0]?.friendlyPlayers ?? [];
   const friendlyIds = new Set(friendlyPlayers.map(Number));
   const rawEvents = rawDetails?.events?.data ?? [];
-  const phaseFourStartTimestamp = findDancingMadPhaseFourStart(rawEvents, actorNames);
+  const phaseReferenceEvents = extractPhaseReferenceEvents(rawEvents, actorNames);
   const partyMembers = normalizePartyMembers(actors, friendlyIds);
   const mitigationCasts = extractTrackedMitigationCasts(rawEvents, actorNames);
   const lifeEvents = extractPlayerLifeEvents(rawEvents);
@@ -1161,13 +1173,13 @@ function normalizeFightDetails(rawDetails) {
       player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
       timestamp: Number(event.timestamp),
     }));
-  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts, lifeEvents };
+  return { status: 'ready', events, phaseReferenceEvents, partyMembers, mitigationCasts, lifeEvents };
 }
 
 function normalizeEmbeddedFightDetails(report, fight) {
   const actorNames = new Map((report.testActors ?? []).map((actor) => [Number(actor.id), actor.name]));
   const friendlyIds = new Set((fight.friendlyPlayers ?? []).map(Number));
-  const phaseFourStartTimestamp = findDancingMadPhaseFourStart(fight.events ?? [], actorNames);
+  const phaseReferenceEvents = extractPhaseReferenceEvents(fight.events ?? [], actorNames);
   const partyMembers = normalizePartyMembers(report.testActors ?? [], friendlyIds);
   const mitigationCasts = extractTrackedMitigationCasts(fight.events ?? [], actorNames);
   const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
@@ -1179,7 +1191,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
       player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
       timestamp: Number(event.timestamp),
     }));
-  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts, lifeEvents };
+  return { status: 'ready', events, phaseReferenceEvents, partyMembers, mitigationCasts, lifeEvents };
 }
 
 function extractPlayerLifeEvents(events) {
@@ -1230,21 +1242,26 @@ function isDisplayedFightEvent(event) {
     || (event.type === 'applydebuff' && Number(event.abilityGameID) === 1002911);
 }
 
-// Test fixtures use the analyzed-event field names from the CSV conversion, while
-// live FFLogs data uses `begincast`, actor IDs, and a server-side ability-name filter.
-function findDancingMadPhaseFourStart(events, actorNames) {
-  const matchingTimestamps = events.flatMap((event) => {
-    const eventType = String(event.eventType ?? event.type ?? '').replace(/\s+/g, '').toLowerCase();
-    const ability = event.ability?.name ?? event.abilityName ?? event.ability;
-    const source = event.source ?? event.sourceName ?? actorNames.get(Number(event.sourceID));
-    const isFilteredLiveCast = eventType === 'begincast' && ability === undefined;
-    const matches = eventType === 'begincast'
-      && (ability === 'Kefka Says' || isFilteredLiveCast)
-      && source === 'Kefka';
-    const timestamp = Number(event.timestamp);
-    return matches && Number.isFinite(timestamp) ? [timestamp] : [];
-  });
-  return matchingTimestamps.length > 0 ? Math.min(...matchingTimestamps) : null;
+// Keep only events referenced by encounter phase definitions. Both live FFLogs data
+// and analyzed CSV fixtures are normalized here before the shared phase resolver runs.
+function extractPhaseReferenceEvents(events, actorNames) {
+  const references = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
+  const referenceTypes = new Set(references.map((reference) => normalizeEventType(reference.eventType)));
+  return events
+    .map((event) => {
+      const eventType = normalizeEventType(event.eventType ?? event.type);
+      const source = event.source ?? event.sourceName
+        ?? actorNames.get(Number(event.sourceID ?? event.sourceId));
+      let ability = event.ability?.name ?? event.abilityName ?? event.ability;
+      if (ability === undefined) {
+        const candidates = references.filter((reference) =>
+          normalizeEventType(reference.eventType) === eventType
+          && (!reference.source || reference.source === source));
+        if (candidates.length === 1) ability = candidates[0].ability;
+      }
+      return { eventType, ability, source, timestamp: Number(event.timestamp) };
+    })
+    .filter((event) => referenceTypes.has(event.eventType) && Number.isFinite(event.timestamp));
 }
 
 function createFightDetailsPanel(fight, state) {
@@ -1548,7 +1565,7 @@ function createMitigationHistoryTable(rows) {
 }
 
 function mitigationIdentity(mitigation) {
-  return [mitigation.assignedTo, mitigation.abilityId, mitigation.phase ?? '', mitigation.afterPhaseThree === true,
+  return [mitigation.assignedTo, mitigation.abilityId, mitigation.phase ?? '',
     mitigation.startElapsedSeconds, mitigation.endElapsedSeconds].join(':');
 }
 
@@ -1566,7 +1583,12 @@ async function loadMitigationResultHistory(report, mitigation) {
             state = normalizeEmbeddedFightDetails(report, fight);
           } else {
             const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
-            state = normalizeFightDetails(await fetchFightEventDetails(report.code, fight.id, abilityIds));
+            state = normalizeFightDetails(await fetchFightEventDetails(
+              report.code,
+              fight.id,
+              abilityIds,
+              getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME),
+            ));
           }
           fightDetails.set(detailKey, state);
         }
@@ -1604,7 +1626,11 @@ function createMitigationAbilityIcon(abilityId, abilityName) {
 function evaluatePartySlotMitigations(fight, state, assignedTo) {
   const durationMs = getFightDuration(fight);
   const partySlots = mapPartyMembersToPlanSlots(state.partyMembers ?? []);
-  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state.phaseReferenceEvents ?? [],
+  );
   const usedCastIndexes = new Set();
   const results = [];
 
@@ -1619,9 +1645,8 @@ function evaluatePartySlotMitigations(fight, state, assignedTo) {
     if (!player) continue;
 
     const phase = Number(mitigation.phase);
-    const isPhaseFourRelative = mitigation.afterPhaseThree === true || phase >= 4;
-    const relativeAnchorMs = isPhaseFourRelative ? phaseStarts.get(4) : 0;
-    if (isPhaseFourRelative && !Number.isFinite(relativeAnchorMs)) continue;
+    const relativeAnchorMs = phaseStarts.get(phase);
+    if (!Number.isFinite(relativeAnchorMs)) continue;
     const startMs = relativeAnchorMs + Number(mitigation.startElapsedSeconds) * 1000;
     const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
     if (startMs > durationMs) continue;
@@ -1791,7 +1816,11 @@ function createFightDetailsTable(fight, state) {
   head.append(headingRow);
 
   const body = document.createElement('tbody');
-  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state.phaseReferenceEvents ?? [],
+  );
   for (const event of events) {
     const elapsedMs = Math.max(0, Number(event.timestamp) - Number(fight.startTime));
     const eventPhase = getDancingMadPhase(elapsedMs, phaseStarts);
@@ -1818,11 +1847,17 @@ function createFightTimeline(fight, state) {
   const timeline = document.createElement('div');
   timeline.className = 'fight-timeline';
   const durationMs = getFightDuration(fight);
-  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
-  const finalAvailablePhase = phaseStarts.has(4) ? 5 : 3;
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state.phaseReferenceEvents ?? [],
+  );
+  const finalAvailablePhase = Math.max(...phaseStarts.keys());
   const endingPhase = Math.min(finalAvailablePhase, Math.max(1, Number(fight.lastPhase) || 1));
   const eqMechanic = dancingMadMechanics.find((mechanic) => mechanic.mechanic.startsWith('EQ'));
-  const eqTimestampMs = Number(eqMechanic?.elapsedSeconds) * 1000;
+  const eqTimestampMs = eqMechanic
+    ? getEncounterRelativeTimestamp(eqMechanic, phaseStarts)
+    : Number.NaN;
   const splitLongPhaseThree = durationMs >= 600_000 && Number.isFinite(eqTimestampMs);
   const phaseSegments = [];
 
@@ -1907,7 +1942,7 @@ function createFightTimeline(fight, state) {
     );
 
     for (const mechanic of dancingMadMechanics.filter((entry) => Number(entry.phase) === phase)) {
-      const mechanicMs = getDancingMadMechanicTimestamp(mechanic, phaseStarts);
+      const mechanicMs = getEncounterRelativeTimestamp(mechanic, phaseStarts);
       if (mechanicMs < phaseStart || mechanicMs > phaseEnd) {
         continue;
       }
@@ -2141,16 +2176,56 @@ function createFightEventIcon(kind) {
   return damageDownIcon;
 }
 
-// Return the absolute elapsed-time boundary for every encounter phase. Phases 1-3
-// use known fixed timings; phase 4 begins at a cast detected in this specific pull
-// and is clamped to its duration so short pulls cannot create impossible geometry.
-function calculateDancingMadPhaseStarts(fight, phaseFourStartTimestamp) {
-  const phaseStarts = new Map(DANCING_MAD_FIXED_PHASE_STARTS);
-  if (Number.isFinite(phaseFourStartTimestamp)) {
-    const phaseFourStartMs = Math.max(0, phaseFourStartTimestamp - Number(fight.startTime));
-    phaseStarts.set(4, phaseFourStartMs);
-    phaseStarts.set(5, phaseFourStartMs + DANCING_MAD_PHASE_FIVE_OFFSET_MS);
+function getEncounterEventReferences(encounterName) {
+  return (encounterPhaseDefinitions.get(encounterName)?.phases ?? [])
+    .filter((definition) => definition.start?.type === 'event')
+    .map((definition) => definition.start.event)
+    .filter(Boolean);
+}
+
+function normalizeEventType(eventType) {
+  return String(eventType ?? '').replace(/\s+/g, '').toLowerCase();
+}
+
+// Resolve every configured phase into pull-relative milliseconds. Fixed phases may
+// build on an earlier phase, while event phases are available only when their exact
+// configured event occurs after all configured lower bounds.
+function resolveEncounterPhaseStarts(encounterName, fight, phaseReferenceEvents) {
+  const definitions = encounterPhaseDefinitions.get(encounterName)?.phases ?? [];
+  const phaseStarts = new Map();
+  const pullStartTimestamp = Number(fight.startTime);
+
+  for (const definition of [...definitions].sort((first, second) => Number(first.phase) - Number(second.phase))) {
+    const phase = Number(definition.phase);
+    const start = definition.start ?? {};
+    const relativePhase = Number(start.relativeToPhase);
+    const relativeStartMs = relativePhase > 0 ? phaseStarts.get(relativePhase) : 0;
+    if (relativePhase > 0 && !Number.isFinite(relativeStartMs)) continue;
+
+    if (start.type === 'fixed') {
+      const offsetMs = Number(start.seconds) * 1000;
+      if (Number.isFinite(offsetMs)) phaseStarts.set(phase, relativeStartMs + offsetMs);
+      continue;
+    }
+
+    if (start.type !== 'event' || !Number.isFinite(pullStartTimestamp)) continue;
+    const reference = start.event ?? {};
+    const minimumPullMs = Number(reference.minimumPullSeconds ?? 0) * 1000;
+    const minimumRelativeMs = Number(reference.relativeToPhase) > 0
+      ? phaseStarts.get(Number(reference.relativeToPhase))
+      : 0;
+    if (!Number.isFinite(minimumRelativeMs)) continue;
+    const matchingElapsedTimes = phaseReferenceEvents
+      .filter((event) => event.eventType === normalizeEventType(reference.eventType)
+        && event.ability === reference.ability
+        && event.source === reference.source)
+      .map((event) => Number(event.timestamp) - pullStartTimestamp)
+      .filter((elapsedMs) => Number.isFinite(elapsedMs)
+        && elapsedMs >= minimumPullMs
+        && elapsedMs >= minimumRelativeMs);
+    if (matchingElapsedTimes.length > 0) phaseStarts.set(phase, Math.min(...matchingElapsedTimes));
   }
+
   return phaseStarts;
 }
 
@@ -2165,20 +2240,22 @@ function getDancingMadPhase(elapsedMs, phaseStarts) {
   return phase;
 }
 
-function getDancingMadMechanicTimestamp(mechanic, phaseStarts) {
-  const phase = Number(mechanic.phase);
-  const relativeMs = Number(mechanic.elapsedSeconds) * 1000;
-  return phase >= 4 ? (phaseStarts.get(4) ?? Number.POSITIVE_INFINITY) + relativeMs : relativeMs;
+function getEncounterRelativeTimestamp(entry, phaseStarts) {
+  const phaseStartMs = phaseStarts.get(Number(entry.phase));
+  const relativeMs = Number(entry.elapsedSeconds) * 1000;
+  return Number.isFinite(phaseStartMs) && Number.isFinite(relativeMs)
+    ? phaseStartMs + relativeMs
+    : Number.POSITIVE_INFINITY;
 }
 
 function getDancingMadMechanic(elapsedMs, phaseStarts, phase = null) {
   let latestMechanic = null;
   for (const mechanic of dancingMadMechanics) {
     if (phase !== null && Number(mechanic.phase) !== phase) continue;
-    if (getDancingMadMechanicTimestamp(mechanic, phaseStarts) >= elapsedMs) continue;
+    if (getEncounterRelativeTimestamp(mechanic, phaseStarts) >= elapsedMs) continue;
     if (!latestMechanic
-      || getDancingMadMechanicTimestamp(mechanic, phaseStarts)
-        > getDancingMadMechanicTimestamp(latestMechanic, phaseStarts)) latestMechanic = mechanic;
+      || getEncounterRelativeTimestamp(mechanic, phaseStarts)
+        > getEncounterRelativeTimestamp(latestMechanic, phaseStarts)) latestMechanic = mechanic;
   }
 
   return latestMechanic;
