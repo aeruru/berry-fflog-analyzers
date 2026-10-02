@@ -1,0 +1,367 @@
+517 00:00.000, Kefka Says (begin cast)
+518 00:05.000, Kefka Says
+519 00:08.176, Enhanced Thrill Of War II
+520 00:09.605, Thrumming Thunder III (begin cast)
+521 00:09.605, Thrumming Thunder III (begin cast)
+522 00:09.605, Thrumming Thunder III (begin cast)
+523 00:09.605, Thrumming Thunder III (begin cast)
+524 00:09.605, Blizzard III Blowout (begin cast)
+525 00:09.605, Blizzard III Blowout (begin cast)
+526 00:09.605, Mystery Magic (begin cast)
+527 00:10.007, Grand Cross (begin cast)
+528 00:14.565, Thrumming Thunder III
+529 00:14.565, Thrumming Thunder III
+530 00:14.565, Thrumming Thunder III
+531 00:14.565, Thrumming Thunder III
+532 00:14.565, Blizzard III Blowout
+533 00:14.565, Blizzard III Blowout
+534 00:14.565, Mystery Magic
+535 00:15.100, Tsunami (begin cast)
+536 00:18.988, Grand Cross
+537 00:24.082, Tsunami
+538 00:24.526, Thrumming Thunder III (begin cast)
+539 00:24.526, Thrumming Thunder III (begin cast)
+540 00:24.526, Thrumming Thunder III (begin cast)
+541 00:24.526, Thrumming Thunder III (begin cast)
+542 00:24.526, Blizzard III Blowout (begin cast)
+543 00:24.526, Blizzard III Blowout (begin cast)
+544 00:24.526, Blizzard III Blowout (begin cast)
+545 00:24.526, Blizzard III Blowout (begin cast)
+546 00:24.526, Mystery Magic (begin cast)
+547 00:24.928, Grand Cross (begin cast)
+548 00:29.487, Thrumming Thunder III
+549 00:29.487, Thrumming Thunder III
+550 00:29.487, Thrumming Thunder III
+551 00:29.487, Thrumming Thunder III
+552 00:29.487, Blizzard III Blowout
+553 00:29.487, Blizzard III Blowout
+554 00:29.487, Blizzard III Blowout
+555 00:29.487, Blizzard III Blowout
+556 00:29.487, Mystery Magic
+557 00:30.023, Inferno (begin cast)
+558 00:33.917, Grand Cross
+559 00:39.014, Inferno
+560 00:39.685, Thrumming Thunder III (begin cast)
+561 00:39.685, Thrumming Thunder III (begin cast)
+562 00:39.685, Blizzard III Blowout (begin cast)
+563 00:39.685, Blizzard III Blowout (begin cast)
+564 00:39.685, Mystery Magic (begin cast)
+565 00:39.864, Grand Cross (begin cast)
+566 00:44.648, Thrumming Thunder III
+567 00:44.648, Thrumming Thunder III
+568 00:44.648, Blizzard III Blowout
+569 00:44.648, Blizzard III Blowout
+570 00:44.648, Mystery Magic
+571 00:47.818, unknown_c554 (begin cast)
+572 00:48.842, Grand Cross
+573 00:50.810, unknown_c554
+574 00:55.996, Edge of Death (begin cast)
+575 00:55.996, Black Antilight (begin cast)
+576 00:55.996, White Antilight (begin cast)
+577 00:55.996, Flood of Naught (begin cast)
+578 01:00.955, Flood of Naught
+579 01:01.493, Edge of Death
+580 01:01.493, Black Antilight
+581 01:01.493, White Antilight
+582 01:04.667, unknown_c555
+583 01:05.339, Death Surge
+584 01:05.339, Death Surge
+585 01:05.339, Death Surge
+586 01:05.339, Death Surge
+587 01:06.765, Mana Charge (begin cast)
+588 01:09.759, Mana Charge
+589 01:10.028, Death Wave
+590 01:10.028, Death Bolt
+591 01:10.028, Death Wave
+592 01:10.028, Death Bolt
+593 01:13.022, Thrumming Thunder III (begin cast)
+594 01:13.022, Thrumming Thunder III (begin cast)
+595 01:13.022, Thrumming Thunder III (begin cast)
+596 01:13.022, Thrumming Thunder III (begin cast)
+597 01:13.022, Thrumming Thunder III (begin cast)
+598 01:17.984, Thrumming Thunder III
+599 01:17.984, Thrumming Thunder III
+600 01:17.984, Thrumming Thunder III
+601 01:17.984, Thrumming Thunder III
+602 01:17.984, Thrumming Thunder III
+603 01:19.100, Death Shriek
+604 01:19.100, Death Shriek
+605 01:25.846, Stray Flames (begin cast)
+606 01:25.846, Stray Flames (begin cast)
+607 01:25.846, Stray Flames (begin cast)
+608 01:28.126, Ultima Upsurge
+609 01:30.806, Stray Flames
+610 01:30.806, Stray Flames
+611 01:30.806, Stray Flames
+612 01:30.806, Stray Flames
+613 01:30.806, Stray Flames
+614 01:30.806, Stray Flames
+615 01:30.806, Stray Flames
+616 01:30.806, Stray Flames
+617 01:30.986, Blizzard III Blowout (begin cast)
+618 01:30.986, Blizzard III Blowout (begin cast)
+619 01:30.986, Blizzard III Blowout (begin cast)
+620 01:35.101, Death Bolt
+621 01:35.101, Death Bolt
+622 01:35.101, Death Wave
+623 01:35.101, Death Wave
+624 01:35.948, Blizzard III Blowout
+625 01:35.948, Blizzard III Blowout
+626 01:35.948, Blizzard III Blowout
+627 01:35.948, Blizzard III Blowout
+628 01:35.948, Blizzard III Blowout
+629 01:43.009, Death Shriek
+630 01:43.009, Death Shriek
+631 01:48.775, Stray Spray (begin cast)
+632 01:48.775, Stray Spray (begin cast)
+633 01:48.775, Stray Spray (begin cast)
+634 01:48.775, Stray Spray (begin cast)
+635 01:49.176, Mana Release
+636 01:53.772, Stray Spray
+637 01:53.772, Stray Spray
+638 01:53.772, Stray Spray
+639 01:53.772, Stray Spray
+640 01:53.772, Stray Spray
+641 01:53.772, Stray Spray
+642 01:53.772, Stray Spray
+643 01:53.772, Stray Spray
+644 01:54.263, Thrumming Thunder III
+645 01:54.263, Blizzard III Blowout
+646 01:54.263, Blizzard III Blowout
+647 01:54.263, Blizzard III Blowout
+648 01:54.263, Blizzard III Blowout
+649 01:54.263, Thrumming Thunder III
+650 01:54.263, Thrumming Thunder III
+651 01:54.263, Thrumming Thunder III
+652 02:00.568, Enhanced Thrill Of War II
+653 02:06.961, Ultima Upsurge
+654 02:45.071, Ultima Repeater
+655 02:46.189, Ultima Repeater
+656 02:46.905, Ultima Repeater
+657 02:47.577, Ultima Repeater
+658 02:48.291, Ultima Repeater
+659 02:50.255, unknown_c652
+660 02:51.060, Fell Forces
+661 02:51.060, Fell Forces
+662 02:51.061, Fell Forces
+663 02:53.426, unknown_c652
+664 02:54.231, Fell Forces
+665 02:54.231, Fell Forces
+666 02:54.231, Fell Forces
+667 02:56.554, unknown_c652
+668 02:57.359, Fell Forces
+669 02:57.359, Fell Forces
+670 02:57.359, Fell Forces
+671 02:59.236, unknown_c183
+672 02:59.236, unknown_c183
+673 02:59.771, unknown_c183 (begin cast)
+674 03:00.263, unknown_c183
+675 03:00.263, unknown_c183
+676 03:01.247, unknown_c183
+677 03:01.247, unknown_c183
+678 03:02.273, unknown_c183
+679 03:02.273, unknown_c183
+680 03:02.630, Flood
+681 03:03.658, Chaotic Flood
+682 03:03.747, Flood
+683 03:03.747, Flood
+684 03:04.642, Chaotic Flood
+685 03:04.775, Flood
+686 03:04.775, Flood
+687 03:05.669, Chaotic Flood
+688 03:05.804, Flood
+689 03:05.804, Flood
+690 03:06.698, Chaotic Flood
+691 03:06.833, Flood
+692 03:06.833, Flood
+693 03:15.771, Maddening Orchestra
+694 03:16.663, Holy
+695 03:16.663, Holy
+696 03:16.663, Holy
+697 03:16.663, Flare
+698 03:16.663, Flare
+699 03:18.942, Maddening Orchestra
+700 03:19.837, Holy
+701 03:19.837, Holy
+702 03:19.837, Holy
+703 03:19.837, Chaotic Flare
+704 03:23.325, Chaotic Holy
+705 03:23.325, Flare Diffusion
+706 03:27.168, unknown_c652
+707 03:27.974, Fell Forces
+708 03:27.974, Fell Forces
+709 03:27.974, Fell Forces
+710 03:30.294, unknown_c652
+711 03:31.099, Fell Forces
+712 03:31.099, Fell Forces
+713 03:31.099, Fell Forces
+714 03:37.489, Celestriad
+715 03:45.985, Catastrophic Choice
+716 03:46.655, Thunder III
+717 03:46.655, Thunder III
+718 03:46.655, Blizzard III
+719 03:46.655, Fire III
+720 03:46.789, Quake
+721 03:52.691, Thunder III
+722 03:52.691, Blizzard III
+723 03:52.691, Blizzard III
+724 03:52.691, Fire III
+725 03:58.141, Catastrophic Choice
+726 03:58.721, Thunder III
+727 03:58.721, Blizzard III
+728 03:58.721, Fire III
+729 03:58.721, Fire III
+730 03:58.944, Tornado
+731 04:06.979, Ultima Repeater
+732 04:08.096, Ultima Repeater
+733 04:08.813, Ultima Repeater
+734 04:09.483, Ultima Repeater
+735 04:10.199, Ultima Repeater
+736 04:12.166, unknown_c652
+737 04:12.973, Fell Forces
+738 04:12.973, Fell Forces
+739 04:12.973, Fell Forces
+740 04:15.338, unknown_c652
+741 04:16.142, Fell Forces
+742 04:16.142, Fell Forces
+743 04:16.142, Fell Forces
+744 04:21.544, Stray Apocalypse
+745 04:21.544, Stray Apocalypse
+746 04:21.544, Stray Apocalypse
+747 04:22.169, Stray Apocalypse
+748 04:22.169, Stray Apocalypse
+749 04:22.660, Stray Apocalypse
+750 04:22.660, Stray Apocalypse
+751 04:23.153, Stray Apocalypse
+752 04:23.153, Stray Apocalypse
+753 04:23.644, Stray Apocalypse
+754 04:23.644, Stray Apocalypse
+755 04:24.045, Stray Apocalypse
+756 04:24.045, Stray Apocalypse
+757 04:24.179, Stray Apocalypse
+758 04:24.179, Stray Apocalypse
+759 04:24.670, Stray Apocalypse
+760 04:24.670, Stray Apocalypse
+761 04:24.670, Stray Apocalypse
+762 04:24.670, Stray Apocalypse
+763 04:25.162, Stray Apocalypse
+764 04:25.162, Stray Apocalypse
+765 04:25.652, Stray Apocalypse
+766 04:25.697, Stray Apocalypse
+767 04:26.189, Stray Apocalypse
+768 04:26.234, Stray Apocalypse
+769 04:26.548, Stray Apocalypse
+770 04:26.548, Stray Apocalypse
+771 04:26.683, Stray Apocalypse
+772 04:26.771, Stray Apocalypse
+773 04:27.173, Stray Apocalypse
+774 04:27.173, Stray Apocalypse
+775 04:27.217, Stray Apocalypse
+776 04:27.262, Stray Apocalypse
+777 04:27.665, Stray Apocalypse
+778 04:27.709, Stray Apocalypse
+779 04:28.156, Stray Apocalypse
+780 04:28.246, Stray Apocalypse
+781 04:28.692, Stray Apocalypse
+782 04:28.781, Stray Apocalypse
+783 04:29.049, Stray Apocalypse
+784 04:29.049, Stray Apocalypse
+785 04:29.229, Stray Apocalypse
+786 04:29.273, Stray Apocalypse
+787 04:29.675, Stray Apocalypse
+788 04:29.675, Stray Apocalypse
+789 04:29.720, Stray Apocalypse
+790 04:29.810, Stray Apocalypse
+791 04:30.168, Stray Apocalypse
+792 04:30.168, Stray Apocalypse
+793 04:30.660, Stray Apocalypse
+794 04:30.705, Stray Apocalypse
+795 04:31.152, Stray Apocalypse
+796 04:31.198, Stray Apocalypse
+797 04:31.556, Stray Apocalypse
+798 04:31.556, Stray Apocalypse
+799 04:31.691, Stray Apocalypse
+800 04:31.735, Stray Apocalypse
+801 04:32.181, Stray Apocalypse
+802 04:32.181, Stray Apocalypse
+803 04:32.181, Stray Apocalypse
+804 04:32.225, Stray Apocalypse
+805 04:32.673, Stray Apocalypse
+806 04:32.673, Stray Apocalypse
+807 04:33.165, Stray Apocalypse
+808 04:33.165, Stray Apocalypse
+809 04:33.703, Stray Apocalypse
+810 04:33.703, Stray Apocalypse
+811 04:34.061, Stray Apocalypse
+812 04:34.061, Stray Apocalypse
+813 04:34.196, Stray Apocalypse
+814 04:34.240, Stray Apocalypse
+815 04:34.688, Stray Apocalypse
+816 04:34.688, Stray Apocalypse
+817 04:34.733, Stray Apocalypse
+818 04:34.733, Stray Apocalypse
+819 04:35.180, Stray Apocalypse
+820 04:35.180, Stray Apocalypse
+821 04:35.716, Stray Apocalypse
+822 04:35.716, Stray Apocalypse
+823 04:36.209, Stray Apocalypse
+824 04:36.254, Stray Apocalypse
+825 04:36.745, Stray Apocalypse
+826 04:36.745, Stray Apocalypse
+827 04:37.236, Stray Apocalypse
+828 04:37.236, Stray Apocalypse
+829 04:38.712, Stray Entropy
+830 04:39.609, Stray Entropy
+831 04:39.609, Stray Entropy
+832 04:39.609, Stray Entropy
+833 04:39.609, Stray Entropy
+834 04:39.609, Stray Entropy
+835 04:39.609, Stray Entropy
+836 04:39.609, Stray Entropy
+837 04:47.880, Maddening Orchestra
+838 04:48.773, Holy
+839 04:48.773, Holy
+840 04:48.773, Holy
+841 04:48.773, Flare
+842 04:48.773, Flare
+843 04:51.051, Maddening Orchestra
+844 04:51.947, Holy
+845 04:51.947, Holy
+846 04:51.947, Holy
+847 04:51.947, Chaotic Flare
+848 04:55.434, Flare Diffusion
+849 04:55.434, Chaotic Holy
+850 04:59.279, unknown_c652
+851 05:00.082, Fell Forces
+852 05:00.082, Fell Forces
+853 05:00.082, Fell Forces
+854 05:02.405, unknown_c652
+855 05:03.210, Fell Forces
+856 05:03.210, Fell Forces
+857 05:03.210, Fell Forces
+858 05:05.529, unknown_c652
+859 05:06.333, Fell Forces
+860 05:06.333, Fell Forces
+861 05:06.333, Fell Forces
+862 05:17.640, Forsaken
+863 05:22.691, Forsaken
+864 05:22.691, Forsaken Ground
+865 05:22.691, Forsaken Ground
+866 05:22.735, Forsaken Bonds
+867 05:25.820, Forsaken
+868 05:30.870, Forsaken Bonds
+869 05:30.870, Forsaken
+870 05:30.870, Forsaken Ground
+871 05:30.870, Forsaken Ground
+872 05:33.951, Forsaken
+873 05:39.001, Forsaken Bonds
+874 05:39.001, Forsaken
+875 05:39.001, Forsaken Ground
+876 05:39.001, Forsaken Ground
+877 05:42.082, Forsaken
+878 05:47.134, Forsaken Bonds
+879 05:47.134, Forsaken
+880 05:47.134, Forsaken Ground
+881 05:47.134, Forsaken Ground
+882 05:52.232, Forsaken Null (begin cast)
+883 06:18.195, Forsaken Null

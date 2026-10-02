@@ -71,7 +71,7 @@ const REPORT_FIGHTS_QUERY = `
 
 // Kefka Says anchors Dancing Mad's pull-specific P4/P5 mechanic timings. Fetch its
 // cast start with the visible failure events so phase alignment needs no second query.
-const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "begincast" AND ability.name = "Kefka Says")';
+const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "begincast" AND ability.name = "Kefka Says")';
 const FIGHT_EVENTS_QUERY = `
   query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
     reportData {

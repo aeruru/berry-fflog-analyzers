@@ -3,7 +3,7 @@
     { "id": 1, "name": "Berry Blue", "type": "Player", "subType": "Paladin" },
     { "id": 2, "name": "Maple Mint", "type": "Player", "subType": "DarkKnight" },
     { "id": 3, "name": "Juniper Jam", "type": "Player", "subType": "WhiteMage" },
-    { "id": 4, "name": "Peach Parfait", "type": "Player", "subType": "Scholar" },
+    { "id": 4, "name": "Peach Parfait", "type": "Player", "subType": "Sage" },
     { "id": 5, "name": "Cocoa Crumble", "type": "Player", "subType": "Dragoon" },
     { "id": 6, "name": "Lemon Lassi", "type": "Player", "subType": "Ninja" },
     { "id": 7, "name": "Kiwi Fizz", "type": "Player", "subType": "Bard" },

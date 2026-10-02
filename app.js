@@ -32,22 +32,29 @@ const elements = {
   themeToggleButton: document.querySelector('#themeToggleButton'),
 };
 const MITIGATION_FILTER_STORAGE_KEY = 'berry-mitigation-filter';
+const MITIGATION_SLOT_STORAGE_KEY = 'berry-mitigation-slot';
 const LEGACY_SHOW_ON_TIME_STORAGE_KEY = 'berry-show-on-time-mitigations';
 const DETAILS_VIEW_STORAGE_KEY = 'berry-details-view';
 const MITIGATION_FILTER_MODES = new Set(['more-than-one', 'off-time', 'all']);
 const DETAILS_VIEW_MODES = new Set(['timeline', 'table']);
+const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const MITIGATION_ABILITY_ICON_URLS = new Map([
   [25862, './assets/ability-icons/002649_hr1.png'],
   [16536, './assets/ability-icons/002645_hr1.png'],
   [3569, './assets/ability-icons/002632_hr1.png'],
   [37011, './assets/ability-icons/002128_hr1.png'],
   [7433, './assets/ability-icons/002639_hr1.png'],
+  [24298, './assets/ability-icons/003666_hr1.png'],
+  [24310, './assets/ability-icons/003678_hr1.png'],
+  [24311, './assets/ability-icons/003679_hr1.png'],
+  [37035, './assets/ability-icons/003690_hr1.png'],
 ]);
 const UNKNOWN_MITIGATION_ABILITY_ICON_URL = './assets/ability-icons/question-mark-status.png';
 
 let currentUser = null;
 let dancingMadMechanics = [];
 let dancingMadMitigations = [];
+let mitigationCooldowns = new Map();
 let fightDetails = new Map();
 let openFightDetailKeys = new Set();
 let openFightMitigationKeys = new Set();
@@ -56,9 +63,11 @@ let selectedDetailsView = loadDetailsViewMode();
 let selectedReport = null;
 let selectedReportPhase = 'all';
 let mitigationFilterMode = loadMitigationFilterMode();
+let selectedMitigationSlot = loadMitigationSlot();
 let usingTestData = false;
 let timelineCollisionFrame = null;
 let fightPanelLayoutFrame = null;
+const mitigationHistoryPromises = new Map();
 
 // P1-P3 use stable encounter timings. P4 begins at a pull-specific cast, and the
 // relative P4/P5 mechanic data is added only after that anchor has been observed.
@@ -69,7 +78,6 @@ const DANCING_MAD_FIXED_PHASE_STARTS = new Map([
 ]);
 const DANCING_MAD_PHASE_FIVE_OFFSET_MS = 150_000;
 const MITIGATION_GRACE_SECONDS = 20;
-const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const JOB_ROLES = new Map([
   ['PLD', 'Tank'], ['WAR', 'Tank'], ['DRK', 'Tank'], ['GNB', 'Tank'],
   ['WHM', 'Healer'], ['SCH', 'Healer'], ['AST', 'Healer'], ['SGE', 'Healer'],
@@ -160,6 +168,7 @@ async function initialize() {
   try {
     await loadDancingMadMechanics();
     await loadDancingMadMitigations();
+    await loadMitigationCooldowns();
     const token = await completeFflogsLogin();
     if (token) {
       setStatus('FFLogs login complete. Loading your account...');
@@ -224,7 +233,7 @@ async function toggleTestData() {
       const payload = await response.json();
       reports = [...payload.reports, createGroupingScenarioReport()]
         .filter((report) => report?.fights?.length > 0)
-        .map((report) => ({ ...report, testActors: payload.actors ?? [] }));
+        .map((report, reportIndex) => addTestMitigationCasts(report, payload.actors ?? [], reportIndex));
       usingTestData = true;
       setReportsStatus('Using local test report data.');
       return;
@@ -305,10 +314,76 @@ async function searchForReport(event) {
 function renderLookupResult() {
   elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
   scheduleTimelineCollisionCheck();
-  scheduleFightPanelLayout();
+  scheduleResponsiveFightPanelLayout();
 }
 
-function scheduleFightPanelLayout() {
+// Every DMU fixture exercises the mitigation tracker. Cast timing rotates through a
+// stable set of outcomes so screenshots and manual checks remain reproducible.
+function addTestMitigationCasts(report, actors, reportIndex) {
+  const friendlyPlayers = actors.filter((actor) => actor.type === 'Player').map((actor) => Number(actor.id));
+  const actorNames = new Map(actors.map((actor) => [Number(actor.id), actor.name]));
+  const playerByJob = new Map(actors
+    .filter((actor) => actor.type === 'Player')
+    .map((actor) => [normalizeJobAbbreviation(actor.subType ?? actor.job), actor]));
+  const trackedAbilityIds = new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)));
+
+  const fights = report.fights.map((fight) => {
+    if (!isDmuPull(fight)) return fight;
+    const durationMs = getFightDuration(fight);
+    const retainedEvents = (fight.events ?? []).filter((event) => {
+      const eventType = String(event.eventType ?? event.type ?? '').replace(/\s+/g, '').toLowerCase();
+      const abilityId = Number(event.abilityId ?? event.abilityGameID ?? event.ability?.id);
+      return eventType !== 'cast' || !trackedAbilityIds.has(abilityId);
+    });
+    const phaseFourStartTimestamp = findDancingMadPhaseFourStart(retainedEvents, actorNames);
+    const phaseFourOffsetMs = Number.isFinite(phaseFourStartTimestamp)
+      ? phaseFourStartTimestamp - Number(fight.startTime)
+      : null;
+    const mitigationEvents = dancingMadMitigations.flatMap((mitigation, mitigationIndex) => {
+      const sourcePlayer = playerByJob.get(normalizeJobAbbreviation(mitigation.class));
+      if (!sourcePlayer) return [];
+      const isPhaseFourRelative = mitigation.afterPhaseThree === true || Number(mitigation.phase) >= 4;
+      if (isPhaseFourRelative && !Number.isFinite(phaseFourOffsetMs)) return [];
+      const relativeAnchorMs = isPhaseFourRelative ? phaseFourOffsetMs : 0;
+      const startMs = relativeAnchorMs + Number(mitigation.startElapsedSeconds) * 1000;
+      const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > durationMs) return [];
+
+      const scenario = (reportIndex * 3 + Number(fight.id) + mitigationIndex) % 7;
+      if (scenario === 0) return [];
+      const castElapsedMs = scenario === 1
+        ? startMs - 3_200
+        : scenario === 2
+          ? endMs + 2_200
+          : scenario === 3
+            ? startMs + 250
+            : scenario === 4
+              ? endMs + 400
+              : scenario === 5
+                ? (startMs + endMs) / 2
+                : startMs - 350;
+      if (castElapsedMs < 0 || castElapsedMs > durationMs) return [];
+      return [{
+        type: 'cast',
+        abilityGameID: Number(mitigation.abilityId),
+        sourceID: Number(sourcePlayer.id),
+        timestamp: Number(fight.startTime) + castElapsedMs,
+      }];
+    });
+
+    return {
+      ...fight,
+      friendlyPlayers,
+      events: [...retainedEvents, ...mitigationEvents].sort((first, second) => Number(first.timestamp) - Number(second.timestamp)),
+    };
+  });
+  return { ...report, fights, testActors: actors };
+}
+
+// Timeline labels and grouped event markers depend on their rendered pixel width,
+// which is unavailable until the browser finishes layout. Queue one recalculation
+// for the next frame and replace any older request caused by the same resize burst.
+function scheduleResponsiveFightPanelLayout() {
   cancelAnimationFrame(fightPanelLayoutFrame);
   fightPanelLayoutFrame = requestAnimationFrame(() => {
     for (const panels of document.querySelectorAll('.fight-panels')) {
@@ -335,8 +410,8 @@ function scheduleFightPanelLayout() {
   });
 }
 
-window.addEventListener('resize', scheduleFightPanelLayout);
-document.fonts?.ready.then(scheduleFightPanelLayout);
+window.addEventListener('resize', scheduleResponsiveFightPanelLayout);
+document.fonts?.ready.then(scheduleResponsiveFightPanelLayout);
 
 // Timeline labels vary enough that elapsed-time thresholds are unreliable. Measure the
 // rendered label boxes and move only end labels that overlap their neighbor by 2px+.
@@ -376,10 +451,10 @@ function renderTimelineEventGroups() {
       continue;
     }
 
-    const initialClusters = createTimelineCollisionClusters(sourceItems, canvas.clientWidth);
+    const initialClusters = groupOverlappingTimelineEvents(sourceItems, canvas.clientWidth);
     const initialGroups = initialClusters
       .filter((items) => items.length > 1)
-      .map((items) => ({ items, layout: getTimelineGroupLayout(items, canvas) }));
+      .map((items) => ({ items, layout: calculateTimelineGroupLayout(items, canvas) }));
     const initialSingles = initialClusters.filter((items) => items.length === 1).map(([item]) => item);
 
     const groupComponents = initialGroups.map((group) => [group]);
@@ -392,10 +467,10 @@ function renderTimelineEventGroups() {
       // group, allowing the requested group-to-group suction to propagate.
       for (let firstIndex = 0; firstIndex < groupComponents.length; firstIndex += 1) {
         const firstItems = groupComponents[firstIndex].flatMap((group) => group.items);
-        const firstLayout = getTimelineGroupLayout(firstItems, canvas);
+        const firstLayout = calculateTimelineGroupLayout(firstItems, canvas);
         for (let secondIndex = firstIndex + 1; secondIndex < groupComponents.length; secondIndex += 1) {
           const secondItems = groupComponents[secondIndex].flatMap((group) => group.items);
-          const secondLayout = getTimelineGroupLayout(secondItems, canvas);
+          const secondLayout = calculateTimelineGroupLayout(secondItems, canvas);
           if (timelineIntervalsTouch(firstLayout, secondLayout)) {
             groupComponents[firstIndex].push(...groupComponents[secondIndex]);
             groupComponents.splice(secondIndex, 1);
@@ -420,7 +495,7 @@ function renderTimelineEventGroups() {
         const hitbox = getTimelineItemCollisionBounds(item, canvas.clientWidth);
         const component = groupComponents.find((groups) => {
           const items = groups.flatMap((group) => group.items);
-          return timelineIntervalsTouch(getTimelineGroupLayout(items, canvas), hitbox);
+          return timelineIntervalsTouch(calculateTimelineGroupLayout(items, canvas), hitbox);
         });
         if (component) {
           component.push({ items: [item], layout: hitbox });
@@ -443,7 +518,7 @@ function renderTimelineEventGroups() {
         continue;
       }
       const groups = createTimelineEventKindGroups(componentItems);
-      const layout = getTimelineGroupLayout(componentItems, canvas);
+      const layout = calculateTimelineGroupLayout(componentItems, canvas);
       canvas.append(createTimelineEventGroupMarker(groups, layout, canvas));
     }
   }
@@ -460,6 +535,16 @@ function loadMitigationFilterMode() {
     // Fall through to the most focused default when storage is unavailable.
   }
   return 'more-than-one';
+}
+
+function loadMitigationSlot() {
+  try {
+    const savedSlot = localStorage.getItem(MITIGATION_SLOT_STORAGE_KEY);
+    if (PARTY_SLOT_ORDER.includes(savedSlot)) return savedSlot;
+  } catch {
+    // Fall through to H1 when storage is unavailable.
+  }
+  return 'H1';
 }
 
 function loadDetailsViewMode() {
@@ -494,10 +579,45 @@ function setMitigationFilterMode(mode) {
   document.querySelectorAll('.mitigation-tracker').forEach((tracker) => {
     const select = tracker.querySelector('.mitigation-filter-select');
     if (select) select.value = mode;
-    applyMitigationFilter(tracker);
+    applyMitigationResultFilter(tracker);
   });
 }
 
+// Keep the desktop tabs and compact select synchronized while preserving the
+// requested party slot when the tracker switches responsive layouts.
+function selectMitigationSlotInTracker(tracker, requestedSlot) {
+  const slotSelect = tracker.querySelector('.mitigation-slot-select');
+  if (!slotSelect) return;
+  const availableSlots = [...slotSelect.options].map((option) => option.value);
+  const selectedSlot = availableSlots.includes(requestedSlot) ? requestedSlot : availableSlots[0];
+  if (!selectedSlot) return;
+
+  slotSelect.value = selectedSlot;
+  for (const tab of tracker.querySelectorAll('.mitigation-tab')) {
+    const isSelected = tab.dataset.mitigationSlot === selectedSlot;
+    tab.setAttribute('aria-selected', String(isSelected));
+    tab.tabIndex = isSelected ? 0 : -1;
+  }
+  for (const panel of tracker.querySelectorAll('.mitigation-panel')) {
+    panel.hidden = panel.dataset.mitigationSlot !== selectedSlot;
+  }
+}
+
+function setMitigationSlot(slot) {
+  if (!PARTY_SLOT_ORDER.includes(slot)) return;
+  selectedMitigationSlot = slot;
+  try {
+    localStorage.setItem(MITIGATION_SLOT_STORAGE_KEY, slot);
+  } catch {
+    // Keep the preference active for this page when storage is unavailable.
+  }
+  document.querySelectorAll('.mitigation-tracker').forEach((tracker) => {
+    selectMitigationSlotInTracker(tracker, slot);
+  });
+}
+
+// Load and normalize the encounter plan once so every pull evaluates the same
+// chronologically ordered mitigation assignments.
 async function loadDancingMadMitigations() {
   const response = await fetch('./fight-data/dancing-mad-mitigations.json');
   if (!response.ok) {
@@ -513,25 +633,57 @@ async function loadDancingMadMitigations() {
     .sort((first, second) => Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds));
 }
 
-function createTimelineCollisionClusters(sourceItems, canvasWidth) {
-  const items = [...sourceItems].sort((first, second) => first.position - second.position);
+async function loadMitigationCooldowns() {
+  const response = await fetch('./fight-data/mitigation-cooldowns.json');
+  if (!response.ok) {
+    throw new Error(`Mitigation cooldown data returned ${response.status}.`);
+  }
+  const cooldowns = await response.json();
+  mitigationCooldowns = new Map(Object.entries(cooldowns)
+    .map(([abilityId, seconds]) => [Number(abilityId), Number(seconds)])
+    .filter(([abilityId, seconds]) => Number.isFinite(abilityId) && Number.isFinite(seconds) && seconds >= 0));
+}
+
+// Convert timeline percentages into pixel hitboxes, then place touching deaths and
+// damage downs into the same cluster. Every absorbed event can expand either edge,
+// so repeatedly scan all remaining events until the cluster reaches a fixed point.
+function groupOverlappingTimelineEvents(sourceItems, canvasWidth) {
+  const remaining = sourceItems.map((item) => ({
+    item,
+    bounds: getTimelineItemCollisionBounds(item, canvasWidth),
+  }));
   const clusters = [];
-  let cluster = [];
-  let clusterRight = -Infinity;
-  for (const item of items) {
-    const bounds = getTimelineItemCollisionBounds(item, canvasWidth);
-    if (cluster.length > 0 && bounds.left > clusterRight + TIMELINE_GROUP_EPSILON_PX) {
-      clusters.push(cluster);
-      cluster = [];
-      clusterRight = -Infinity;
+
+  while (remaining.length > 0) {
+    const seed = remaining.shift();
+    const cluster = [seed.item];
+    let clusterLeft = seed.bounds.left;
+    let clusterRight = seed.bounds.right;
+    let absorbedItem = true;
+
+    while (absorbedItem) {
+      absorbedItem = false;
+      for (let index = remaining.length - 1; index >= 0; index -= 1) {
+        const candidate = remaining[index];
+        if (!timelineIntervalsTouch(
+          { left: clusterLeft, right: clusterRight },
+          candidate.bounds,
+        )) {
+          continue;
+        }
+
+        cluster.push(candidate.item);
+        clusterLeft = Math.min(clusterLeft, candidate.bounds.left);
+        clusterRight = Math.max(clusterRight, candidate.bounds.right);
+        remaining.splice(index, 1);
+        absorbedItem = true;
+      }
     }
-    cluster.push(item);
-    clusterRight = Math.max(clusterRight, bounds.right);
+
+    clusters.push(cluster.sort((first, second) => first.position - second.position));
   }
-  if (cluster.length > 0) {
-    clusters.push(cluster);
-  }
-  return clusters;
+
+  return clusters.sort((first, second) => first[0].position - second[0].position);
 }
 
 function getTimelineItemCollisionBounds(item, canvasWidth) {
@@ -546,7 +698,10 @@ function createTimelineEventKindGroups(items) {
     .filter((group) => group.items.length > 0);
 }
 
-function getTimelineGroupLayout(items, canvas) {
+// Calculate both kinds of geometry used by a grouped marker. `collisionLeft` and
+// `collisionRight` decide which nearby events are absorbed; `left` and `right`
+// describe the visible summary box, including its minimum content width.
+function calculateTimelineGroupLayout(items, canvas) {
   const collisionBounds = items.map((item) => getTimelineItemCollisionBounds(item, canvas.clientWidth));
   const eventLeft = Math.min(...collisionBounds.map((bounds) => bounds.left));
   const eventRight = Math.max(...collisionBounds.map((bounds) => bounds.right));
@@ -573,7 +728,7 @@ function timelineIntervalsTouch(first, second) {
 }
 
 function measureTimelineGroupBoxWidth(groups, canvas) {
-  const box = createTimelineEventGroupBox(groups);
+  const box = createTimelineGroupSummaryBox(groups);
   box.style.position = 'absolute';
   box.style.visibility = 'hidden';
   canvas.append(box);
@@ -871,7 +1026,7 @@ function createDetailedFightCard(report, fight, highlightedFight) {
     card.append(analyzerLinks);
   }
   const detailsPanel = detailsOpen ? createFightDetailsPanel(fight, fightDetails.get(detailKey)) : null;
-  const mitigationPanel = mitigationsOpen ? createFightMitigationPanel(fight, fightDetails.get(detailKey)) : null;
+  const mitigationPanel = mitigationsOpen ? createFightMitigationPanel(report, fight, fightDetails.get(detailKey)) : null;
   if (detailsPanel && mitigationPanel) {
     const panels = document.createElement('div');
     panels.className = 'fight-panels';
@@ -939,14 +1094,17 @@ function createExternalLink(label, href) {
 }
 
 async function toggleFightDetails(report, fight) {
-  return toggleFightPanel(report, fight, openFightDetailKeys);
+  return toggleFightPanelWithLoadedState(report, fight, openFightDetailKeys);
 }
 
 async function toggleFightMitigations(report, fight) {
-  return toggleFightPanel(report, fight, openFightMitigationKeys);
+  return toggleFightPanelWithLoadedState(report, fight, openFightMitigationKeys);
 }
 
-async function toggleFightPanel(report, fight, openPanelKeys) {
+// Open or close one fight subpanel. On first open, fetch and normalize the shared
+// fight data; the caller-provided key set determines whether this is the details
+// panel or mitigation panel without duplicating their loading and error handling.
+async function toggleFightPanelWithLoadedState(report, fight, openPanelKeys) {
   const key = `${report.code}:${fight.id}`;
   if (openPanelKeys.has(key)) {
     openPanelKeys.delete(key);
@@ -988,7 +1146,8 @@ function normalizeFightDetails(rawDetails) {
   const rawEvents = rawDetails?.events?.data ?? [];
   const phaseFourStartTimestamp = findDancingMadPhaseFourStart(rawEvents, actorNames);
   const partyMembers = normalizePartyMembers(actors, friendlyIds);
-  const mitigationCasts = normalizeMitigationCasts(rawEvents, actorNames);
+  const mitigationCasts = extractTrackedMitigationCasts(rawEvents, actorNames);
+  const lifeEvents = extractPlayerLifeEvents(rawEvents);
   const events = rawEvents
     .filter(isDisplayedFightEvent)
     .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
@@ -997,7 +1156,7 @@ function normalizeFightDetails(rawDetails) {
       player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
       timestamp: Number(event.timestamp),
     }));
-  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts };
+  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts, lifeEvents };
 }
 
 function normalizeEmbeddedFightDetails(report, fight) {
@@ -1005,7 +1164,8 @@ function normalizeEmbeddedFightDetails(report, fight) {
   const friendlyIds = new Set((fight.friendlyPlayers ?? []).map(Number));
   const phaseFourStartTimestamp = findDancingMadPhaseFourStart(fight.events ?? [], actorNames);
   const partyMembers = normalizePartyMembers(report.testActors ?? [], friendlyIds);
-  const mitigationCasts = normalizeMitigationCasts(fight.events ?? [], actorNames);
+  const mitigationCasts = extractTrackedMitigationCasts(fight.events ?? [], actorNames);
+  const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
   const events = (fight.events ?? [])
     .filter(isDisplayedFightEvent)
     .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
@@ -1014,7 +1174,19 @@ function normalizeEmbeddedFightDetails(report, fight) {
       player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
       timestamp: Number(event.timestamp),
     }));
-  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts };
+  return { status: 'ready', events, phaseFourStartTimestamp, partyMembers, mitigationCasts, lifeEvents };
+}
+
+function extractPlayerLifeEvents(events) {
+  return events
+    .filter((event) => ['death', 'resurrect'].includes(String(event.type ?? event.eventType ?? '').toLowerCase()))
+    .map((event) => ({
+      type: String(event.type ?? event.eventType).toLowerCase(),
+      playerId: Number(event.targetID ?? event.targetId),
+      timestamp: Number(event.timestamp),
+    }))
+    .filter((event) => Number.isFinite(event.playerId) && Number.isFinite(event.timestamp))
+    .sort((first, second) => first.timestamp - second.timestamp);
 }
 
 function normalizeJobAbbreviation(job) {
@@ -1031,7 +1203,10 @@ function normalizePartyMembers(actors, friendlyIds) {
     });
 }
 
-function normalizeMitigationCasts(events, actorNames) {
+// Extract only configured mitigation casts from the much larger FFLogs event list.
+// The returned records contain normalized timestamps, actor names, and ability IDs,
+// so the evaluation code does not need to understand the raw API/test-data shapes.
+function extractTrackedMitigationCasts(events, actorNames) {
   const trackedAbilityIds = new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)));
   return events
     .filter((event) => String(event.eventType ?? event.type ?? '').replace(/\s+/g, '').toLowerCase() === 'cast')
@@ -1085,7 +1260,7 @@ function createFightDetailsPanel(fight, state) {
   return panel;
 }
 
-function createFightMitigationPanel(fight, state) {
+function createFightMitigationPanel(report, fight, state) {
   const panel = document.createElement('div');
   panel.className = 'fight-mitigation-panel';
   if (!state || state.status === 'loading') {
@@ -1096,11 +1271,14 @@ function createFightMitigationPanel(fight, state) {
     panel.textContent = `Could not load mitigation events: ${state.error}`;
     return panel;
   }
-  panel.replaceChildren(createMitigationTracker(fight, state));
+  panel.replaceChildren(createMitigationTrackerView(report, fight, state));
   return panel;
 }
 
-function createMitigationTracker(fight, state) {
+// Build the complete mitigation-tracker UI for one pull. It creates one result
+// panel per standard party slot (T1 through R2), provides desktop and compact
+// navigation, and restores the user's persisted slot and result filter.
+function createMitigationTrackerView(report, fight, state) {
   const tracker = document.createElement('section');
   tracker.className = 'mitigation-tracker';
 
@@ -1143,22 +1321,15 @@ function createMitigationTracker(fight, state) {
   const slotSelect = document.createElement('select');
   slotSelect.className = 'mitigation-slot-select';
   slotSelect.setAttribute('aria-label', 'Mitigation assignment');
-  const panels = [];
 
-  const selectPanel = (selectedSlot) => {
-    for (const item of panels) {
-      const isSelected = item.slot === selectedSlot;
-      item.tab.setAttribute('aria-selected', String(isSelected));
-      item.tab.tabIndex = isSelected ? 0 : -1;
-      item.panel.hidden = !isSelected;
-    }
-    slotSelect.value = selectedSlot;
-  };
+  const initialSlot = assignedSlots.includes(selectedMitigationSlot)
+    ? selectedMitigationSlot
+    : assignedSlots[0];
 
-  assignedSlots.forEach((slot, index) => {
+  assignedSlots.forEach((slot) => {
     const tab = document.createElement('button');
-    const panel = createMitigationAssignmentPanel(fight, state, slot);
-    const selected = index === 0;
+    const panel = createPartySlotMitigationPanel(report, fight, state, slot);
+    const selected = slot === initialSlot;
     const tabId = `mitigation-tab-${fight.id}-${slot}`;
     const panelId = `mitigation-panel-${fight.id}-${slot}`;
     tab.className = 'mitigation-tab';
@@ -1168,13 +1339,14 @@ function createMitigationTracker(fight, state) {
     tab.setAttribute('role', 'tab');
     tab.setAttribute('aria-controls', panelId);
     tab.setAttribute('aria-selected', String(selected));
+    tab.dataset.mitigationSlot = slot;
     tab.tabIndex = selected ? 0 : -1;
     panel.id = panelId;
     panel.setAttribute('role', 'tabpanel');
     panel.setAttribute('aria-labelledby', tabId);
+    panel.dataset.mitigationSlot = slot;
     panel.hidden = !selected;
-    panels.push({ slot, tab, panel });
-    tab.addEventListener('click', () => selectPanel(slot));
+    tab.addEventListener('click', () => setMitigationSlot(slot));
     const option = document.createElement('option');
     option.value = slot;
     option.textContent = slot;
@@ -1182,18 +1354,22 @@ function createMitigationTracker(fight, state) {
     tabs.append(tab);
     tracker.append(panel);
   });
-  slotSelect.addEventListener('change', () => selectPanel(slotSelect.value));
+  slotSelect.value = initialSlot;
+  slotSelect.addEventListener('change', () => setMitigationSlot(slotSelect.value));
 
   tracker.insertBefore(tabs, tracker.children[1]);
   tracker.insertBefore(slotSelect, tracker.children[2]);
   const resultRows = [...tracker.querySelectorAll('.mitigation-result')];
   filterSelect.hidden = !resultRows.some((row) => row.classList.contains('on-time')
     || (!row.classList.contains('missed') && Number(row.dataset.timingDeltaSeconds) <= 1));
-  applyMitigationFilter(tracker);
+  applyMitigationResultFilter(tracker);
   return tracker;
 }
 
-function applyMitigationFilter(tracker) {
+// Apply the selected result filter to every party-slot panel. A panel whose rows
+// are all filtered out receives a visible explanation instead of becoming an
+// unexplained blank area.
+function applyMitigationResultFilter(tracker) {
   for (const panel of tracker.querySelectorAll('.mitigation-panel')) {
     const rows = [...panel.querySelectorAll('.mitigation-result')];
     if (rows.length === 0) continue;
@@ -1225,14 +1401,20 @@ function applyMitigationFilter(tracker) {
   }
 }
 
-function createMitigationAssignmentPanel(fight, state, assignedTo) {
+// Render the encounter plan and actual cast result for one logical party slot,
+// such as T1 or H2. This is a view function; matching casts to assignments is
+// delegated to `evaluatePartySlotMitigations`.
+function createPartySlotMitigationPanel(report, fight, state, assignedTo) {
   const panel = document.createElement('div');
   panel.className = 'mitigation-panel';
-  const results = evaluateMitigations(fight, state, assignedTo);
+  const classUnsupported = isPartySlotClassUnsupported(state, assignedTo);
+  const results = classUnsupported ? [] : evaluatePartySlotMitigations(fight, state, assignedTo);
   if (results.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'mitigation-empty-state';
-    empty.textContent = 'No applicable assignments before this pull ended.';
+    empty.textContent = classUnsupported
+      ? `${assignedTo}'s class not supported.`
+      : 'No applicable assignments before this pull ended.';
     panel.append(empty);
     return panel;
   }
@@ -1272,13 +1454,125 @@ function createMitigationAssignmentPanel(fight, state, assignedTo) {
     usedCell.textContent = result.cast ? formatFightDuration(result.cast.elapsedMs) : '—';
     const statusCell = document.createElement('td');
     statusCell.className = 'mitigation-result-status';
-    statusCell.textContent = result.status;
+    statusCell.append(createMitigationResultHistory(report, result));
     row.append(abilityCell, windowCell, statusCell, usedCell, playerCell);
     body.append(row);
   }
   table.append(head, body);
   panel.append(table);
   return panel;
+}
+
+function isPartySlotClassUnsupported(state, assignedTo) {
+  const partyMembers = state.partyMembers ?? [];
+  if (partyMembers.length === 0) return false;
+  const slotAssignments = dancingMadMitigations.filter((mitigation) => mitigation.assignedTo === assignedTo);
+  if (slotAssignments.length === 0) return false;
+  const supportedJobs = new Set(slotAssignments.map((mitigation) =>
+    normalizeJobAbbreviation(mitigation.class)));
+  return !partyMembers.some((member) => supportedJobs.has(member.job));
+}
+
+function createMitigationResultHistory(report, result) {
+  const anchor = document.createElement('span');
+  anchor.className = 'mitigation-result-history-anchor';
+  anchor.tabIndex = 0;
+  anchor.textContent = result.status;
+  anchor.setAttribute('aria-label', `${result.status}. Show result history.`);
+
+  const tooltip = document.createElement('span');
+  tooltip.className = 'mitigation-result-history-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.textContent = 'Loading pull history…';
+  anchor.append(tooltip);
+
+  let requested = false;
+  const populate = async () => {
+    if (requested) return;
+    requested = true;
+    try {
+      const rows = await loadMitigationResultHistory(report, result.mitigation);
+      tooltip.replaceChildren(createMitigationHistoryTable(rows));
+    } catch (error) {
+      tooltip.textContent = `Could not load pull history: ${error.message}`;
+    }
+  };
+  anchor.addEventListener('mouseenter', populate, { once: true });
+  anchor.addEventListener('focus', populate, { once: true });
+  return anchor;
+}
+
+function createMitigationHistoryTable(rows) {
+  if (rows.length === 0) {
+    const empty = document.createElement('span');
+    empty.textContent = 'No pulls reached this assignment.';
+    return empty;
+  }
+  const table = document.createElement('table');
+  table.className = 'mitigation-history-table';
+  const headRow = document.createElement('tr');
+  for (const label of ['Pull', 'Badge', 'Result']) {
+    const heading = document.createElement('th');
+    heading.scope = 'col';
+    heading.textContent = label;
+    headRow.append(heading);
+  }
+  const head = document.createElement('thead');
+  head.append(headRow);
+  const body = document.createElement('tbody');
+  for (const row of rows) {
+    const tableRow = document.createElement('tr');
+    const pullCell = document.createElement('td');
+    pullCell.textContent = String(row.fight.id);
+    const badgeCell = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = `mitigation-history-badge ${getPullColorClass(row.fight)}`;
+    badge.textContent = row.fight.kill ? 'CLR' : row.fight.lastPhaseIsIntermission
+      ? `I${Number(row.fight.lastPhase) || 1}`
+      : `P${Number(row.fight.lastPhase) || 1}`;
+    badgeCell.append(badge);
+    const resultCell = document.createElement('td');
+    resultCell.className = `mitigation-history-result ${row.result.statusClass}`;
+    resultCell.textContent = row.result.status;
+    if (row.result.statusColor) resultCell.style.setProperty('--timing-color', row.result.statusColor);
+    tableRow.append(pullCell, badgeCell, resultCell);
+    body.append(tableRow);
+  }
+  table.append(head, body);
+  return table;
+}
+
+function mitigationIdentity(mitigation) {
+  return [mitigation.assignedTo, mitigation.abilityId, mitigation.phase ?? '', mitigation.afterPhaseThree === true,
+    mitigation.startElapsedSeconds, mitigation.endElapsedSeconds].join(':');
+}
+
+async function loadMitigationResultHistory(report, mitigation) {
+  const cacheKey = `${report.code}:${mitigationIdentity(mitigation)}`;
+  if (!mitigationHistoryPromises.has(cacheKey)) {
+    mitigationHistoryPromises.set(cacheKey, (async () => {
+      const rows = [];
+      for (const fight of report.fights ?? []) {
+        if (Number(fight.encounterID) !== DMU_ENCOUNTER_ID) continue;
+        const detailKey = `${report.code}:${fight.id}`;
+        let state = fightDetails.get(detailKey);
+        if (!state || state.status !== 'ready') {
+          if (usingTestData) {
+            state = normalizeEmbeddedFightDetails(report, fight);
+          } else {
+            const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
+            state = normalizeFightDetails(await fetchFightEventDetails(report.code, fight.id, abilityIds));
+          }
+          fightDetails.set(detailKey, state);
+        }
+        const result = evaluatePartySlotMitigations(fight, state, mitigation.assignedTo)
+          .find((entry) => mitigationIdentity(entry.mitigation) === mitigationIdentity(mitigation));
+        if (result) rows.push({ fight, result });
+      }
+      return rows.sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+    })());
+  }
+  return mitigationHistoryPromises.get(cacheKey);
 }
 
 function createMitigationAbilityIcon(abilityId, abilityName) {
@@ -1299,10 +1593,13 @@ function createMitigationAbilityIcon(abilityId, abilityName) {
   return icon;
 }
 
-function evaluateMitigations(fight, state, assignedTo) {
+// Compare one party slot's planned mitigation windows with that player's actual
+// casts. Each cast can satisfy at most one assignment; the nearest eligible unused
+// cast is marked on-time, early, or late, and an unmatched assignment is missing.
+function evaluatePartySlotMitigations(fight, state, assignedTo) {
   const durationMs = getFightDuration(fight);
-  const partySlots = assignPartySlots(state.partyMembers ?? []);
-  const phaseStarts = getDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
+  const partySlots = mapPartyMembersToPlanSlots(state.partyMembers ?? []);
+  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
   const usedCastIndexes = new Set();
   const results = [];
 
@@ -1317,8 +1614,9 @@ function evaluateMitigations(fight, state, assignedTo) {
     if (!player) continue;
 
     const phase = Number(mitigation.phase);
-    const relativeAnchorMs = phase >= 4 ? phaseStarts.get(4) : 0;
-    if (phase >= 4 && !Number.isFinite(relativeAnchorMs)) continue;
+    const isPhaseFourRelative = mitigation.afterPhaseThree === true || phase >= 4;
+    const relativeAnchorMs = isPhaseFourRelative ? phaseStarts.get(4) : 0;
+    if (isPhaseFourRelative && !Number.isFinite(relativeAnchorMs)) continue;
     const startMs = relativeAnchorMs + Number(mitigation.startElapsedSeconds) * 1000;
     const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
     if (startMs > durationMs) continue;
@@ -1346,18 +1644,29 @@ function evaluateMitigations(fight, state, assignedTo) {
       timingDeltaSeconds = deltaSeconds;
       status = `${formatMitigationDelta(deltaSeconds)} early`;
       statusClass = 'early';
-      statusColor = getMitigationTimingColor(deltaSeconds, 'early');
+      statusColor = getMitigationTimingStatusColor(deltaSeconds, 'early');
     } else if (cast && cast.elapsedMs > endMs) {
       const deltaSeconds = (cast.elapsedMs - endMs) / 1000;
       timingDeltaSeconds = deltaSeconds;
       status = `${formatMitigationDelta(deltaSeconds)} late`;
       statusClass = 'late';
-      statusColor = getMitigationTimingColor(deltaSeconds, 'late');
+      statusColor = getMitigationTimingStatusColor(deltaSeconds, 'late');
     } else if (cast) {
       timingDeltaSeconds = 0;
       status = 'On time';
       statusClass = 'on-time';
       statusColor = '#34d399';
+    } else if (isPlayerDeadAt(
+      state.lifeEvents ?? [],
+      state.mitigationCasts ?? [],
+      player,
+      Number(fight.startTime) + endMs,
+    )) {
+      status = 'Dead';
+      statusClass = 'missed dead';
+    } else if (isMitigationOnCooldown(state.mitigationCasts ?? [], mitigation, player, fight, endMs)) {
+      status = 'On cooldown';
+      statusClass = 'missed on-cooldown';
     }
 
     results.push({
@@ -1375,7 +1684,36 @@ function evaluateMitigations(fight, state, assignedTo) {
   return results;
 }
 
-function assignPartySlots(partyMembers) {
+function isPlayerDeadAt(lifeEvents, casts, player, timestamp) {
+  const lifeTransitions = lifeEvents
+    .filter((event) => event.playerId === Number(player.id) && event.timestamp <= timestamp);
+  const proofOfLife = casts
+    .filter((cast) => (cast.sourceId === Number(player.id) || cast.source === player.name)
+      && cast.timestamp <= timestamp)
+    .map((cast) => ({ type: 'alive', timestamp: cast.timestamp }));
+  const latest = [...lifeTransitions, ...proofOfLife]
+    .sort((first, second) => first.timestamp - second.timestamp)
+    .at(-1);
+  return latest?.type === 'death';
+}
+
+function isMitigationOnCooldown(casts, mitigation, player, fight, windowEndMs) {
+  const cooldownSeconds = mitigationCooldowns.get(Number(mitigation.abilityId));
+  if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return false;
+  const fightStart = Number(fight.startTime);
+  const previousCast = casts
+    .filter((cast) => cast.abilityId === Number(mitigation.abilityId)
+      && (cast.sourceId === player.id || cast.source === player.name)
+      && cast.timestamp - fightStart < windowEndMs)
+    .sort((first, second) => second.timestamp - first.timestamp)[0];
+  if (!previousCast) return false;
+  return previousCast.timestamp - fightStart + cooldownSeconds * 1000 > windowEndMs;
+}
+
+// Map real party members onto the encounter plan's role slots. Members keep API
+// order within each role, making duplicate tanks, healers, melee, and ranged jobs
+// resolve deterministically to labels such as T1, H2, M1, and R2.
+function mapPartyMembersToPlanSlots(partyMembers) {
   const slots = new Map();
   const roleSlots = new Map([
     ['Tank', ['MT', 'OT']],
@@ -1401,7 +1739,10 @@ function formatMitigationDelta(seconds) {
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}s`;
 }
 
-function getMitigationTimingColor(seconds, timing) {
+// Convert an early/late offset into the status color shown beside a cast. Early
+// casts receive a wider warning ramp because their effects may still overlap the
+// mechanic, while late casts reach red sooner because mitigation arrived too late.
+function getMitigationTimingStatusColor(seconds, timing) {
   const green = [52, 211, 153];
   const yellowGreen = [163, 230, 53];
   const yellow = [251, 191, 36];
@@ -1445,7 +1786,7 @@ function createFightDetailsTable(fight, state) {
   head.append(headingRow);
 
   const body = document.createElement('tbody');
-  const phaseStarts = getDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
+  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
   for (const event of events) {
     const elapsedMs = Math.max(0, Number(event.timestamp) - Number(fight.startTime));
     const eventPhase = getDancingMadPhase(elapsedMs, phaseStarts);
@@ -1472,7 +1813,7 @@ function createFightTimeline(fight, state) {
   const timeline = document.createElement('div');
   timeline.className = 'fight-timeline';
   const durationMs = getFightDuration(fight);
-  const phaseStarts = getDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
+  const phaseStarts = calculateDancingMadPhaseStarts(fight, state.phaseFourStartTimestamp);
   const finalAvailablePhase = phaseStarts.has(4) ? 5 : 3;
   const endingPhase = Math.min(finalAvailablePhase, Math.max(1, Number(fight.lastPhase) || 1));
   const eqMechanic = dancingMadMechanics.find((mechanic) => mechanic.mechanic.startsWith('EQ'));
@@ -1644,7 +1985,7 @@ function createTimelineEventGroupMarker(groups, layout, canvas) {
     .map((group) => `${group.items.length} ${group.kind.toLowerCase()} events`)
     .join(' and '));
 
-  const box = createTimelineEventGroupBox(groups);
+  const box = createTimelineGroupSummaryBox(groups);
   // The collision layout may span every constituent hitbox for suction purposes,
   // while the visible summary border deliberately remains at its intrinsic width.
 
@@ -1726,7 +2067,10 @@ function createTimelineEventGroupMarker(groups, layout, canvas) {
   return marker;
 }
 
-function createTimelineEventGroupBox(groups) {
+// Create the small boxed icon/count summary for one collision cluster. Mixed
+// clusters show separate death and damage-down counts; hover/pin details are built
+// by the parent marker from the original ungrouped events.
+function createTimelineGroupSummaryBox(groups) {
   const box = document.createElement('span');
   box.className = `fight-timeline-event-box${groups.length > 1 ? ' mixed' : ''}`;
   for (const group of groups) {
@@ -1792,7 +2136,10 @@ function createFightEventIcon(kind) {
   return damageDownIcon;
 }
 
-function getDancingMadPhaseStarts(fight, phaseFourStartTimestamp) {
+// Return the absolute elapsed-time boundary for every encounter phase. Phases 1-3
+// use known fixed timings; phase 4 begins at a cast detected in this specific pull
+// and is clamped to its duration so short pulls cannot create impossible geometry.
+function calculateDancingMadPhaseStarts(fight, phaseFourStartTimestamp) {
   const phaseStarts = new Map(DANCING_MAD_FIXED_PHASE_STARTS);
   if (Number.isFinite(phaseFourStartTimestamp)) {
     const phaseFourStartMs = Math.max(0, phaseFourStartTimestamp - Number(fight.startTime));

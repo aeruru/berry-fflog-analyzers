@@ -9,7 +9,8 @@
     "formalName": "Bell",
     "role": "Pure Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "04:41.757",
@@ -21,7 +22,8 @@
     "formalName": "Bell",
     "role": "Pure Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "10:06.873",
@@ -33,7 +35,8 @@
     "formalName": "Bell",
     "role": "Pure Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "00:29.674",
@@ -45,7 +48,8 @@
     "formalName": "Temperance",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "02:46.701",
@@ -57,7 +61,8 @@
     "formalName": "Temperance",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "04:55.817",
@@ -69,7 +74,8 @@
     "formalName": "Temperance",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "08:14.070",
@@ -81,7 +87,8 @@
     "formalName": "Temperance",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "10:36.034",
@@ -93,7 +100,8 @@
     "formalName": "Temperance",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "01:27.000",
@@ -105,7 +113,8 @@
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "03:54.000",
@@ -117,7 +126,8 @@
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "05:27.000",
@@ -129,19 +139,21 @@
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "07:42.000",
     "endTime": "07:47.000",
-    "startElapsedSeconds": 482.0,
-    "endElapsedSeconds": 487.0,
+    "startElapsedSeconds": 462.0,
+    "endElapsedSeconds": 467.0,
     "abilityId": 3569,
     "ability": "Asylum",
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "09:09.000",
@@ -153,7 +165,8 @@
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "10:44.000",
@@ -165,7 +178,8 @@
     "formalName": "Asylum",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "00:29.674",
@@ -177,7 +191,8 @@
     "formalName": "Divine Caress",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "02:43.730",
@@ -189,7 +204,8 @@
     "formalName": "Divine Caress",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "05:02.037",
@@ -201,7 +217,8 @@
     "formalName": "Divine Caress",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "08:37.128",
@@ -213,7 +230,8 @@
     "formalName": "Divine Caress",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "10:40.938",
@@ -225,7 +243,8 @@
     "formalName": "Divine Caress",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "00:52.723",
@@ -237,7 +256,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "02:02.525",
@@ -249,7 +269,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "03:45.787",
@@ -261,7 +282,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "04:50.817",
@@ -273,7 +295,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "06:07.940",
@@ -285,7 +308,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "07:20.686",
@@ -297,7 +321,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "08:29.128",
@@ -309,7 +334,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "09:36.175",
@@ -321,7 +347,8 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
   },
   {
     "startTime": "11:14.723",
@@ -333,6 +360,475 @@
     "formalName": "Indulgence",
     "role": "Healer",
     "class": "WHM",
-    "assignedTo": "H1"
+    "assignedTo": "H1",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "00:32.000",
+    "endTime": "00:42.438",
+    "startElapsedSeconds": 32.000,
+    "endElapsedSeconds": 42.438,
+    "abilityId": 24310,
+    "ability": "Holos",
+    "formalName": "Holos",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "03:35.787",
+    "endTime": "03:40.601",
+    "startElapsedSeconds": 215.787,
+    "endElapsedSeconds": 220.601,
+    "abilityId": 24310,
+    "ability": "Holos",
+    "formalName": "Holos",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "05:39.111",
+    "endTime": "05:42.111",
+    "startElapsedSeconds": 339.111,
+    "endElapsedSeconds": 342.111,
+    "abilityId": 24310,
+    "ability": "Holos",
+    "formalName": "Holos",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "08:02.206",
+    "endTime": "08:16.813",
+    "startElapsedSeconds": 482.206,
+    "endElapsedSeconds": 496.813,
+    "abilityId": 24310,
+    "ability": "Holos",
+    "formalName": "Holos",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "09:58.252",
+    "endTime": "10:09.274",
+    "startElapsedSeconds": 598.252,
+    "endElapsedSeconds": 609.274,
+    "abilityId": 24310,
+    "ability": "Holos",
+    "formalName": "Holos",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "00:31.058",
+    "endTime": "00:32.723",
+    "startElapsedSeconds": 31.058,
+    "endElapsedSeconds": 32.723,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "01:01.058",
+    "endTime": "01:02.723",
+    "startElapsedSeconds": 61.058,
+    "endElapsedSeconds": 62.723,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "01:31.102",
+    "endTime": "01:42.525",
+    "startElapsedSeconds": 91.102,
+    "endElapsedSeconds": 102.525,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "02:01.102",
+    "endTime": "02:12.525",
+    "startElapsedSeconds": 121.102,
+    "endElapsedSeconds": 132.525,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "02:51.701",
+    "endTime": "02:53.730",
+    "startElapsedSeconds": 171.701,
+    "endElapsedSeconds": 173.73,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "03:54.013",
+    "endTime": "03:55.787",
+    "startElapsedSeconds": 234.013,
+    "endElapsedSeconds": 235.787,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "04:25.078",
+    "endTime": "04:30.064",
+    "startElapsedSeconds": 265.078,
+    "endElapsedSeconds": 270.064,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "05:07.180",
+    "endTime": "05:10.654",
+    "startElapsedSeconds": 307.18,
+    "endElapsedSeconds": 310.654,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "05:37.180",
+    "endTime": "05:40.654",
+    "startElapsedSeconds": 337.18,
+    "endElapsedSeconds": 340.654,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "06:07.180",
+    "endTime": "06:10.654",
+    "startElapsedSeconds": 367.18,
+    "endElapsedSeconds": 370.654,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "07:15.686",
+    "endTime": "07:20.806",
+    "startElapsedSeconds": 435.686,
+    "endElapsedSeconds": 440.806,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "07:45.686",
+    "endTime": "07:50.806",
+    "startElapsedSeconds": 465.686,
+    "endElapsedSeconds": 470.806,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "08:24.128",
+    "endTime": "08:28.035",
+    "startElapsedSeconds": 504.128,
+    "endElapsedSeconds": 508.035,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "09:23.850",
+    "endTime": "09:37.694",
+    "startElapsedSeconds": 563.85,
+    "endElapsedSeconds": 577.694,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "10:01.689",
+    "endTime": "10:07.694",
+    "startElapsedSeconds": 601.689,
+    "endElapsedSeconds": 607.694,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "10:35.937",
+    "endTime": "10:37.694",
+    "startElapsedSeconds": 635.937,
+    "endElapsedSeconds": 637.694,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "11:05.937",
+    "endTime": "11:14.511",
+    "startElapsedSeconds": 665.937,
+    "endElapsedSeconds": 674.511,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "11:36.794",
+    "endTime": "11:44.511",
+    "startElapsedSeconds": 696.794,
+    "endElapsedSeconds": 704.511,
+    "abilityId": 24298,
+    "ability": "Kerachole",
+    "formalName": "Kera",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "01:57.525",
+    "endTime": "01:58.341",
+    "startElapsedSeconds": 117.525,
+    "endElapsedSeconds": 118.341,
+    "abilityId": 24311,
+    "ability": "Panhaima",
+    "formalName": "Panhaima",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "04:04.023",
+    "endTime": "04:09.013",
+    "startElapsedSeconds": 244.023,
+    "endElapsedSeconds": 249.013,
+    "abilityId": 24311,
+    "ability": "Panhaima",
+    "formalName": "Panhaima",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "06:04.023",
+    "endTime": "06:10.654",
+    "startElapsedSeconds": 364.023,
+    "endElapsedSeconds": 370.654,
+    "abilityId": 24311,
+    "ability": "Panhaima",
+    "formalName": "Panhaima",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "08:24.128",
+    "endTime": "08:35.236",
+    "startElapsedSeconds": 504.128,
+    "endElapsedSeconds": 515.236,
+    "abilityId": 24311,
+    "ability": "Panhaima",
+    "formalName": "Panhaima",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "10:37.501",
+    "endTime": "10:37.694",
+    "startElapsedSeconds": 637.501,
+    "endElapsedSeconds": 637.694,
+    "abilityId": 24311,
+    "ability": "Panhaima",
+    "formalName": "Panhaima",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "01:35.607",
+    "endTime": "01:48.102",
+    "startElapsedSeconds": 95.607,
+    "endElapsedSeconds": 108.102,
+    "abilityId": 37035,
+    "ability": "Philosophia",
+    "formalName": "Philosophia",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "04:46.130",
+    "endTime": "05:11.130",
+    "startElapsedSeconds": 286.13,
+    "endElapsedSeconds": 311.13,
+    "abilityId": 37035,
+    "ability": "Philosophia",
+    "formalName": "Philosophia",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "09:17.942",
+    "endTime": "09:19.942",
+    "startElapsedSeconds": 557.942,
+    "endElapsedSeconds": 559.942,
+    "abilityId": 37035,
+    "ability": "Philosophia",
+    "formalName": "Philosophia",
+    "role": "Shield Healer",
+    "class": "SGE",
+    "assignedTo": "H2",
+    "afterPhaseThree": false
+  },
+  {
+    "startTime": "00:14.082",
+    "endTime": "00:18.988",
+    "startElapsedSeconds": 14.082,
+    "endElapsedSeconds": 18.988,
+    "abilityId": 7433,
+    "ability": "Plenary Indulgence",
+    "formalName": "Indulgence",
+    "role": "Healer",
+    "class": "WHM",
+    "assignedTo": "H1",
+    "afterPhaseThree": true
+  },
+  {
+    "startTime": "00:28.842",
+    "endTime": "00:33.917",
+    "startElapsedSeconds": 28.842,
+    "endElapsedSeconds": 33.917,
+    "abilityId": 16536,
+    "ability": "Temperance",
+    "formalName": "Temperance",
+    "role": "Healer",
+    "class": "WHM",
+    "assignedTo": "H1",
+    "afterPhaseThree": true
+  },
+  {
+    "startTime": "00:38.842",
+    "endTime": "00:48.842",
+    "startElapsedSeconds": 38.842,
+    "endElapsedSeconds": 48.842,
+    "abilityId": 37011,
+    "ability": "Divine Caress",
+    "formalName": "Divine Caress",
+    "role": "Healer",
+    "class": "WHM",
+    "assignedTo": "H1",
+    "afterPhaseThree": true
+  },
+  {
+    "startTime": "00:57.984",
+    "endTime": "01:01.493",
+    "startElapsedSeconds": 57.984,
+    "endElapsedSeconds": 61.493,
+    "abilityId": 25862,
+    "ability": "Liturgy of the Bell",
+    "formalName": "Bell",
+    "role": "Pure Healer",
+    "class": "WHM",
+    "assignedTo": "H1",
+    "afterPhaseThree": true
+  },
+  {
+    "startTime": "01:25.101",
+    "endTime": "01:28.126",
+    "startElapsedSeconds": 85.101,
+    "endElapsedSeconds": 88.126,
+    "abilityId": 7433,
+    "ability": "Plenary Indulgence",
+    "formalName": "Indulgence",
+    "role": "Healer",
+    "class": "WHM",
+    "assignedTo": "H1",
+    "afterPhaseThree": true
   }
 ]
