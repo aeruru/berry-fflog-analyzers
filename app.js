@@ -630,7 +630,12 @@ async function loadDancingMadMitigations() {
       && Number.isFinite(Number(entry.startElapsedSeconds))
       && Number.isFinite(Number(entry.endElapsedSeconds))
       && PARTY_SLOT_ORDER.includes(entry.assignedTo))
-    .sort((first, second) => Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds));
+    .sort((first, second) => {
+      const phaseGroupDifference = Number(first.afterPhaseThree === true)
+        - Number(second.afterPhaseThree === true);
+      if (phaseGroupDifference !== 0) return phaseGroupDifference;
+      return Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds);
+    });
 }
 
 async function loadMitigationCooldowns() {
