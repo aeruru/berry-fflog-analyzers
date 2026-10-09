@@ -70,8 +70,20 @@ const REPORT_FIGHTS_QUERY = `
 `;
 
 const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "damage" AND target.disposition = "friendly")';
+const DEATH_CAUSE_BUFF_NAMES = [
+  'Rampart',
+  'Guardian',
+  'Damnation',
+  'Shadowed Vigil',
+  'Great Nebula',
+];
 const FIGHT_EVENTS_QUERY = `
-  query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
+  query FightEvents(
+    $code: String!
+    $fightIDs: [Int]!
+    $filterExpression: String!
+    $startTime: Float
+  ) {
     reportData {
       report(code: $code) {
         masterData {
@@ -92,8 +104,15 @@ const FIGHT_EVENTS_QUERY = `
           endTime
           friendlyPlayers
         }
-        events(fightIDs: $fightIDs, filterExpression: $filterExpression, includeResources: true, limit: 10000) {
+        events(
+          fightIDs: $fightIDs
+          filterExpression: $filterExpression
+          includeResources: true
+          limit: 10000
+          startTime: $startTime
+        ) {
           data
+          nextPageTimestamp
         }
       }
     }
@@ -174,18 +193,62 @@ export async function fetchFightEventDetails(
     '(type = "cast" AND ability.name = "Revolting Ruin III")',
     '(type = "cast" AND source.disposition = "friendly")',
   ];
+  // Only the defensive statuses used by programmed death explanations are fetched;
+  // this keeps the shared fight-event response much smaller than all buff traffic.
+  const deathCauseBuffFilters = DEATH_CAUSE_BUFF_NAMES.flatMap((abilityName) => [
+    `(type = "applybuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+    `(type = "refreshbuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+    `(type = "removebuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+  ]);
   const filterExpression = [
     BASE_FIGHT_EVENT_FILTER,
     ...mitigationFilters,
     ...phaseEventFilters,
     ...assignmentFilters,
+    ...deathCauseBuffFilters,
   ].join(' OR ');
-  const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
-    code,
-    fightIDs: normalizedFightIds,
-    filterExpression,
-  }, options);
-  return data.reportData.report;
+  let report = null;
+  const events = await collectFflogsEventPages(async (startTime) => {
+    const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
+      code,
+      fightIDs: normalizedFightIds,
+      filterExpression,
+      startTime,
+    }, options);
+    const page = data.reportData.report;
+    if (!report) report = page;
+    return page.events;
+  });
+
+  return {
+    ...report,
+    events: {
+      ...report.events,
+      data: events,
+      nextPageTimestamp: null,
+    },
+  };
+}
+
+export async function collectFflogsEventPages(fetchPage) {
+  let startTime = null;
+  const events = [];
+  const seenPageTimestamps = new Set();
+
+  do {
+    const page = await fetchPage(startTime);
+    events.push(...(page?.data ?? []));
+    const nextPageTimestamp = Number(page?.nextPageTimestamp) || null;
+    if (nextPageTimestamp !== null) {
+      if (seenPageTimestamps.has(nextPageTimestamp)) {
+        throw new Error(`FFLogs repeated event page timestamp ${nextPageTimestamp}.`);
+      }
+      seenPageTimestamps.add(nextPageTimestamp);
+    }
+    startTime = nextPageTimestamp;
+  } while (startTime !== null);
+
+  return events;
 }
 
 function escapeFflogsFilterString(value) {

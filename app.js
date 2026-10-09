@@ -5,7 +5,9 @@ import {
   startFflogsLogin,
 } from './src/auth.js';
 import { DMU_ENCOUNTER_ID } from './src/config.js';
+import { findCauseOfDeath } from './fight-data/dancing-mad-death-causes.js';
 import {
+  collectFflogsEventPages,
   fetchCurrentFflogsUser,
   fetchFightEventDetails,
   fetchReportByCode,
@@ -13,6 +15,7 @@ import {
 } from './src/fflogs.js';
 import { parseFflogsReportCode } from './src/report-search.js';
 import { createGroupingScenarioReport } from './test-data/grouping-scenarios.js';
+import { createOneEventPageReport } from './test-data/pagination-scenarios.js';
 
 const elements = {
   accountName: document.querySelector('#accountName'),
@@ -23,6 +26,7 @@ const elements = {
   lookupStatus: document.querySelector('#lookupStatus'),
   recentReportCodes: document.querySelector('#recentReportCodes'),
   refreshReportsButton: document.querySelector('#refreshReportsButton'),
+  resetCacheButton: document.querySelector('#resetCacheButton'),
   reportCount: document.querySelector('#reportCount'),
   reportSearchForm: document.querySelector('#reportSearchForm'),
   reportSearchInput: document.querySelector('#reportSearchInput'),
@@ -43,6 +47,8 @@ const MITIGATION_FILTER_MODES = new Set(['more-than-one', 'off-time', 'all']);
 const DETAILS_VIEW_MODES = new Set(['timeline', 'table']);
 const FIGHT_EVENT_TABLE_HEADINGS = ['Time', 'Event', 'Mechanic', 'Player', 'Reason'];
 const UNKNOWN_DEATH_REASON_TOOLTIP = 'No listed cause of death from FFLogs, most likely falling off';
+const DEATH_REASON_DAMAGE_LOOKBACK_MS = 2_500;
+const TANK_FORTY_PERCENT_BUFFS = new Set(['Guardian', 'Damnation', 'Shadowed Vigil', 'Great Nebula']);
 const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const DANCING_MAD_ENCOUNTER_NAME = 'Dancing Mad';
 const MITIGATION_ABILITY_ICON_URLS = new Map([
@@ -53,6 +59,9 @@ const MITIGATION_ABILITY_ICON_URLS = new Map([
   [7433, './assets/ability-icons/002639_hr1.png'],
   [24298, './assets/ability-icons/003666_hr1.png'],
   [7549, './assets/ability-icons/000828_hr1.png'],
+  [7405, './assets/ability-icons/002612_hr1.png'],
+  [16012, './assets/ability-icons/003469_hr1.png'],
+  [16889, './assets/ability-icons/003040_hr1.png'],
   [24310, './assets/ability-icons/003678_hr1.png'],
   [24311, './assets/ability-icons/003679_hr1.png'],
   [37035, './assets/ability-icons/003690_hr1.png'],
@@ -77,6 +86,7 @@ let selectedMitigationSlot = loadMitigationSlot();
 let usingTestData = false;
 let timelineCollisionFrame = null;
 let fightPanelLayoutFrame = null;
+let mitigationHistoryPopupId = 0;
 const mitigationHistoryPromises = new Map();
 let fightDetailsCacheDatabasePromise = null;
 
@@ -135,12 +145,14 @@ elements.authButton.addEventListener('click', async () => {
 
 elements.testDataButton.addEventListener('click', toggleTestData);
 elements.refreshReportsButton.addEventListener('click', refreshWeeklyReports);
+elements.resetCacheButton.addEventListener('click', resetFightDetailsCache);
 elements.themeToggleButton.addEventListener('click', toggleTheme);
 elements.reportSearchForm.addEventListener('submit', searchForReport);
 window.addEventListener('resize', scheduleTimelineCollisionCheck);
 window.addEventListener('resize', positionOpenMitigationHistoryPopup);
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('.mitigation-result-history-anchor')) {
+  if (!event.target.closest('.mitigation-result-history-anchor')
+    && !event.target.closest('.mitigation-result-history-tooltip')) {
     closeOpenMitigationHistoryPopups();
   }
 });
@@ -283,7 +295,12 @@ async function toggleTestData() {
       }
 
       const payload = await response.json();
-      reports = [...payload.reports, createGroupingScenarioReport()]
+      const testReports = await Promise.all([
+        ...payload.reports,
+        createGroupingScenarioReport(),
+        createOneEventPageReport(dancingMadMitigations),
+      ].map(materializePaginatedTestReport));
+      reports = testReports
         .filter((report) => report?.fights?.length > 0)
         .map((report, reportIndex) => addTestMitigationCasts(report, payload.actors ?? [], reportIndex));
       usingTestData = true;
@@ -363,6 +380,8 @@ async function searchForReport(event) {
 }
 
 function renderLookupResult() {
+  closeOpenMitigationHistoryPopups();
+  elements.resetCacheButton.hidden = !selectedReport;
   elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
   scheduleTimelineCollisionCheck();
   scheduleResponsiveFightPanelLayout();
@@ -377,6 +396,17 @@ function addTestMitigationCasts(report, actors, reportIndex) {
     .filter((actor) => actor.type === 'Player')
     .map((actor) => [normalizeJobAbbreviation(actor.subType ?? actor.job), actor]));
   const trackedAbilityIds = new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)));
+
+  if (report.preserveTestEvents) {
+    return {
+      ...report,
+      fights: report.fights.map((fight) => ({
+        ...fight,
+        friendlyPlayers: fight.friendlyPlayers?.length ? fight.friendlyPlayers : friendlyPlayers,
+      })),
+      testActors: actors,
+    };
+  }
 
   const fights = report.fights.map((fight) => {
     if (!isDmuPull(fight)) return fight;
@@ -434,6 +464,25 @@ function addTestMitigationCasts(report, actors, reportIndex) {
     };
   });
   return { ...report, fights, testActors: actors };
+}
+
+async function materializePaginatedTestReport(report) {
+  if (!Array.isArray(report.eventPages)) return report;
+  const pagesByStartTime = new Map(report.eventPages.map((page) => [page.startTime, page]));
+  const events = await collectFflogsEventPages(async (startTime) => pagesByStartTime.get(startTime));
+  const eventsByFight = new Map();
+  for (const event of events) {
+    const fightId = Number(event.fight);
+    if (!eventsByFight.has(fightId)) eventsByFight.set(fightId, []);
+    eventsByFight.get(fightId).push(event);
+  }
+  return {
+    ...report,
+    fights: report.fights.map((fight) => ({
+      ...fight,
+      events: eventsByFight.get(Number(fight.id)) ?? [],
+    })),
+  };
 }
 
 // Timeline labels and grouped event markers depend on their rendered pixel width,
@@ -1249,7 +1298,16 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   const tankSlots = inferTankPlanSlots(rawEvents, partyMembers);
   const mitigationCasts = extractTrackedMitigationCasts(rawEvents, actorNames);
   const lifeEvents = extractPlayerLifeEvents(rawEvents);
-  const events = extractDisplayedFightEvents(rawEvents, actorNames, friendlyIds, abilityNames);
+  const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, rawFight, phaseReferenceEvents);
+  const events = extractDisplayedFightEvents(
+    rawEvents,
+    actorNames,
+    friendlyIds,
+    abilityNames,
+    partyMembers,
+    rawFight,
+    phaseStarts,
+  );
   return { status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots, mitigationCasts, lifeEvents };
 }
 
@@ -1261,13 +1319,30 @@ function normalizeEmbeddedFightDetails(report, fight) {
   const tankSlots = inferTankPlanSlots(fight.events ?? [], partyMembers);
   const mitigationCasts = extractTrackedMitigationCasts(fight.events ?? [], actorNames);
   const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
-  const events = extractDisplayedFightEvents(fight.events ?? [], actorNames, friendlyIds);
+  const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, fight, phaseReferenceEvents);
+  const events = extractDisplayedFightEvents(
+    fight.events ?? [],
+    actorNames,
+    friendlyIds,
+    new Map(),
+    partyMembers,
+    fight,
+    phaseStarts,
+  );
   return { status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots, mitigationCasts, lifeEvents };
 }
 
 // Resolve display events and their causes together. DDs and deaths use the latest
 // incoming damage ability for that player; a DD falls back to its applying ability.
-function extractDisplayedFightEvents(rawEvents, actorNames, friendlyIds, abilityNames = new Map()) {
+function extractDisplayedFightEvents(
+  rawEvents,
+  actorNames,
+  friendlyIds,
+  abilityNames = new Map(),
+  partyMembers = [],
+  fight = null,
+  phaseStarts = new Map(),
+) {
   const events = rawEvents
     .filter(isDisplayedFightEvent)
     .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
@@ -1275,7 +1350,7 @@ function extractDisplayedFightEvents(rawEvents, actorNames, friendlyIds, ability
       kind: event.type === 'death' ? 'Death' : 'Damage down',
       player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
       reason: event.type === 'death'
-        ? getDeathReason(rawEvents, event, abilityNames)
+        ? getDeathReason(rawEvents, event, abilityNames, partyMembers, fight, phaseStarts)
         : findLastDamageAbility(rawEvents, event, abilityNames)
           ?? getEventAbilityName(event, abilityNames),
       timestamp: Number(event.timestamp),
@@ -1285,7 +1360,19 @@ function extractDisplayedFightEvents(rawEvents, actorNames, friendlyIds, ability
 
 // FFLogs includes a dedicated killing blow on ordinary deaths. Environmental
 // deaths instead use the Environment source and should not inherit an old hit.
-function getDeathReason(rawEvents, deathEvent, abilityNames) {
+function getDeathReason(rawEvents, deathEvent, abilityNames, partyMembers, fight, phaseStarts) {
+  const killingDamage = findLastDamageEvent(rawEvents, deathEvent, DEATH_REASON_DAMAGE_LOOKBACK_MS);
+  const programmedCause = getProgrammedDeathReason(
+    rawEvents,
+    deathEvent,
+    killingDamage,
+    abilityNames,
+    partyMembers,
+    fight,
+    phaseStarts,
+  );
+  if (programmedCause) return programmedCause;
+
   const killingAbility = deathEvent.killingAbility?.name ?? deathEvent.killingAbilityName;
   if (killingAbility) return String(killingAbility);
   const killingAbilityId = Number(deathEvent.killingAbilityGameID ?? deathEvent.killingAbilityId);
@@ -1295,10 +1382,16 @@ function getDeathReason(rawEvents, deathEvent, abilityNames) {
   if (Number(deathEvent.sourceID ?? deathEvent.sourceId) === -1) {
     return 'Unknown';
   }
-  return findLastDamageAbility(rawEvents, deathEvent, abilityNames, 5_000);
+  // A hit further back than this is too weakly connected to the death to present
+  // as its cause; environmental deaths commonly have no nearby damage event.
+  return findLastDamageAbility(rawEvents, deathEvent, abilityNames, DEATH_REASON_DAMAGE_LOOKBACK_MS);
 }
 
 function findLastDamageAbility(rawEvents, targetEvent, abilityNames, maxAgeMs = Number.POSITIVE_INFINITY) {
+  return getEventAbilityName(findLastDamageEvent(rawEvents, targetEvent, maxAgeMs), abilityNames);
+}
+
+function findLastDamageEvent(rawEvents, targetEvent, maxAgeMs = Number.POSITIVE_INFINITY) {
   const targetId = Number(targetEvent.targetID ?? targetEvent.targetId);
   const targetTimestamp = Number(targetEvent.timestamp);
   let latestDamage = null;
@@ -1315,7 +1408,59 @@ function findLastDamageAbility(rawEvents, targetEvent, abilityNames, maxAgeMs = 
     }
     latestDamage = event;
   }
-  return getEventAbilityName(latestDamage, abilityNames);
+  return latestDamage;
+}
+
+// Assemble the complete fight-specific context only for deaths. The separate
+// resolver owns the chronological decision tree; this adapter owns FFLogs shapes.
+function getProgrammedDeathReason(
+  rawEvents,
+  deathEvent,
+  killingDamage,
+  abilityNames,
+  partyMembers,
+  fight,
+  phaseStarts,
+) {
+  const fightStart = Number(fight?.startTime);
+  const timestamp = Number(deathEvent.timestamp);
+  if (!Number.isFinite(fightStart) || !Number.isFinite(timestamp)) return null;
+
+  const elapsedMs = timestamp - fightStart;
+  const phase = getDancingMadPhase(elapsedMs, phaseStarts);
+  const phaseStartMs = phaseStarts.get(phase);
+  if (!Number.isFinite(phaseStartMs)) return null;
+
+  const targetId = Number(deathEvent.targetID ?? deathEvent.targetId);
+  const victim = partyMembers.find((member) => member.id === targetId);
+  const activeBuffs = getActiveBuffNames(rawEvents, targetId, timestamp, abilityNames);
+  return findCauseOfDeath({
+    phase,
+    time: (elapsedMs - phaseStartMs) / 1000,
+    isTank: victim?.role === 'Tank',
+    killingAbility: getEventAbilityName(killingDamage, abilityNames),
+    overkill: killingDamage?.overkill,
+    activeBuffs,
+    hasFortyPercentMitigation: [...TANK_FORTY_PERCENT_BUFFS].some((name) => activeBuffs.has(name)),
+  });
+}
+
+function getActiveBuffNames(rawEvents, targetId, timestamp, abilityNames) {
+  const activeBuffs = new Set();
+  const buffEvents = rawEvents
+    .filter((event) => Number(event.targetID ?? event.targetId) === targetId
+      && Number(event.timestamp) <= timestamp)
+    .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+
+  for (const event of buffEvents) {
+    const type = normalizeEventType(event.eventType ?? event.type);
+    if (!['applybuff', 'refreshbuff', 'removebuff'].includes(type)) continue;
+    const ability = getEventAbilityName(event, abilityNames);
+    if (!ability) continue;
+    if (type === 'removebuff') activeBuffs.delete(ability);
+    else activeBuffs.add(ability);
+  }
+  return activeBuffs;
 }
 
 function getEventAbilityName(event, abilityNames = new Map()) {
@@ -1357,7 +1502,7 @@ function discardChangedFightDetails(report) {
 function getFightDetailsCacheVersion() {
   const abilityIds = dancingMadMitigations.map((entry) => Number(entry.abilityId)).sort((a, b) => a - b);
   const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-  return JSON.stringify({ version: 6, abilityIds, phaseReferences });
+  return JSON.stringify({ version: 9, abilityIds, phaseReferences });
 }
 
 function getPersistentFightDetailsKey(reportCode, fight) {
@@ -1408,6 +1553,33 @@ async function writeCachedFightDetails(reportCode, fight, state) {
       .put(state, getPersistentFightDetailsKey(reportCode, fight));
   } catch {
     // A cache write failure must never prevent the live FFLogs result from rendering.
+  }
+}
+
+async function resetFightDetailsCache() {
+  elements.resetCacheButton.disabled = true;
+  try {
+    const database = await openFightDetailsCacheDatabase();
+    if (database) {
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction(FIGHT_DETAILS_CACHE_STORE_NAME, 'readwrite');
+        transaction.objectStore(FIGHT_DETAILS_CACHE_STORE_NAME).clear();
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    }
+
+    fightDetails.clear();
+    mitigationHistoryPromises.clear();
+    openFightDetailKeys.clear();
+    openFightMitigationKeys.clear();
+    renderLookupResult();
+    setLookupStatus('Cache reset. Fight details will be fetched again when opened.');
+  } catch {
+    setLookupStatus('Could not reset the cache.', true);
+  } finally {
+    elements.resetCacheButton.disabled = false;
   }
 }
 
@@ -1490,6 +1662,15 @@ function createFightDetailsPanel(fight, state) {
   }
   if (state.status === 'error') {
     panel.textContent = `Could not load fight events: ${state.error}`;
+    return panel;
+  }
+  // Timeline and table are two presentations of the same event collection, so an
+  // empty fight gets one panel-level message instead of one message per view.
+  if (state.events.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'detailed-empty-state';
+    empty.textContent = 'No deaths or damage downs in this fight.';
+    panel.append(empty);
     return panel;
   }
   // The timeline is the primary view. The table is an optional companion that
@@ -1691,7 +1872,9 @@ function createPartySlotMitigationPanel(report, fight, state, assignedTo) {
     abilityCell.append(abilityContent);
     abilityCell.title = result.mitigation.ability;
     const playerCell = document.createElement('td');
-    playerCell.textContent = `${result.player.name} (${result.player.job})`;
+    playerCell.textContent = result.status === 'Missed'
+      ? '—'
+      : `${result.player.name} (${result.player.job})`;
     const usedCell = document.createElement('td');
     usedCell.textContent = result.cast ? formatFightDuration(result.cast.elapsedMs) : '—';
     const statusCell = document.createElement('td');
@@ -1744,9 +1927,13 @@ function createMitigationResultHistory(report, result) {
 
   const tooltip = document.createElement('span');
   tooltip.className = 'mitigation-result-history-tooltip';
+  mitigationHistoryPopupId += 1;
+  tooltip.id = `mitigation-result-history-${mitigationHistoryPopupId}`;
   tooltip.setAttribute('role', 'dialog');
   tooltip.setAttribute('aria-label', `${result.mitigation.formalName ?? result.mitigation.ability} result history`);
   tooltip.textContent = 'Loading pull history…';
+  anchor.setAttribute('aria-controls', tooltip.id);
+  anchor.historyTooltip = tooltip;
   anchor.append(tooltip);
 
   let requested = false;
@@ -1771,7 +1958,13 @@ function createMitigationResultHistory(report, result) {
     anchor.classList.toggle('open', willOpen);
     anchor.setAttribute('aria-expanded', String(willOpen));
     anchor.title = willOpen ? '' : anchor.dataset.closedTitle;
-    if (!willOpen) return;
+    if (!willOpen) {
+      tooltip.classList.remove('open', 'above');
+      anchor.append(tooltip);
+      return;
+    }
+    document.body.append(tooltip);
+    tooltip.classList.add('open');
     populate();
     requestAnimationFrame(() => positionMitigationHistoryPopup(anchor, tooltip));
   };
@@ -1794,13 +1987,18 @@ function closeOpenMitigationHistoryPopups(except = null) {
     anchor.classList.remove('open');
     anchor.setAttribute('aria-expanded', 'false');
     anchor.title = anchor.dataset.closedTitle;
+    const tooltip = anchor.historyTooltip;
+    if (tooltip) {
+      tooltip.classList.remove('open', 'above');
+      anchor.append(tooltip);
+    }
   });
 }
 
 function positionOpenMitigationHistoryPopup() {
   const anchor = document.querySelector('.mitigation-result-history-anchor.open');
   if (!anchor) return;
-  const tooltip = anchor.querySelector('.mitigation-result-history-tooltip');
+  const tooltip = anchor.historyTooltip;
   if (tooltip) positionMitigationHistoryPopup(anchor, tooltip);
 }
 
@@ -1816,6 +2014,16 @@ function positionMitigationHistoryPopup(anchor, tooltip) {
   tooltip.classList.toggle('above', showAbove);
   const availableSpace = Math.max(80, showAbove ? aboveSpace : belowSpace);
   tooltip.style.maxHeight = `${Math.min(naturalHeight, availableSpace)}px`;
+  const tooltipRect = tooltip.getBoundingClientRect();
+  const left = Math.max(12, Math.min(
+    anchorRect.left + anchorRect.width / 2 - tooltipRect.width / 2,
+    window.innerWidth - tooltipRect.width - 12,
+  ));
+  const top = showAbove
+    ? Math.max(12, anchorRect.top - tooltipRect.height - 7)
+    : anchorRect.bottom + 7;
+  tooltip.style.left = `${left + window.scrollX}px`;
+  tooltip.style.top = `${top + window.scrollY}px`;
 }
 
 function createMitigationHistorySummary(rows) {
@@ -1839,7 +2047,7 @@ function createMitigationHistorySummary(rows) {
 
   const chart = document.createElement('div');
   chart.className = 'mitigation-history-chart';
-  chart.setAttribute('aria-label', 'Mitigation cast timing from 20 seconds before the minimum to 20 seconds after the maximum');
+  chart.setAttribute('aria-label', 'Mitigation cast timing density from 20 seconds before the minimum to 20 seconds after the maximum, followed by missed pulls');
   const referenceResult = rows[0]?.result;
   const windowSeconds = referenceResult
     ? Math.max(0, (referenceResult.endMs - referenceResult.startMs) / 1000)
@@ -1847,8 +2055,6 @@ function createMitigationHistorySummary(rows) {
   const chartSeconds = 40 + windowSeconds;
   const chartPosition = (secondsAfterMinimum) =>
     Math.max(0, Math.min(100, ((secondsAfterMinimum + 20) / chartSeconds) * 100));
-  const track = document.createElement('div');
-  track.className = 'mitigation-history-track';
   const gradientStops = [
     [-20, getMitigationTimingStatusColor(20, 'early')],
     [-4, getMitigationTimingStatusColor(4, 'early')],
@@ -1862,34 +2068,84 @@ function createMitigationHistorySummary(rows) {
     [windowSeconds + 4, getMitigationTimingStatusColor(4, 'late')],
     [windowSeconds + 20, getMitigationTimingStatusColor(20, 'late')],
   ];
-  track.style.background = `linear-gradient(to right, ${gradientStops
-    .map(([seconds, color]) => `${color} ${chartPosition(seconds)}%`)
-    .join(', ')})`;
-  const minimum = document.createElement('span');
-  minimum.className = 'mitigation-history-boundary minimum';
-  minimum.style.left = `${chartPosition(0)}%`;
-  minimum.setAttribute('aria-hidden', 'true');
-  const maximum = document.createElement('span');
-  maximum.className = 'mitigation-history-boundary maximum';
-  maximum.style.left = `${chartPosition(windowSeconds)}%`;
-  maximum.setAttribute('aria-hidden', 'true');
-  track.append(minimum, maximum);
-
-  // Fade the pull markers as one composited layer so coincident casts remain
-  // 30%-white instead of becoming brighter as individual ticks overlap.
-  const ticks = document.createElement('div');
-  ticks.className = 'mitigation-history-ticks';
-  for (const row of eligibleRows.filter((entry) => entry.result.cast)) {
-    const secondsAfterMinimum = (row.result.cast.elapsedMs - row.result.startMs) / 1000;
-    const position = chartPosition(secondsAfterMinimum);
-    const tick = document.createElement('span');
-    tick.className = 'mitigation-history-tick';
-    tick.style.left = `${position}%`;
-    tick.title = `Pull ${row.fight.id}: ${formatFightDuration(row.result.cast.elapsedMs)} (${row.result.status})`;
-    tick.setAttribute('aria-label', tick.title);
-    ticks.append(tick);
+  const timedRows = eligibleRows.filter((entry) => entry.result.cast);
+  const timedSamples = timedRows.map((row) =>
+    (row.result.cast.elapsedMs - row.result.startMs) / 1000);
+  const sampleCount = Math.ceil(chartSeconds * 20) + 1;
+  const kernelRadiusSeconds = 0.5;
+  const densities = Array.from({ length: sampleCount }, (_, index) => {
+    const seconds = -20 + (index / (sampleCount - 1)) * chartSeconds;
+    return timedSamples.reduce((total, sample) =>
+      total + Math.max(1 - Math.abs(seconds - sample) / kernelRadiusSeconds, 0), 0);
+  });
+  const densityScale = Math.max(1, missedCount, ...densities);
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const graph = document.createElement('div');
+  graph.className = 'mitigation-history-density-layout';
+  const timingGraph = document.createElement('div');
+  timingGraph.className = 'mitigation-history-density-graph';
+  const svg = document.createElementNS(svgNamespace, 'svg');
+  svg.classList.add('mitigation-history-density-svg');
+  svg.setAttribute('viewBox', '0 0 240 56');
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  const defs = document.createElementNS(svgNamespace, 'defs');
+  const gradient = document.createElementNS(svgNamespace, 'linearGradient');
+  const gradientId = `mitigation-density-gradient-${mitigationHistoryPopupId++}`;
+  gradient.id = gradientId;
+  gradient.setAttribute('x1', '0%');
+  gradient.setAttribute('x2', '100%');
+  for (const [seconds, color] of gradientStops) {
+    const stop = document.createElementNS(svgNamespace, 'stop');
+    stop.setAttribute('offset', `${chartPosition(seconds)}%`);
+    stop.setAttribute('stop-color', color);
+    gradient.append(stop);
   }
-  track.append(ticks);
+  defs.append(gradient);
+  svg.append(defs);
+  const points = densities.map((density, index) => {
+    const x = (index / (sampleCount - 1)) * 240;
+    const y = 52 - (density / densityScale) * 46;
+    return [x, y];
+  });
+  const area = document.createElementNS(svgNamespace, 'path');
+  area.classList.add('mitigation-history-density-area');
+  area.setAttribute('fill', `url(#${gradientId})`);
+  area.setAttribute('d', `M 0 52 ${points.map(([x, y]) => `L ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')} L 240 52 Z`);
+  svg.append(area);
+  for (const [seconds, className] of [[0, 'minimum'], [windowSeconds, 'maximum']]) {
+    const guide = document.createElementNS(svgNamespace, 'line');
+    const x = (chartPosition(seconds) / 100) * 240;
+    guide.classList.add('mitigation-history-density-guide', className);
+    guide.setAttribute('x1', x);
+    guide.setAttribute('x2', x);
+    guide.setAttribute('y1', '2');
+    guide.setAttribute('y2', '56');
+    svg.append(guide);
+  }
+  for (const [index, row] of timedRows.entries()) {
+    const tick = document.createElementNS(svgNamespace, 'line');
+    const x = (chartPosition(timedSamples[index]) / 100) * 240;
+    tick.classList.add('mitigation-history-density-rug');
+    tick.setAttribute('x1', x);
+    tick.setAttribute('x2', x);
+    tick.setAttribute('y1', '49');
+    tick.setAttribute('y2', '56');
+    tick.setAttribute('stroke', getPullPhaseColor(row.fight));
+    const title = document.createElementNS(svgNamespace, 'title');
+    title.textContent = `Pull ${row.fight.id}: ${formatFightDuration(row.result.cast.elapsedMs)} (${row.result.status})`;
+    tick.append(title);
+    svg.append(tick);
+  }
+  timingGraph.append(svg);
+
+  const missedGraph = document.createElement('div');
+  missedGraph.className = 'mitigation-history-missed-graph';
+  missedGraph.title = `${missedCount} missed ${missedCount === 1 ? 'pull' : 'pulls'}`;
+  const missedBar = document.createElement('span');
+  missedBar.style.height = `${(missedCount / densityScale) * 100}%`;
+  missedGraph.append(missedBar);
+  graph.append(timingGraph, missedGraph);
 
   const labels = document.createElement('div');
   labels.className = 'mitigation-history-chart-labels';
@@ -1905,9 +2161,26 @@ function createMitigationHistorySummary(rows) {
     span.style.left = `${position}%`;
     labels.append(span);
   }
-  chart.append(track, labels);
+  const missedLabel = document.createElement('span');
+  missedLabel.className = 'mitigation-history-missed-label';
+  missedLabel.textContent = 'Missed';
+  labels.append(missedLabel);
+  chart.append(graph, labels);
   summary.append(totals, chart);
   return summary;
+}
+
+function getPullPhaseColor(fight) {
+  if (fight?.kill) return '#34d399';
+  if (fight?.lastPhaseIsIntermission) return '#9aa8bb';
+  return ({
+    1: '#4f8fd6',
+    2: '#d97706',
+    3: '#a855c7',
+    4: '#60a5fa',
+    5: '#db547c',
+    6: '#84942b',
+  })[Number(fight?.lastPhase)] || '#9aa8bb';
 }
 
 function getMitigationMissRateColor(percent) {
@@ -1993,21 +2266,23 @@ async function loadMitigationResultHistory(report, mitigation) {
         if (uncachedFights.length === 0) {
           // Every pull was restored locally; FFLogs does not need another event query.
         } else {
-        const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
-        const rawDetails = await fetchFightEventDetails(
-          report.code,
-          uncachedFights.map((fight) => fight.id),
-          abilityIds,
-          getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME),
-        );
-        for (const fight of uncachedFights) {
-          const normalizedDetails = attachFightFingerprint(normalizeFightDetails(rawDetails, fight.id), fight);
-          fightDetails.set(
-            `${report.code}:${fight.id}`,
-            normalizedDetails,
-          );
-          writeCachedFightDetails(report.code, fight, normalizedDetails);
-        }
+          const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
+          const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
+          const batchSize = 3;
+          for (let index = 0; index < uncachedFights.length; index += batchSize) {
+            const batch = uncachedFights.slice(index, index + batchSize);
+            await Promise.all(batch.map(async (fight) => {
+              const rawDetails = await fetchFightEventDetails(
+                report.code,
+                fight.id,
+                abilityIds,
+                phaseReferences,
+              );
+              const normalizedDetails = attachFightFingerprint(normalizeFightDetails(rawDetails, fight.id), fight);
+              fightDetails.set(`${report.code}:${fight.id}`, normalizedDetails);
+              await writeCachedFightDetails(report.code, fight, normalizedDetails);
+            }));
+          }
         }
       }
 
@@ -2300,13 +2575,6 @@ function rgbColor(channels) {
 
 function createFightDetailsTable(fight, state) {
   const { events } = state;
-  if (events.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'detailed-empty-state';
-    empty.textContent = 'No deaths or damage downs in this fight.';
-    return empty;
-  }
-
   const table = document.createElement('table');
   table.className = 'fight-details-table';
   const head = document.createElement('thead');
@@ -2487,13 +2755,6 @@ function createFightTimeline(fight, state) {
     canvas.append(track);
     row.append(label, canvas);
     timeline.append(row);
-  }
-
-  if (timeline.childElementCount === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'detailed-empty-state';
-    empty.textContent = 'No deaths or damage downs in this fight.';
-    timeline.append(empty);
   }
 
   return timeline;

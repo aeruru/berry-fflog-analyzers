@@ -214,7 +214,19 @@ h2 {
   white-space: nowrap;
 }
 
-.report-search-form > p,
+.report-search-meta {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.report-search-meta > p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 0;
+}
+
 .lookup-status {
   font-size: 0.84rem;
   margin: 8px 0 0;
@@ -564,7 +576,7 @@ h2 {
 }
 
 .fight-panels.side-by-side {
-  align-items: stretch;
+  align-items: start;
   border-top: 1px solid var(--line);
   column-gap: 24px;
   display: grid;
@@ -581,8 +593,30 @@ h2 {
   padding-top: 0;
 }
 
+/* Let the timeline span the complete combined panel while only the exact-value
+   table occupies the left side of the table/mitigation comparison row. */
+.fight-panels.side-by-side > .fight-details-panel {
+  display: contents;
+}
+
+.fight-panels.side-by-side > .fight-details-panel > .fight-timeline {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-bottom: 18px;
+  width: 100%;
+}
+
+.fight-panels.side-by-side > .fight-details-panel > .fight-details-table {
+  align-self: start;
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 0;
+}
+
 .fight-panels.side-by-side > .fight-mitigation-panel {
   border-left: 1px solid var(--line);
+  grid-column: 2;
+  grid-row: 2;
   padding-left: 24px;
 }
 
@@ -751,26 +785,20 @@ h2 {
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
   color: var(--ink);
   display: none;
+  font-size: 0.8rem;
   font-weight: 400;
-  left: 50%;
   max-height: min(300px, calc(100vh - 24px));
+  max-width: calc(100vw - 24px);
   min-width: 128px;
   overflow: auto;
   padding: 7px;
   position: absolute;
-  top: calc(100% + 7px);
-  transform: translateX(-50%);
   white-space: nowrap;
-  z-index: 20;
+  z-index: 10000;
 }
 
-.mitigation-result-history-anchor.open > .mitigation-result-history-tooltip {
+.mitigation-result-history-tooltip.open {
   display: block;
-}
-
-.mitigation-result-history-tooltip.above {
-  bottom: calc(100% + 7px);
-  top: auto;
 }
 
 .mitigation-history-table {
@@ -803,41 +831,63 @@ h2 {
 }
 
 .mitigation-history-chart {
-  min-width: 165px;
+  min-width: 230px;
 }
 
-.mitigation-history-track {
-  border-radius: 999px;
-  height: 6px;
-  position: relative;
+.mitigation-history-density-layout {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  height: 56px;
 }
 
-.mitigation-history-boundary {
-  background: var(--muted);
-  height: 14px;
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 1px;
-  z-index: 1;
+.mitigation-history-density-graph {
+  min-width: 0;
 }
 
-.mitigation-history-ticks {
-  inset: 0;
-  opacity: 0.3;
-  position: absolute;
-  z-index: 2;
+.mitigation-history-density-svg {
+  display: block;
+  height: 56px;
+  overflow: visible;
+  width: 100%;
 }
 
-.mitigation-history-tick {
-  background: #fff;
-  border: 0;
-  border-radius: 1px;
-  height: 14px;
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 4px;
+.mitigation-history-density-area {
+  fill-opacity: 0.78;
+  stroke: rgba(255, 255, 255, 0.72);
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.mitigation-history-density-guide {
+  stroke: var(--ink);
+  stroke-dasharray: 2 2;
+  stroke-opacity: 0.62;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.mitigation-history-density-rug {
+  opacity: 0.62;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.mitigation-history-missed-graph {
+  align-items: end;
+  border-left: 1px solid var(--line);
+  display: flex;
+  height: 56px;
+  justify-content: center;
+  padding-left: 5px;
+}
+
+.mitigation-history-missed-graph span {
+  background: #fb7185;
+  border-radius: 2px 2px 0 0;
+  display: block;
+  min-height: 0;
+  width: 10px;
 }
 
 .mitigation-history-chart-labels {
@@ -846,6 +896,7 @@ h2 {
   height: 12px;
   margin-top: 7px;
   position: relative;
+  width: calc(100% - 26px);
 }
 
 .mitigation-history-chart-labels span {
@@ -868,6 +919,11 @@ h2 {
 
 .mitigation-history-chart-labels .end {
   transform: translateX(-100%);
+}
+
+.mitigation-history-chart-labels .mitigation-history-missed-label {
+  left: calc(100% + 17px);
+  transform: translateX(-50%);
 }
 
 .mitigation-history-table th,

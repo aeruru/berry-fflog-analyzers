@@ -65,7 +65,10 @@
                 >
                 <button id="loadReportButton" type="submit">Load report</button>
               </div>
-              <p>Paste an FFLogs report URL or enter its report code.</p>
+              <div class="report-search-meta">
+                <p>Paste an FFLogs report URL or enter its report code.</p>
+                <button class="report-reload-button" id="resetCacheButton" type="button" hidden>Reset cache</button>
+              </div>
               <datalist id="recentReportCodes"></datalist>
             </form>
             <p class="lookup-status" id="lookupStatus" role="status" hidden></p>
