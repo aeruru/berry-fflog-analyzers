@@ -69,9 +69,21 @@ const REPORT_FIGHTS_QUERY = `
   }
 `;
 
-const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR (type = "applydebuff" AND ability.id = 1002911)';
+const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "damage" AND target.disposition = "friendly")';
+const DEATH_CAUSE_BUFF_NAMES = [
+  'Rampart',
+  'Guardian',
+  'Damnation',
+  'Shadowed Vigil',
+  'Great Nebula',
+];
 const FIGHT_EVENTS_QUERY = `
-  query FightEvents($code: String!, $fightIDs: [Int]!, $filterExpression: String!) {
+  query FightEvents(
+    $code: String!
+    $fightIDs: [Int]!
+    $filterExpression: String!
+    $startTime: Float
+  ) {
     reportData {
       report(code: $code) {
         masterData {
@@ -81,13 +93,26 @@ const FIGHT_EVENTS_QUERY = `
             type
             subType
           }
+          abilities {
+            gameID
+            name
+          }
         }
         fights(fightIDs: $fightIDs) {
           id
+          startTime
+          endTime
           friendlyPlayers
         }
-        events(fightIDs: $fightIDs, filterExpression: $filterExpression, limit: 10000) {
+        events(
+          fightIDs: $fightIDs
+          filterExpression: $filterExpression
+          includeResources: true
+          limit: 10000
+          startTime: $startTime
+        ) {
           data
+          nextPageTimestamp
         }
       }
     }
@@ -146,11 +171,14 @@ export async function fetchReportByCode(code, options) {
 
 export async function fetchFightEventDetails(
   code,
-  fightId,
+  fightIds,
   mitigationAbilityIds = [],
   phaseEventReferences = [],
   options,
 ) {
+  const normalizedFightIds = (Array.isArray(fightIds) ? fightIds : [fightIds])
+    .map(Number)
+    .filter(Number.isFinite);
   const mitigationFilters = mitigationAbilityIds
     .filter(Number.isFinite)
     .map((abilityId) => `(type = "cast" AND ability.id = ${abilityId})`);
@@ -161,20 +189,73 @@ export async function fetchFightEventDetails(
     if (ability) conditions.push(`ability.name = "${ability}"`);
     return `(${conditions.join(' AND ')})`;
   });
-  const filterExpression = [BASE_FIGHT_EVENT_FILTER, ...mitigationFilters, ...phaseEventFilters].join(' OR ');
-  const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
-    code,
-    fightIDs: [Number(fightId)],
-    filterExpression,
-  }, options);
-  return data.reportData.report;
+  const assignmentFilters = [
+    '(type = "cast" AND ability.name = "Revolting Ruin III")',
+    '(type = "cast" AND source.disposition = "friendly")',
+  ];
+  // Only the defensive statuses used by programmed death explanations are fetched;
+  // this keeps the shared fight-event response much smaller than all buff traffic.
+  const deathCauseBuffFilters = DEATH_CAUSE_BUFF_NAMES.flatMap((abilityName) => [
+    `(type = "applybuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+    `(type = "refreshbuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+    `(type = "removebuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
+  ]);
+  const filterExpression = [
+    BASE_FIGHT_EVENT_FILTER,
+    ...mitigationFilters,
+    ...phaseEventFilters,
+    ...assignmentFilters,
+    ...deathCauseBuffFilters,
+  ].join(' OR ');
+  let report = null;
+  const events = await collectFflogsEventPages(async (startTime) => {
+    const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
+      code,
+      fightIDs: normalizedFightIds,
+      filterExpression,
+      startTime,
+    }, options);
+    const page = data.reportData.report;
+    if (!report) report = page;
+    return page.events;
+  });
+
+  return {
+    ...report,
+    events: {
+      ...report.events,
+      data: events,
+      nextPageTimestamp: null,
+    },
+  };
+}
+
+export async function collectFflogsEventPages(fetchPage) {
+  let startTime = null;
+  const events = [];
+  const seenPageTimestamps = new Set();
+
+  do {
+    const page = await fetchPage(startTime);
+    events.push(...(page?.data ?? []));
+    const nextPageTimestamp = Number(page?.nextPageTimestamp) || null;
+    if (nextPageTimestamp !== null) {
+      if (seenPageTimestamps.has(nextPageTimestamp)) {
+        throw new Error(`FFLogs repeated event page timestamp ${nextPageTimestamp}.`);
+      }
+      seenPageTimestamps.add(nextPageTimestamp);
+    }
+    startTime = nextPageTimestamp;
+  } while (startTime !== null);
+
+  return events;
 }
 
 function escapeFflogsFilterString(value) {
   return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
-export async function fetchWeeklyReports(userId, options) {
+export async function fetchWeeklyReports(userId, { cachedReports = [], ...options } = {}) {
   const endTime = Date.now();
   const startTime = endTime - (REPORT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const reports = [];
@@ -200,9 +281,17 @@ export async function fetchWeeklyReports(userId, options) {
     page += 1;
   }
 
-  // Report-list records do not contain fights, so hydrate them with a small concurrency
-  // cap before filtering and rendering the weekly cards.
+  // Report-list records do not contain fights. Reuse fight lists for unchanged reports,
+  // and hydrate only new or updated reports with a small concurrency cap.
+  const cachedReportsByCode = new Map(cachedReports.map((report) => [report.code, report]));
   const hydratedReports = await mapWithConcurrency(reports, 4, async (report) => {
+    const cachedReport = cachedReportsByCode.get(report.code);
+    if (cachedReport
+      && Number(cachedReport.startTime) === Number(report.startTime)
+      && Number(cachedReport.endTime) === Number(report.endTime)
+      && Array.isArray(cachedReport.fights)) {
+      return { ...report, fights: cachedReport.fights };
+    }
     const data = await queryFflogs(REPORT_FIGHTS_QUERY, { code: report.code }, options);
     return data.reportData.report;
   });

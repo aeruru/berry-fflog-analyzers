@@ -7,7 +7,9 @@
     { "id": 5, "name": "Cocoa Crumble", "type": "Player", "subType": "Dragoon" },
     { "id": 6, "name": "Lemon Lassi", "type": "Player", "subType": "Ninja" },
     { "id": 7, "name": "Kiwi Fizz", "type": "Player", "subType": "Bard" },
-    { "id": 8, "name": "Cherry Choux", "type": "Player", "subType": "Summoner" }
+    { "id": 8, "name": "Cherry Choux", "type": "Player", "subType": "Summoner" },
+    { "id": 9, "name": "Mango Mousse", "type": "Player", "subType": "Dancer" },
+    { "id": 10, "name": "Toffee Torte", "type": "Player", "subType": "Machinist" }
   ],
   "reports": [
     {
