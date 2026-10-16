@@ -21,12 +21,14 @@ const elements = {
   accountName: document.querySelector('#accountName'),
   authButton: document.querySelector('#authButton'),
   authState: document.querySelector('#authState'),
+  detailsViewButton: document.querySelector('#detailsViewButton'),
+  detailsViewControl: document.querySelector('#detailsViewControl'),
+  detailsViewLabel: document.querySelector('#detailsViewLabel'),
   loadReportButton: document.querySelector('#loadReportButton'),
   lookupResult: document.querySelector('#lookupResult'),
   lookupStatus: document.querySelector('#lookupStatus'),
   recentReportCodes: document.querySelector('#recentReportCodes'),
   refreshReportsButton: document.querySelector('#refreshReportsButton'),
-  resetCacheButton: document.querySelector('#resetCacheButton'),
   reportCount: document.querySelector('#reportCount'),
   reportSearchForm: document.querySelector('#reportSearchForm'),
   reportSearchInput: document.querySelector('#reportSearchInput'),
@@ -52,6 +54,9 @@ const TANK_FORTY_PERCENT_BUFFS = new Set(['Guardian', 'Damnation', 'Shadowed Vig
 const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const DANCING_MAD_ENCOUNTER_NAME = 'Dancing Mad';
 const MITIGATION_ABILITY_ICON_URLS = new Map([
+  [188, './assets/ability-icons/000188_hr1.png'],
+  [3585, './assets/ability-icons/003585_hr1.png'],
+  [7560, './assets/ability-icons/000861_hr1.png'],
   [25862, './assets/ability-icons/002649_hr1.png'],
   [16536, './assets/ability-icons/002645_hr1.png'],
   [3569, './assets/ability-icons/002632_hr1.png'],
@@ -66,8 +71,15 @@ const MITIGATION_ABILITY_ICON_URLS = new Map([
   [24311, './assets/ability-icons/003679_hr1.png'],
   [37035, './assets/ability-icons/003690_hr1.png'],
   [16532, './assets/ability-icons/002641_hr1.png'],
+  [16538, './assets/ability-icons/016538_hr1.png'],
+  [25868, './assets/ability-icons/025868_hr1.png'],
+  [16545, './assets/ability-icons/002850_hr1.png'],
 ]);
 const UNKNOWN_MITIGATION_ABILITY_ICON_URL = './assets/ability-icons/question-mark-status.png';
+const CHECK_REPORTS_TOOLTIP = "Only checks for new reports—doesn't update existing ones. Hold Shift to reload the cache for each report.";
+const RELOAD_REPORTS_TOOLTIP = 'Reloads the cache for all reports. Warning—this consumes more account usage than only checking for new reports. (release Shift to only check for new reports)';
+const CHECK_PULLS_TOOLTIP = "Only checks for new pulls—doesn't update existing ones. Hold Shift to reload the cache for all pulls.";
+const RELOAD_PULLS_TOOLTIP = 'Reloads the cache for all pulls. Warning—this consumes more account usage than only checking for new pulls. (release Shift to only check for new pulls)';
 
 let currentUser = null;
 let encounterPhaseDefinitions = new Map();
@@ -89,6 +101,8 @@ let fightPanelLayoutFrame = null;
 let mitigationHistoryPopupId = 0;
 const mitigationHistoryPromises = new Map();
 let fightDetailsCacheDatabasePromise = null;
+let isRefreshingWeeklyReports = false;
+let isShiftHeld = false;
 
 const MITIGATION_GRACE_SECONDS = 20;
 const JOB_ROLES = new Map([
@@ -145,7 +159,10 @@ elements.authButton.addEventListener('click', async () => {
 
 elements.testDataButton.addEventListener('click', toggleTestData);
 elements.refreshReportsButton.addEventListener('click', refreshWeeklyReports);
-elements.resetCacheButton.addEventListener('click', resetFightDetailsCache);
+elements.detailsViewButton.addEventListener('click', () => {
+  setDetailsTableVisibility(!isDetailsTableVisible);
+  renderLookupResult();
+});
 elements.themeToggleButton.addEventListener('click', toggleTheme);
 elements.reportSearchForm.addEventListener('submit', searchForReport);
 window.addEventListener('resize', scheduleTimelineCollisionCheck);
@@ -157,12 +174,17 @@ document.addEventListener('click', (event) => {
   }
 });
 document.addEventListener('keydown', (event) => {
+  if (event.key === 'Shift') updateShiftSensitiveButtons(true);
   if (event.key !== 'Escape') return;
   const openAnchor = document.querySelector('.mitigation-result-history-anchor.open');
   if (!openAnchor) return;
   closeOpenMitigationHistoryPopups();
   openAnchor.focus();
 });
+document.addEventListener('keyup', (event) => {
+  if (event.key === 'Shift') updateShiftSensitiveButtons(false);
+});
+window.addEventListener('blur', () => updateShiftSensitiveButtons(false));
 document.addEventListener('click', (event) => {
   if (!event.target.closest('.fight-timeline-event.grouped')) {
     closePinnedTimelineGroups();
@@ -170,6 +192,8 @@ document.addEventListener('click', (event) => {
 });
 
 renderThemeButton();
+renderDetailsViewControl();
+updateRefreshReportsButton(false);
 initialize();
 
 function toggleTheme() {
@@ -258,15 +282,49 @@ function renderReports() {
   }));
 }
 
-async function refreshWeeklyReports() {
+// Shift changes both the promise made by this control and the amount of FFLogs work it
+// performs: the normal action reuses unchanged fight lists, while Shift reloads them all.
+function updateRefreshReportsButton(isShiftHeld) {
+  if (isRefreshingWeeklyReports) return;
+  const label = isShiftHeld ? 'Reload all reports' : 'Check for new reports';
+  const tooltip = isShiftHeld ? RELOAD_REPORTS_TOOLTIP : CHECK_REPORTS_TOOLTIP;
+  elements.refreshReportsButton.textContent = label;
+  elements.refreshReportsButton.title = tooltip;
+  elements.refreshReportsButton.setAttribute('aria-label', `${label}. ${tooltip}`);
+}
+
+function updateShiftSensitiveButtons(nextShiftState) {
+  isShiftHeld = nextShiftState;
+  updateRefreshReportsButton(isShiftHeld);
+  document.querySelectorAll('.report-reload-button').forEach((button) => {
+    updateSelectedReportReloadButton(button, isShiftHeld);
+  });
+}
+
+function updateSelectedReportReloadButton(button, shiftHeld) {
+  if (button.disabled) return;
+  const label = shiftHeld ? 'Reload report' : 'Check for new pulls';
+  const tooltip = shiftHeld ? RELOAD_PULLS_TOOLTIP : CHECK_PULLS_TOOLTIP;
+  button.textContent = label;
+  button.title = tooltip;
+  button.setAttribute('aria-label', `${label}. ${tooltip}`);
+}
+
+async function refreshWeeklyReports(event) {
   if (usingTestData || !currentUser || !isLoggedInToFflogs()) return;
+  const reloadAllReports = event.shiftKey;
   const previousCodes = new Set(reports.map((report) => report.code));
+  isRefreshingWeeklyReports = true;
   elements.refreshReportsButton.disabled = true;
-  elements.refreshReportsButton.textContent = 'Checking…';
-  setReportsStatus('Checking FFLogs for new reports...');
+  elements.refreshReportsButton.textContent = reloadAllReports ? 'Reloading…' : 'Checking…';
+  setReportsStatus(reloadAllReports
+    ? 'Reloading every report from FFLogs...'
+    : 'Checking FFLogs for new reports...');
 
   try {
-    const refreshedReports = await fetchWeeklyReports(currentUser.id, { cachedReports: reports });
+    const refreshedReports = await fetchWeeklyReports(currentUser.id, {
+      cachedReports: reloadAllReports ? [] : reports,
+    });
     const newReportCount = refreshedReports.filter((report) => !previousCodes.has(report.code)).length;
     reports = refreshedReports;
     renderReports();
@@ -276,8 +334,9 @@ async function refreshWeeklyReports() {
   } catch (error) {
     setReportsStatus(error.message, true);
   } finally {
-    elements.refreshReportsButton.textContent = 'Check for new reports';
+    isRefreshingWeeklyReports = false;
     elements.refreshReportsButton.disabled = false;
+    updateRefreshReportsButton(false);
   }
 }
 
@@ -381,10 +440,23 @@ async function searchForReport(event) {
 
 function renderLookupResult() {
   closeOpenMitigationHistoryPopups();
-  elements.resetCacheButton.hidden = !selectedReport;
+  renderDetailsViewControl();
   elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
   scheduleTimelineCollisionCheck();
   scheduleResponsiveFightPanelLayout();
+}
+
+function renderDetailsViewControl() {
+  elements.detailsViewLabel.textContent = `Events table: ${isDetailsTableVisible ? 'On' : 'Off'}`;
+  elements.detailsViewControl.title = 'The events timeline will always be shown.';
+  elements.detailsViewButton.setAttribute('aria-pressed', String(isDetailsTableVisible));
+  elements.detailsViewButton.setAttribute(
+    'aria-label',
+    `Events table: ${isDetailsTableVisible ? 'on' : 'off'}. The events timeline will always be shown.`,
+  );
+  elements.detailsViewButton.title = isDetailsTableVisible
+    ? 'Hide events table. The events timeline will always be shown.'
+    : 'Show events table. The events timeline will always be shown.';
 }
 
 // Every DMU fixture exercises the mitigation tracker. Cast timing rotates through a
@@ -435,19 +507,25 @@ function addTestMitigationCasts(report, actors, reportIndex) {
       const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > durationMs) return [];
 
+      const isP1OnlyTemperanceSample = report.code === 'TESTP1ONLY02'
+        && Number(mitigation.abilityId) === 16536
+        && Number(mitigation.phase) === 1
+        && Number(mitigation.startElapsedSeconds) < 30;
       const scenario = (reportIndex * 3 + Number(fight.id) + mitigationIndex) % 7;
-      if (scenario === 0) return [];
-      const castElapsedMs = scenario === 1
-        ? startMs - 3_200
-        : scenario === 2
-          ? endMs + 2_200
-          : scenario === 3
-            ? startMs + 250
-            : scenario === 4
-              ? endMs + 400
-              : scenario === 5
-                ? (startMs + endMs) / 2
-                : startMs - 350;
+      if (scenario === 0 && !isP1OnlyTemperanceSample) return [];
+      const castElapsedMs = isP1OnlyTemperanceSample
+        ? startMs + 1_000 + (Number(fight.id) - 1) * 200
+        : scenario === 1
+          ? startMs - 3_200
+          : scenario === 2
+            ? endMs + 2_200
+            : scenario === 3
+              ? startMs + 250
+              : scenario === 4
+                ? endMs + 400
+                : scenario === 5
+                  ? (startMs + endMs) / 2
+                  : startMs - 350;
       if (castElapsedMs < 0 || castElapsedMs > durationMs) return [];
       return [{
         type: 'cast',
@@ -645,7 +723,7 @@ function loadMitigationFilterMode() {
 function loadMitigationSlot() {
   try {
     const savedSlot = localStorage.getItem(MITIGATION_SLOT_STORAGE_KEY);
-    if (PARTY_SLOT_ORDER.includes(savedSlot)) return savedSlot;
+    if (savedSlot === 'all' || PARTY_SLOT_ORDER.includes(savedSlot)) return savedSlot;
   } catch {
     // Fall through to H1 when storage is unavailable.
   }
@@ -709,7 +787,7 @@ function selectMitigationSlotInTracker(tracker, requestedSlot) {
 }
 
 function setMitigationSlot(slot) {
-  if (!PARTY_SLOT_ORDER.includes(slot)) return;
+  if (slot !== 'all' && !PARTY_SLOT_ORDER.includes(slot)) return;
   selectedMitigationSlot = slot;
   try {
     localStorage.setItem(MITIGATION_SLOT_STORAGE_KEY, slot);
@@ -876,17 +954,15 @@ function loadKnownReport(report) {
   setLookupStatus(`Loaded report ${report.code}.`);
 }
 
-// Builds the detailed viewer from selected report state. Phase selection filters only
-// the displayed fights; it does not alter the report used for highlighting or reloads.
+// Builds the detailed viewer from selected report state. The pull-outcome filter drives
+// both the displayed fights and the mitigation-history overview, but not report reloads.
 function createDetailedReportView(report) {
   const article = document.createElement('article');
   article.className = 'detailed-report-card';
 
   const fights = report.fights.filter(isDmuPull)
     .sort((first, second) => Number(second.startTime) - Number(first.startTime));
-  const visibleFights = selectedReportPhase === 'all'
-    ? fights
-    : fights.filter((fight) => String(Number(fight.lastPhase) || 1) === selectedReportPhase);
+  const visibleFights = filterReportFightsByOutcome(fights, selectedReportPhase);
   const highlightedFight = getBestDmuPull(visibleFights);
 
   const summary = document.createElement('div');
@@ -912,14 +988,15 @@ function createDetailedReportView(report) {
   const reloadButton = document.createElement('button');
   reloadButton.className = 'report-reload-button';
   reloadButton.type = 'button';
-  reloadButton.textContent = 'Reload report';
-  reloadButton.addEventListener('click', () => reloadSelectedReport(reloadButton));
+  updateSelectedReportReloadButton(reloadButton, isShiftHeld);
+  reloadButton.addEventListener('click', (event) => reloadSelectedReport(reloadButton, event.shiftKey));
   const phaseFilter = document.createElement('select');
   phaseFilter.className = 'report-phase-select';
   phaseFilter.setAttribute('aria-label', 'Filter fights by phase');
-  phaseFilter.append(new Option('All phases', 'all'));
+  phaseFilter.append(new Option('All pulls', 'all'));
+  phaseFilter.append(new Option('Clears', 'clears'));
   for (let phase = 1; phase <= 5; phase += 1) {
-    phaseFilter.append(new Option(`Phase ${phase}`, String(phase)));
+    phaseFilter.append(new Option(`Phase ${phase} wipes`, String(phase)));
   }
   phaseFilter.value = selectedReportPhase;
   phaseFilter.addEventListener('change', () => {
@@ -927,26 +1004,26 @@ function createDetailedReportView(report) {
     renderLookupResult();
   });
 
-  const detailsViewButton = document.createElement('button');
-  detailsViewButton.className = 'report-details-view-button';
-  detailsViewButton.type = 'button';
-  detailsViewButton.textContent = isDetailsTableVisible ? 'Hide table view' : 'Show table view';
-  detailsViewButton.setAttribute('aria-pressed', String(isDetailsTableVisible));
-  detailsViewButton.addEventListener('click', () => {
-    setDetailsTableVisibility(!isDetailsTableVisible);
-    renderLookupResult();
+  const mitigationOverviewButton = document.createElement('button');
+  mitigationOverviewButton.className = 'report-mitigation-overview-button';
+  mitigationOverviewButton.type = 'button';
+  mitigationOverviewButton.textContent = 'View all mit graphs';
+  mitigationOverviewButton.addEventListener('click', () => {
+    showReportMitigationHistoryOverview(report, mitigationOverviewButton);
   });
 
   const fightCount = document.createElement('span');
   fightCount.className = 'fight-count-pill';
-  fightCount.textContent = `${visibleFights.length} ${visibleFights.length === 1 ? 'pull' : 'pulls'}`;
+  fightCount.textContent = formatFilteredFightCount(visibleFights.length, selectedReportPhase);
   const pullSummary = document.createElement('div');
   pullSummary.className = 'detailed-report-pull-summary';
   const emptyPullLabel = selectedReportPhase === 'all'
     ? 'No DMU pulls'
-    : `No P${selectedReportPhase} pulls`;
+    : selectedReportPhase === 'clears'
+      ? 'No clears'
+      : `No P${selectedReportPhase} wipes`;
   pullSummary.append(fightCount, createBestPullBadge(highlightedFight, emptyPullLabel));
-  actions.append(reloadButton, phaseFilter, detailsViewButton, pullSummary);
+  actions.append(reloadButton, phaseFilter, mitigationOverviewButton, pullSummary);
   summary.append(info, actions);
 
   const fightList = document.createElement('div');
@@ -956,7 +1033,9 @@ function createDetailedReportView(report) {
     empty.className = 'detailed-empty-state';
     empty.textContent = selectedReportPhase === 'all'
       ? 'This report does not include DMU fight data.'
-      : `No fights ended during Phase ${selectedReportPhase} in this report.`;
+      : selectedReportPhase === 'clears'
+        ? 'No clears found in this report.'
+        : `No wipes ended during Phase ${selectedReportPhase} in this report.`;
     fightList.append(empty);
   } else {
     fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
@@ -964,6 +1043,21 @@ function createDetailedReportView(report) {
 
   article.append(summary, fightList);
   return article;
+}
+
+// Numbered phases are wipe locations, while successful kills have their own filter.
+// Keeping those outcomes disjoint prevents a clear from also appearing as a P5 wipe.
+function filterReportFightsByOutcome(fights, filter) {
+  if (filter === 'all') return fights;
+  if (filter === 'clears') return fights.filter((fight) => fight.kill);
+  return fights.filter((fight) => !fight.kill
+    && String(Number(fight.lastPhase) || 1) === filter);
+}
+
+function formatFilteredFightCount(count, filter) {
+  if (filter === 'clears') return `${count} ${count === 1 ? 'clear' : 'clears'}`;
+  if (filter !== 'all') return `${count} P${filter} ${count === 1 ? 'wipe' : 'wipes'}`;
+  return `${count} ${count === 1 ? 'pull' : 'pulls'}`;
 }
 
 // Each fight card owns only summary UI. The details and mitigation panels have
@@ -1159,14 +1253,17 @@ function createDetailedFightCard(report, fight, highlightedFight) {
 
 // Reloading replaces the selected report's fight snapshot while retaining event details
 // whose fight fingerprints are unchanged. New or extended pulls are fetched on demand.
-async function reloadSelectedReport(button) {
+async function reloadSelectedReport(button, reloadAllPulls) {
   if (!selectedReport) {
     return;
   }
 
   button.disabled = true;
+  button.textContent = reloadAllPulls ? 'Reloading…' : 'Checking…';
   const reportCode = selectedReport.code;
-  setLookupStatus(`Reloading report ${reportCode}...`);
+  setLookupStatus(reloadAllPulls
+    ? `Reloading every pull in report ${reportCode}...`
+    : `Checking report ${reportCode} for new pulls...`);
 
   try {
     if (usingTestData) {
@@ -1181,14 +1278,21 @@ async function reloadSelectedReport(button) {
       renderReports();
     }
 
-    discardChangedFightDetails(selectedReport);
+    if (reloadAllPulls) {
+      await clearReportFightDetailsCache(reportCode);
+    } else {
+      discardChangedFightDetails(selectedReport);
+    }
     openFightDetailKeys = new Set();
     openFightMitigationKeys = new Set();
     renderLookupResult();
-    setLookupStatus(`Reloaded report ${reportCode}.`);
+    setLookupStatus(reloadAllPulls
+      ? `Reloaded report ${reportCode}. Pull details will be fetched again when opened.`
+      : `Checked report ${reportCode} for new pulls.`);
   } catch (error) {
     setLookupStatus(error.message, true);
     button.disabled = false;
+    updateSelectedReportReloadButton(button, isShiftHeld);
   }
 }
 
@@ -1556,30 +1660,34 @@ async function writeCachedFightDetails(reportCode, fight, state) {
   }
 }
 
-async function resetFightDetailsCache() {
-  elements.resetCacheButton.disabled = true;
-  try {
-    const database = await openFightDetailsCacheDatabase();
-    if (database) {
-      await new Promise((resolve, reject) => {
-        const transaction = database.transaction(FIGHT_DETAILS_CACHE_STORE_NAME, 'readwrite');
-        transaction.objectStore(FIGHT_DETAILS_CACHE_STORE_NAME).clear();
-        transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
-      });
-    }
+// Removes only one report's pull details, leaving other reports' cached analysis intact.
+// IndexedDB keys include the cache schema before the report code, so a bounded cursor
+// can delete the report's entire contiguous key range without scanning unrelated data.
+async function clearReportFightDetailsCache(reportCode) {
+  const keyPrefix = `${getFightDetailsCacheVersion()}:${reportCode}:`;
+  const database = await openFightDetailsCacheDatabase();
+  if (database) {
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction(FIGHT_DETAILS_CACHE_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(FIGHT_DETAILS_CACHE_STORE_NAME);
+      const request = store.openCursor(IDBKeyRange.bound(keyPrefix, `${keyPrefix}\uffff`));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) return;
+        cursor.delete();
+        cursor.continue();
+      };
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
 
-    fightDetails.clear();
-    mitigationHistoryPromises.clear();
-    openFightDetailKeys.clear();
-    openFightMitigationKeys.clear();
-    renderLookupResult();
-    setLookupStatus('Cache reset. Fight details will be fetched again when opened.');
-  } catch {
-    setLookupStatus('Could not reset the cache.', true);
-  } finally {
-    elements.resetCacheButton.disabled = false;
+  for (const key of fightDetails.keys()) {
+    if (key.startsWith(`${reportCode}:`)) fightDetails.delete(key);
+  }
+  for (const key of mitigationHistoryPromises.keys()) {
+    if (key.startsWith(`${reportCode}:`)) mitigationHistoryPromises.delete(key);
   }
 }
 
@@ -1696,7 +1804,7 @@ function createFightMitigationPanel(report, fight, state) {
 }
 
 // Build the complete mitigation-tracker UI for one pull. It creates one result
-// panel per standard party slot (T1 through R2), provides desktop and compact
+// panel per standard party slot (T1 through R2), plus one merged All panel, provides desktop and compact
 // navigation, and restores the user's persisted slot and result filter.
 function createMitigationTrackerView(report, fight, state) {
   const tracker = document.createElement('section');
@@ -1742,9 +1850,34 @@ function createMitigationTrackerView(report, fight, state) {
   slotSelect.className = 'mitigation-slot-select';
   slotSelect.setAttribute('aria-label', 'Mitigation assignment');
 
-  const initialSlot = assignedSlots.includes(selectedMitigationSlot)
+  const initialSlot = selectedMitigationSlot === 'all' || assignedSlots.includes(selectedMitigationSlot)
     ? selectedMitigationSlot
     : assignedSlots[0];
+
+  const allTab = document.createElement('button');
+  allTab.className = 'mitigation-tab';
+  allTab.type = 'button';
+  allTab.id = `mitigation-tab-${fight.id}-all`;
+  allTab.textContent = 'All';
+  allTab.setAttribute('role', 'tab');
+  allTab.setAttribute('aria-controls', `mitigation-panel-${fight.id}-all`);
+  allTab.setAttribute('aria-selected', String(initialSlot === 'all'));
+  allTab.dataset.mitigationSlot = 'all';
+  allTab.tabIndex = initialSlot === 'all' ? 0 : -1;
+  allTab.addEventListener('click', () => setMitigationSlot('all'));
+  tabs.append(allTab);
+  const allOption = document.createElement('option');
+  allOption.value = 'all';
+  allOption.textContent = 'All';
+  slotSelect.append(allOption);
+
+  const allPanel = createAllMitigationsPanel(report, fight, state, assignedSlots);
+  allPanel.id = `mitigation-panel-${fight.id}-all`;
+  allPanel.setAttribute('role', 'tabpanel');
+  allPanel.setAttribute('aria-labelledby', allTab.id);
+  allPanel.dataset.mitigationSlot = 'all';
+  allPanel.hidden = initialSlot !== 'all';
+  tracker.append(allPanel);
 
   assignedSlots.forEach((slot) => {
     const tab = document.createElement('button');
@@ -1784,6 +1917,33 @@ function createMitigationTrackerView(report, fight, state) {
     || (!row.classList.contains('missed') && Number(row.dataset.timingDeltaSeconds) <= 1));
   applyMitigationResultFilter(tracker);
   return tracker;
+}
+
+// The All view is one chronological result stream, not a row of independently sized
+// role tables. Slot-specific views remain separate so their focused layout is unchanged.
+function createAllMitigationsPanel(report, fight, state, assignedSlots) {
+  const panel = document.createElement('div');
+  panel.className = 'mitigation-panel';
+  const results = assignedSlots.flatMap((slot) => {
+    if (!hasApplicablePartySlotAssignments(fight, state, slot)
+      || isPartySlotClassUnsupported(state, slot)) return [];
+    return evaluatePartySlotMitigations(fight, state, slot);
+  }).sort((first, second) =>
+    first.startMs - second.startMs
+      || first.endMs - second.endMs
+      || PARTY_SLOT_ORDER.indexOf(first.mitigation.assignedTo)
+        - PARTY_SLOT_ORDER.indexOf(second.mitigation.assignedTo));
+
+  if (results.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'mitigation-empty-state';
+    empty.textContent = 'No applicable assignments before this pull ended.';
+    panel.append(empty);
+    return panel;
+  }
+
+  panel.append(createMitigationResultsTable(report, results, { showRole: true }));
+  return panel;
 }
 
 // Apply the selected result filter to every party-slot panel. A panel whose rows
@@ -1842,11 +2002,21 @@ function createPartySlotMitigationPanel(report, fight, state, assignedTo) {
     return panel;
   }
 
+  panel.append(createMitigationResultsTable(report, results));
+  return panel;
+}
+
+// Rows share one renderer across merged and slot-specific views so timing colors,
+// history popups, icons, and filtering behave identically in both layouts.
+function createMitigationResultsTable(report, results, { showRole = false } = {}) {
   const table = document.createElement('table');
   table.className = 'mitigation-table';
   const head = document.createElement('thead');
   const headingRow = document.createElement('tr');
-  for (const heading of ['Ability', 'Window', 'Result', 'Used', 'Player']) {
+  const headings = ['Ability', 'Window', 'Result', 'Used'];
+  if (showRole) headings.push('Role');
+  headings.push('Player');
+  for (const heading of headings) {
     const cell = document.createElement('th');
     cell.scope = 'col';
     cell.textContent = heading;
@@ -1877,15 +2047,18 @@ function createPartySlotMitigationPanel(report, fight, state, assignedTo) {
       : `${result.player.name} (${result.player.job})`;
     const usedCell = document.createElement('td');
     usedCell.textContent = result.cast ? formatFightDuration(result.cast.elapsedMs) : '—';
+    const roleCell = document.createElement('td');
+    roleCell.textContent = result.mitigation.assignedTo;
     const statusCell = document.createElement('td');
     statusCell.className = 'mitigation-result-status';
     statusCell.append(createMitigationResultHistory(report, result));
-    row.append(abilityCell, windowCell, statusCell, usedCell, playerCell);
+    row.append(abilityCell, windowCell, statusCell, usedCell);
+    if (showRole) row.append(roleCell);
+    row.append(playerCell);
     body.append(row);
   }
   table.append(head, body);
-  panel.append(table);
-  return panel;
+  return table;
 }
 
 function hasApplicablePartySlotAssignments(fight, state, assignedTo) {
@@ -1981,6 +2154,147 @@ function createMitigationResultHistory(report, result) {
   return anchor;
 }
 
+async function showReportMitigationHistoryOverview(report, button) {
+  const phaseFilter = selectedReportPhase;
+  const filteredReport = {
+    ...report,
+    fights: filterReportFightsByOutcome(report.fights ?? [], phaseFilter),
+  };
+  const mitigations = [...dancingMadMitigations].sort((first, second) =>
+    Number(first.phase) - Number(second.phase)
+      || Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds)
+      || PARTY_SLOT_ORDER.indexOf(first.assignedTo) - PARTY_SLOT_ORDER.indexOf(second.assignedTo)
+      || String(first.formalName ?? first.ability).localeCompare(String(second.formalName ?? second.ability)));
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'mitigation-overview-dialog';
+  dialog.setAttribute('aria-labelledby', 'mitigation-overview-title');
+
+  const header = document.createElement('div');
+  header.className = 'mitigation-overview-header';
+  const heading = document.createElement('h3');
+  heading.id = 'mitigation-overview-title';
+  heading.textContent = 'All mitigations';
+  const closeButton = document.createElement('button');
+  closeButton.className = 'mitigation-overview-close';
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  closeButton.addEventListener('click', () => dialog.close());
+  header.append(heading, closeButton);
+
+  const content = document.createElement('div');
+  content.className = 'mitigation-overview-content';
+  const loading = document.createElement('p');
+  loading.className = 'mitigation-overview-status';
+  const phaseFilterLabel = phaseFilter === 'all'
+    ? 'All pulls'
+    : phaseFilter === 'clears'
+      ? 'Clears'
+      : `Phase ${phaseFilter} wipes`;
+  loading.textContent = `Loading mitigation histories for ${phaseFilterLabel.toLowerCase()}…`;
+  content.append(loading);
+  dialog.append(header, content);
+  document.body.append(dialog);
+  button.disabled = true;
+  dialog.addEventListener('close', () => {
+    button.disabled = false;
+    dialog.remove();
+  }, { once: true });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.showModal();
+
+  try {
+    // The first history request fills any missing pull-detail cache entries. Once it
+    // finishes, every remaining history can reuse those details without duplicating
+    // FFLogs event requests for the same pulls.
+    if (mitigations.length > 0) {
+      await loadMitigationResultHistory(filteredReport, mitigations[0]);
+    }
+    const histories = await Promise.all(mitigations.map(async (mitigation) => ({
+      mitigation,
+      rows: await loadMitigationResultHistory(filteredReport, mitigation),
+    })));
+    const populatedHistories = histories.filter(({ rows }) => rows.length > 0);
+
+    if (populatedHistories.length === 0) {
+      loading.textContent = `No mitigation histories have eligible ${phaseFilterLabel.toLowerCase()} data.`;
+      return;
+    }
+
+    const populatedRoles = PARTY_SLOT_ORDER.filter((role) =>
+      populatedHistories.some(({ mitigation }) => mitigation.assignedTo === role));
+    const savedRole = loadMitigationSlot();
+    let activeRole = savedRole === 'all' || populatedRoles.includes(savedRole)
+      ? savedRole
+      : populatedRoles[0];
+    const tabs = document.createElement('div');
+    tabs.className = 'mitigation-tabs mitigation-overview-tabs';
+    tabs.setAttribute('role', 'tablist');
+    tabs.setAttribute('aria-label', 'Mitigation role');
+    const strip = document.createElement('div');
+    strip.className = 'mitigation-overview-strip';
+    strip.setAttribute('role', 'tabpanel');
+
+    const createHistoryCard = ({ mitigation, rows }) => {
+      const card = document.createElement('section');
+      card.className = 'mitigation-overview-card';
+      const cardHeader = document.createElement('div');
+      cardHeader.className = 'mitigation-overview-card-header';
+      const title = document.createElement('h4');
+      const abilityName = mitigation.formalName ?? mitigation.ability;
+      title.append(createMitigationAbilityIcon(mitigation.abilityId, abilityName), abilityName);
+      const details = document.createElement('span');
+      // History rows already contain the assignment window after its phase start has
+      // been resolved for a real pull. Use that fight-relative window in the header;
+      // the configured values alone are only offsets within the phase.
+      const representativeResult = rows[0]?.result;
+      const startMs = representativeResult?.startMs
+        ?? Number(mitigation.startElapsedSeconds) * 1000;
+      const endMs = representativeResult?.endMs
+        ?? Number(mitigation.endElapsedSeconds) * 1000;
+      details.textContent = `P${mitigation.phase} · ${mitigation.assignedTo} · ${formatFightDuration(startMs)}–${formatFightDuration(endMs)}`;
+      cardHeader.append(title, details);
+      card.append(cardHeader, createMitigationHistorySummary(rows), createMitigationHistoryTable(rows));
+      return card;
+    };
+
+    const renderRole = () => {
+      tabs.querySelectorAll('.mitigation-tab').forEach((tab) => {
+        const selected = tab.dataset.mitigationSlot === activeRole;
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+      strip.replaceChildren(...populatedHistories
+        .filter(({ mitigation }) => activeRole === 'all' || mitigation.assignedTo === activeRole)
+        .map(createHistoryCard));
+    };
+
+    for (const role of ['all', ...populatedRoles]) {
+      const tab = document.createElement('button');
+      tab.className = 'mitigation-tab';
+      tab.type = 'button';
+      tab.textContent = role === 'all' ? 'All' : role;
+      tab.dataset.mitigationSlot = role;
+      tab.setAttribute('role', 'tab');
+      tab.addEventListener('click', () => {
+        activeRole = role;
+        setMitigationSlot(role);
+        renderRole();
+      });
+      tabs.append(tab);
+    }
+    const phaseFilterNotice = document.createElement('p');
+    phaseFilterNotice.className = 'mitigation-overview-filter-notice';
+    phaseFilterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
+    renderRole();
+    content.replaceChildren(tabs, phaseFilterNotice, strip);
+  } catch (error) {
+    loading.textContent = `Could not load mitigation histories: ${error.message}`;
+  }
+}
+
 function closeOpenMitigationHistoryPopups(except = null) {
   document.querySelectorAll('.mitigation-result-history-anchor.open').forEach((anchor) => {
     if (anchor === except) return;
@@ -2032,11 +2346,13 @@ function createMitigationHistorySummary(rows) {
   const eligibleRows = rows.filter((row) =>
     !['Dead', 'On cooldown'].includes(row.result.status));
   const missedCount = eligibleRows.filter((row) => row.result.status === 'Missed').length;
+  const deadCount = rows.filter((row) => row.result.status === 'Dead').length;
+  const onCooldownCount = rows.filter((row) => row.result.status === 'On cooldown').length;
 
   const totals = document.createElement('div');
   totals.className = 'mitigation-history-summary-totals';
   const reached = document.createElement('strong');
-  reached.textContent = `${eligibleRows.length} ${eligibleRows.length === 1 ? 'pull' : 'pulls'} reached mit`;
+  reached.textContent = `${rows.length} ${rows.length === 1 ? 'pull' : 'pulls'} reached mit`;
   const missed = document.createElement('span');
   const missedPercent = eligibleRows.length > 0 ? (missedCount / eligibleRows.length) * 100 : 0;
   missed.className = 'mitigation-history-missed-total';
@@ -2047,7 +2363,7 @@ function createMitigationHistorySummary(rows) {
 
   const chart = document.createElement('div');
   chart.className = 'mitigation-history-chart';
-  chart.setAttribute('aria-label', 'Mitigation cast timing density from 20 seconds before the minimum to 20 seconds after the maximum, followed by missed pulls');
+  chart.setAttribute('aria-label', 'Mitigation cast timing density from 20 seconds before the minimum to 20 seconds after the maximum, followed by missed, dead, and on cooldown pulls');
   const referenceResult = rows[0]?.result;
   const windowSeconds = referenceResult
     ? Math.max(0, (referenceResult.endMs - referenceResult.startMs) / 1000)
@@ -2078,10 +2394,14 @@ function createMitigationHistorySummary(rows) {
     return timedSamples.reduce((total, sample) =>
       total + Math.max(1 - Math.abs(seconds - sample) / kernelRadiusSeconds, 0), 0);
   });
-  const densityScale = Math.max(1, missedCount, ...densities);
+  const densityScale = Math.max(1, missedCount, deadCount, onCooldownCount, ...densities);
   const svgNamespace = 'http://www.w3.org/2000/svg';
   const graph = document.createElement('div');
   graph.className = 'mitigation-history-density-layout';
+  const formattedDensityScale = Number.isInteger(densityScale)
+    ? String(densityScale)
+    : densityScale.toFixed(1);
+  graph.dataset.scaleLabel = formattedDensityScale;
   const timingGraph = document.createElement('div');
   timingGraph.className = 'mitigation-history-density-graph';
   const svg = document.createElementNS(svgNamespace, 'svg');
@@ -2139,13 +2459,20 @@ function createMitigationHistorySummary(rows) {
   }
   timingGraph.append(svg);
 
-  const missedGraph = document.createElement('div');
-  missedGraph.className = 'mitigation-history-missed-graph';
-  missedGraph.title = `${missedCount} missed ${missedCount === 1 ? 'pull' : 'pulls'}`;
-  const missedBar = document.createElement('span');
-  missedBar.style.height = `${(missedCount / densityScale) * 100}%`;
-  missedGraph.append(missedBar);
-  graph.append(timingGraph, missedGraph);
+  graph.append(timingGraph);
+  for (const [statusClass, count, label] of [
+    ['missed', missedCount, 'Missed'],
+    ['dead', deadCount, 'Dead'],
+    ['on-cooldown', onCooldownCount, 'On cooldown'],
+  ]) {
+    const statusGraph = document.createElement('div');
+    statusGraph.className = `mitigation-history-status-graph ${statusClass}`;
+    statusGraph.title = `${count} ${label.toLowerCase()} ${count === 1 ? 'pull' : 'pulls'}`;
+    const statusBar = document.createElement('span');
+    statusBar.style.height = `${(count / densityScale) * (46 / 56) * 100}%`;
+    statusGraph.append(statusBar);
+    graph.append(statusGraph);
+  }
 
   const labels = document.createElement('div');
   labels.className = 'mitigation-history-chart-labels';
@@ -2161,10 +2488,16 @@ function createMitigationHistorySummary(rows) {
     span.style.left = `${position}%`;
     labels.append(span);
   }
-  const missedLabel = document.createElement('span');
-  missedLabel.className = 'mitigation-history-missed-label';
-  missedLabel.textContent = 'Missed';
-  labels.append(missedLabel);
+  for (const [label, className] of [
+    ['Missed', 'missed'],
+    ['Dead', 'dead'],
+    ['On CD', 'on-cooldown'],
+  ]) {
+    const statusLabel = document.createElement('span');
+    statusLabel.className = `mitigation-history-status-label ${className}`;
+    statusLabel.textContent = label;
+    labels.append(statusLabel);
+  }
   chart.append(graph, labels);
   summary.append(totals, chart);
   return summary;

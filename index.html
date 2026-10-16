@@ -66,12 +66,28 @@
                 <button id="loadReportButton" type="submit">Load report</button>
               </div>
               <div class="report-search-meta">
-                <p>Paste an FFLogs report URL or enter its report code.</p>
-                <button class="report-reload-button" id="resetCacheButton" type="button" hidden>Reset cache</button>
+                <p class="report-search-hint">Paste an FFLogs report URL or enter its report code.</p>
+                <p class="lookup-status" id="lookupStatus" role="status" hidden></p>
+                <div
+                  class="report-details-view-control"
+                  id="detailsViewControl"
+                  title="The events timeline will always be shown."
+                >
+                  <span id="detailsViewLabel">Events table: Off</span>
+                  <button
+                    class="report-details-view-button"
+                    id="detailsViewButton"
+                    type="button"
+                    aria-label="Events table: off"
+                    aria-pressed="false"
+                    title="Show events table"
+                  >
+                    <span class="report-details-view-toggle-thumb" aria-hidden="true"></span>
+                  </button>
+                </div>
               </div>
               <datalist id="recentReportCodes"></datalist>
             </form>
-            <p class="lookup-status" id="lookupStatus" role="status" hidden></p>
             <div class="lookup-result" id="lookupResult"></div>
           </section>
         </div>
