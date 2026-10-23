@@ -1,0 +1,116 @@
+[
+  {
+    "startTime": "00:47.723",
+    "endTime": "01:02.723",
+    "startElapsedSeconds": 47.723,
+    "endElapsedSeconds": 62.723,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 1
+  },
+  {
+    "startTime": "-00:01.399",
+    "endTime": "00:13.601",
+    "startElapsedSeconds": -1.399,
+    "endElapsedSeconds": 13.601,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 2
+  },
+  {
+    "startTime": "02:35.940",
+    "endTime": "02:43.654",
+    "startElapsedSeconds": 155.94,
+    "endElapsedSeconds": 163.654,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 2
+  },
+  {
+    "startTime": "01:23.074",
+    "endTime": "01:26.981",
+    "startElapsedSeconds": 83.074,
+    "endElapsedSeconds": 86.981,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 3
+  },
+  {
+    "startTime": "03:36.447",
+    "endTime": "03:36.640",
+    "startElapsedSeconds": 216.447,
+    "endElapsedSeconds": 216.64,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 3
+  },
+  {
+    "startTime": "00:03.000",
+    "endTime": "00:10.000",
+    "startElapsedSeconds": 3,
+    "endElapsedSeconds": 10,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M2",
+    "phase": 4
+  }
+]

@@ -1,0 +1,104 @@
+[
+  {
+    "startTime": "00:47.723",
+    "endTime": "01:02.723",
+    "startElapsedSeconds": 47.723,
+    "endElapsedSeconds": 62.723,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 1
+  },
+  {
+    "startTime": "00:27.013",
+    "endTime": "00:42.013",
+    "startElapsedSeconds": 27.013,
+    "endElapsedSeconds": 42.013,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 2
+  },
+  {
+    "startTime": "02:00.111",
+    "endTime": "02:15.111",
+    "startElapsedSeconds": 120.111,
+    "endElapsedSeconds": 135.111,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 2
+  },
+  {
+    "startTime": "00:47.206",
+    "endTime": "00:58.111",
+    "startElapsedSeconds": 47.206,
+    "endElapsedSeconds": 58.111,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 3
+  },
+  {
+    "startTime": "03:24.762",
+    "endTime": "03:36.728",
+    "startElapsedSeconds": 204.762,
+    "endElapsedSeconds": 216.728,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 3
+  },
+  {
+    "startTime": "01:20.101",
+    "endTime": "01:28.126",
+    "startElapsedSeconds": 80.101,
+    "endElapsedSeconds": 88.126,
+    "ability": "Addle",
+    "nickname": "Addle",
+    "role": "Magical Ranged",
+    "class": [
+      "BLM",
+      "SMN",
+      "RDM",
+      "PCT"
+    ],
+    "assignedTo": "R2",
+    "phase": 4
+  }
+]

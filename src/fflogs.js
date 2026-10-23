@@ -69,7 +69,7 @@ const REPORT_FIGHTS_QUERY = `
   }
 `;
 
-const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "damage" AND target.disposition = "friendly")';
+const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR type = "applydebuff" OR type = "refreshdebuff" OR type = "removedebuff" OR type = "applybuff" OR type = "refreshbuff" OR type = "removebuff" OR (type = "damage" AND target.disposition = "friendly")';
 const DEATH_CAUSE_BUFF_NAMES = [
   'Rampart',
   'Guardian',
@@ -83,6 +83,7 @@ const FIGHT_EVENTS_QUERY = `
     $fightIDs: [Int]!
     $filterExpression: String!
     $startTime: Float
+    $endTime: Float
   ) {
     reportData {
       report(code: $code) {
@@ -96,6 +97,7 @@ const FIGHT_EVENTS_QUERY = `
           abilities {
             gameID
             name
+            icon
           }
         }
         fights(fightIDs: $fightIDs) {
@@ -110,6 +112,7 @@ const FIGHT_EVENTS_QUERY = `
           includeResources: true
           limit: 10000
           startTime: $startTime
+          endTime: $endTime
         ) {
           data
           nextPageTimestamp
@@ -208,15 +211,22 @@ export async function fetchFightEventDetails(
     ...deathCauseBuffFilters,
   ].join(' OR ');
   let report = null;
+  let eventEndTime = null;
   const events = await collectFflogsEventPages(async (startTime) => {
     const data = await queryFflogs(FIGHT_EVENTS_QUERY, {
       code,
       fightIDs: normalizedFightIds,
       filterExpression,
       startTime,
+      endTime: eventEndTime,
     }, options);
     const page = data.reportData.report;
     if (!report) report = page;
+    if (eventEndTime === null) {
+      const fightEndTimes = (page.fights ?? []).map((fight) => Number(fight.endTime));
+      eventEndTime = Math.max(...fightEndTimes.filter(Number.isFinite));
+      if (!Number.isFinite(eventEndTime)) eventEndTime = null;
+    }
     return page.events;
   });
 

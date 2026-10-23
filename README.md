@@ -46,7 +46,9 @@ After logging in, the app looks up the current FFLogs user, loads that user's Da
 
 The event query is filtered to death events, damage down debuff applications, the
 Kefka Says cast start used to anchor Dancing Mad phases 4 and 5, and casts for every
-ability ID configured in `fight-data/dancing-mad-mitigations.json`:
+ability named in the role files under `fight-data/dancing-mad-mitigations/`. FFLogs
+IDs and icon paths for those names are defined centrally in
+`fight-data/fflogs-abilities.json`:
 
 ```text
 type = "death" OR (type = "applydebuff" AND ability.id = 1002911) OR (type = "begincast" AND ability.name = "Kefka Says")
