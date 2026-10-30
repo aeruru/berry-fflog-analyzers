@@ -87,6 +87,35 @@
         { "id": 2, "encounterID": 1085, "startTime": 700000, "endTime": 1800000, "kill": true, "bossPercentage": 0, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "eventType": "Begin Cast", "ability": "Kefka Says", "source": "Kefka", "timestamp": 1435064 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 1, "timestamp": 1770000 }, { "type": "death", "targetID": 1, "timestamp": 1778000 }] },
         { "id": 3, "encounterID": 1085, "startTime": 1900000, "endTime": 3020000, "kill": true, "bossPercentage": 0, "lastPhase": 5, "friendlyPlayers": [1, 2, 3], "events": [{ "eventType": "Begin Cast", "ability": "Kefka Says", "source": "Kefka", "timestamp": 2647926 }, { "type": "applydebuff", "abilityGameID": 1002911, "targetID": 2, "timestamp": 2990000 }, { "type": "death", "targetID": 2, "timestamp": 2998000 }] }
       ]
+    },
+    {
+      "code": "vQj4z2YaxpdwTZhr",
+      "title": "Dancing Mad",
+      "startTime": 1792543812349,
+      "endTime": 1792557274260,
+      "zone": { "id": 76, "name": "Dancing Mad" },
+      "fightDetailsFile": "./test-data/vQj4z2YaxpdwTZhr-fight-details.json",
+      "preserveTestDetails": true,
+      "fights": [
+        { "id": 1, "encounterID": 1085, "name": "Dancing Mad", "startTime": 2612852, "endTime": 3441065, "kill": false, "bossPercentage": 45.24, "fightPercentage": 39.04, "lastPhase": 4, "lastPhaseIsIntermission": false },
+        { "id": 2, "encounterID": 1085, "name": "Dancing Mad", "startTime": 3691736, "endTime": 4562923, "kill": false, "bossPercentage": 35.89, "fightPercentage": 37.17, "lastPhase": 4, "lastPhaseIsIntermission": false },
+        { "id": 3, "encounterID": 1085, "name": "Dancing Mad", "startTime": 4781301, "endTime": 5406931, "kill": false, "bossPercentage": 30.04, "fightPercentage": 56, "lastPhase": 3, "lastPhaseIsIntermission": false },
+        { "id": 4, "encounterID": 1085, "name": "Dancing Mad", "startTime": 5449261, "endTime": 5636344, "kill": false, "bossPercentage": 20.76, "fightPercentage": 92.07, "lastPhase": 1, "lastPhaseIsIntermission": false },
+        { "id": 5, "encounterID": 1085, "name": "Dancing Mad", "startTime": 5672649, "endTime": 6481600, "kill": false, "bossPercentage": 53.3, "fightPercentage": 40.66, "lastPhase": 4, "lastPhaseIsIntermission": false },
+        { "id": 6, "encounterID": 1085, "name": "Dancing Mad", "startTime": 6732813, "endTime": 6782731, "kill": false, "bossPercentage": 76.75, "fightPercentage": 97.67, "lastPhase": 1, "lastPhaseIsIntermission": false },
+        { "id": 7, "encounterID": 1085, "name": "Dancing Mad", "startTime": 6812675, "endTime": 7139195, "kill": false, "bossPercentage": 36.69, "fightPercentage": 77.33, "lastPhase": 2, "lastPhaseIsIntermission": false },
+        { "id": 8, "encounterID": 1085, "name": "Dancing Mad", "startTime": 7940257, "endTime": 7975989, "kill": false, "bossPercentage": 82.78, "fightPercentage": 98.27, "lastPhase": 1, "lastPhaseIsIntermission": false },
+        { "id": 9, "encounterID": 1085, "name": "Dancing Mad", "startTime": 7999980, "endTime": 8815877, "kill": false, "bossPercentage": 51.12, "fightPercentage": 40.22, "lastPhase": 4, "lastPhaseIsIntermission": false },
+        { "id": 10, "encounterID": 1085, "name": "Dancing Mad", "startTime": 8993300, "endTime": 9318075, "kill": false, "bossPercentage": 37.14, "fightPercentage": 77.42, "lastPhase": 2, "lastPhaseIsIntermission": false },
+        { "id": 11, "encounterID": 1085, "name": "Dancing Mad", "startTime": 9349104, "endTime": 10221695, "kill": false, "bossPercentage": 34.84, "fightPercentage": 36.96, "lastPhase": 4, "lastPhaseIsIntermission": false },
+        { "id": 12, "encounterID": 1085, "name": "Dancing Mad", "startTime": 10427154, "endTime": 11096069, "kill": false, "bossPercentage": 16.22, "fightPercentage": 53.24, "lastPhase": 3, "lastPhaseIsIntermission": false },
+        { "id": 13, "encounterID": 1085, "name": "Dancing Mad", "startTime": 11137218, "endTime": 11444960, "kill": false, "bossPercentage": 48.18, "fightPercentage": 79.63, "lastPhase": 2, "lastPhaseIsIntermission": false },
+        { "id": 14, "encounterID": 1085, "name": "Dancing Mad", "startTime": 11472285, "endTime": 11577118, "kill": false, "bossPercentage": 54.64, "fightPercentage": 95.46, "lastPhase": 1, "lastPhaseIsIntermission": false },
+        { "id": 15, "encounterID": 1085, "name": "Dancing Mad", "startTime": 11602398, "endTime": 11885489, "kill": false, "bossPercentage": 56.3, "fightPercentage": 81.26, "lastPhase": 2, "lastPhaseIsIntermission": false },
+        { "id": 16, "encounterID": 1085, "name": "Dancing Mad", "startTime": 11912816, "endTime": 11963168, "kill": false, "bossPercentage": 77.8, "fightPercentage": 97.78, "lastPhase": 1, "lastPhaseIsIntermission": false },
+        { "id": 17, "encounterID": 1085, "name": "Dancing Mad", "startTime": 12008132, "endTime": 12316898, "kill": false, "bossPercentage": 45.52, "fightPercentage": 79.1, "lastPhase": 2, "lastPhaseIsIntermission": false },
+        { "id": 18, "encounterID": 1085, "name": "Dancing Mad", "startTime": 12353493, "endTime": 13146672, "kill": false, "bossPercentage": 65.38, "fightPercentage": 43.07, "lastPhase": 4, "lastPhaseIsIntermission": false }
+      ]
     }
   ]
 }

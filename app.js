@@ -47,34 +47,26 @@ const FIGHT_DETAILS_CACHE_STORE_NAME = 'fight-details';
 const FIGHT_DETAILS_CACHE_DB_VERSION = 1;
 const MITIGATION_FILTER_MODES = new Set(['more-than-one', 'off-time', 'all']);
 const DETAILS_VIEW_MODES = new Set(['timeline', 'table']);
-const FIGHT_EVENT_TABLE_HEADINGS = ['Time', 'Event', 'Mechanic', 'Player', 'Reason'];
+const FIGHT_EVENT_TABLE_HEADINGS = ['Time', 'Event', 'Mechanic', 'Player'];
+const FIGHT_EVENT_DEBUFFS_TOOLTIP = 'Displays the debuffs on the caster and player.';
+const FIGHT_EVENT_BUFFS_TOOLTIP = 'Displays the buffs on the player.';
 const UNKNOWN_DEATH_REASON_TOOLTIP = 'No listed cause of death from FFLogs, most likely falling off';
 const DEATH_REASON_DAMAGE_LOOKBACK_MS = 2_500;
+const PLAYER_ACTION_PIXELS_PER_SECOND = 50;
+const PLAYER_ACTION_BASE_GCD_MS = 2_500;
+const PLAYER_ACTION_LOG_BATCH_MS = 45;
+const PLAYER_ACTION_CAST_ANIMATION_LOCK_MS = 100;
+const PLAYER_ACTION_GCD_COOLDOWN_GROUP = 58;
+const PLAYER_ACTION_SPELL_SPEED_JOBS = new Set([
+  'WHM', 'SCH', 'AST', 'SGE', 'BLM', 'SMN', 'RDM', 'PCT', 'BLU',
+]);
+// FFLogs encodes consumables as large pseudo-action IDs (for example, HQ
+// tinctures in the 34-million range). They are not rows in XIVAPI's Action
+// sheet, and including one makes XIVAPI reject the entire bulk request.
+const FFLOGS_PSEUDO_ACTION_ID_MIN = 10_000_000;
 const TANK_FORTY_PERCENT_BUFFS = new Set(['Guardian', 'Damnation', 'Shadowed Vigil', 'Great Nebula']);
 const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const DANCING_MAD_ENCOUNTER_NAME = 'Dancing Mad';
-const MITIGATION_ABILITY_ICON_URLS = new Map([
-  [188, './assets/ability-icons/000188_hr1.png'],
-  [3585, './assets/ability-icons/003585_hr1.png'],
-  [7560, './assets/ability-icons/000861_hr1.png'],
-  [25862, './assets/ability-icons/002649_hr1.png'],
-  [16536, './assets/ability-icons/002645_hr1.png'],
-  [3569, './assets/ability-icons/002632_hr1.png'],
-  [37011, './assets/ability-icons/002128_hr1.png'],
-  [7433, './assets/ability-icons/002639_hr1.png'],
-  [24298, './assets/ability-icons/003666_hr1.png'],
-  [7549, './assets/ability-icons/000828_hr1.png'],
-  [7405, './assets/ability-icons/002612_hr1.png'],
-  [16012, './assets/ability-icons/003469_hr1.png'],
-  [16889, './assets/ability-icons/003040_hr1.png'],
-  [24310, './assets/ability-icons/003678_hr1.png'],
-  [24311, './assets/ability-icons/003679_hr1.png'],
-  [37035, './assets/ability-icons/003690_hr1.png'],
-  [16532, './assets/ability-icons/002641_hr1.png'],
-  [16538, './assets/ability-icons/016538_hr1.png'],
-  [25868, './assets/ability-icons/025868_hr1.png'],
-  [16545, './assets/ability-icons/002850_hr1.png'],
-]);
 const UNKNOWN_MITIGATION_ABILITY_ICON_URL = './assets/ability-icons/question-mark-status.png';
 const CHECK_REPORTS_TOOLTIP = "Only checks for new reports—doesn't update existing ones. Hold Shift to reload the cache for each report.";
 const RELOAD_REPORTS_TOOLTIP = 'Reloads the cache for all reports. Warning—this consumes more account usage than only checking for new reports. (release Shift to only check for new reports)';
@@ -85,6 +77,16 @@ let currentUser = null;
 let encounterPhaseDefinitions = new Map();
 let dancingMadMechanics = [];
 let dancingMadMitigations = [];
+let mitigationAbilitiesById = new Map();
+let mitigationAbilitiesByName = new Map();
+const playerActionGameDataById = new Map();
+// Deliberately session-only: each report remembers its own viewer controls until
+// this page is reloaded, without making later visits load player-action data.
+const reportPlayerActionViewStates = new Map();
+// Pull-specific display override only. This intentionally never touches localStorage
+// because a tank swap in one pull should not change any other pull or later visit.
+const swappedTankAssignmentsByFight = new Map();
+const pinnedMitigationHistoryZoomPreviews = [];
 let mitigationCooldowns = new Map();
 let fightDetails = new Map();
 let openFightDetailKeys = new Set();
@@ -221,6 +223,7 @@ async function initialize() {
   try {
     await loadEncounterPhaseDefinitions();
     await loadDancingMadMechanics();
+    await loadMitigationAbilities();
     await loadDancingMadMitigations();
     await loadMitigationCooldowns();
     const token = await completeFflogsLogin();
@@ -354,8 +357,9 @@ async function toggleTestData() {
       }
 
       const payload = await response.json();
+      const localReports = await Promise.all(payload.reports.map(loadExternalTestFightDetails));
       const testReports = await Promise.all([
-        ...payload.reports,
+        ...localReports,
         createGroupingScenarioReport(),
         createOneEventPageReport(dancingMadMitigations),
       ].map(materializePaginatedTestReport));
@@ -383,6 +387,25 @@ async function toggleTestData() {
     elements.testDataButton.disabled = false;
     renderReports();
   }
+}
+
+async function loadExternalTestFightDetails(report) {
+  if (!report.fightDetailsFile) return report;
+  const response = await fetch(report.fightDetailsFile);
+  if (!response.ok) {
+    throw new Error(`Test fight details returned ${response.status}.`);
+  }
+  const fixture = await response.json();
+  if (fixture.reportCode !== report.code) {
+    throw new Error(`Test fight details belong to ${fixture.reportCode}, not ${report.code}.`);
+  }
+  return {
+    ...report,
+    fights: report.fights.map((fight) => ({
+      ...fight,
+      cachedDetails: fixture.fights?.[String(fight.id)] ?? null,
+    })),
+  };
 }
 
 // Report selection has two entry points—the weekly cards and free-form lookup—but both
@@ -441,9 +464,57 @@ async function searchForReport(event) {
 function renderLookupResult() {
   closeOpenMitigationHistoryPopups();
   renderDetailsViewControl();
-  elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
+  updateWithSmoothHeight(elements.lookupResult, () => {
+    elements.lookupResult.replaceChildren(...(selectedReport ? [createDetailedReportView(selectedReport)] : []));
+  });
   scheduleTimelineCollisionCheck();
   scheduleResponsiveFightPanelLayout();
+}
+
+const smoothHeightAnimations = new WeakMap();
+
+// Animate the layout itself rather than scaling its contents. This keeps text
+// and icons crisp while nearby content follows short height changes smoothly.
+function updateWithSmoothHeight(element, update) {
+  if (!element?.isConnected
+    || typeof element.animate !== 'function'
+    || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    update();
+    return;
+  }
+
+  const existing = smoothHeightAnimations.get(element);
+  const startHeight = element.getBoundingClientRect().height;
+  const originalOverflow = existing?.originalOverflow ?? element.style.overflow;
+  const originalOverflowClipMargin = existing?.originalOverflowClipMargin
+    ?? element.style.overflowClipMargin;
+  existing?.animation.cancel();
+  update();
+  const endHeight = element.getBoundingClientRect().height;
+  if (startHeight < 1 || Math.abs(endHeight - startHeight) < 1) return;
+
+  // Keep changing content contained without shearing off focus rings, borders,
+  // and card glows that intentionally paint just outside the layout box.
+  element.style.overflow = 'clip';
+  element.style.overflowClipMargin = '24px';
+  const animation = element.animate([
+    { height: `${startHeight}px` },
+    { height: `${endHeight}px` },
+  ], {
+    duration: 170,
+    easing: 'cubic-bezier(0.2, 0.75, 0.25, 1)',
+  });
+  smoothHeightAnimations.set(element, {
+    animation,
+    originalOverflow,
+    originalOverflowClipMargin,
+  });
+  animation.addEventListener('finish', () => {
+    if (smoothHeightAnimations.get(element)?.animation !== animation) return;
+    element.style.overflow = originalOverflow;
+    element.style.overflowClipMargin = originalOverflowClipMargin;
+    smoothHeightAnimations.delete(element);
+  }, { once: true });
 }
 
 function renderDetailsViewControl() {
@@ -469,12 +540,15 @@ function addTestMitigationCasts(report, actors, reportIndex) {
     .map((actor) => [normalizeJobAbbreviation(actor.subType ?? actor.job), actor]));
   const trackedAbilityIds = new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)));
 
+  if (report.preserveTestDetails) return report;
+
   if (report.preserveTestEvents) {
     return {
       ...report,
       fights: report.fights.map((fight) => ({
         ...fight,
         friendlyPlayers: fight.friendlyPlayers?.length ? fight.friendlyPlayers : friendlyPlayers,
+        events: addTestPlayerActionCasts(fight, actors, fight.events ?? []),
       })),
       testActors: actors,
     };
@@ -497,9 +571,12 @@ function addTestMitigationCasts(report, actors, reportIndex) {
     const mitigationEvents = dancingMadMitigations.flatMap((mitigation, mitigationIndex) => {
       const supportedJobs = getMitigationJobs(mitigation);
       const assignedPlayer = partySlots.get(mitigation.assignedTo);
+      const isTankSlot = ['MT', 'OT'].includes(mitigation.assignedTo);
       const sourcePlayer = supportedJobs.includes(assignedPlayer?.job)
         ? assignedPlayer
-        : supportedJobs.map((job) => playerByJob.get(job)).find(Boolean);
+        : isTankSlot
+          ? null
+          : supportedJobs.map((job) => playerByJob.get(job)).find(Boolean);
       if (!sourcePlayer) return [];
       const relativeAnchorMs = phaseStarts.get(Number(mitigation.phase));
       if (!Number.isFinite(relativeAnchorMs)) return [];
@@ -508,7 +585,7 @@ function addTestMitigationCasts(report, actors, reportIndex) {
       if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > durationMs) return [];
 
       const isP1OnlyTemperanceSample = report.code === 'TESTP1ONLY02'
-        && Number(mitigation.abilityId) === 16536
+        && mitigation.ability === 'Temperance'
         && Number(mitigation.phase) === 1
         && Number(mitigation.startElapsedSeconds) < 30;
       const scenario = (reportIndex * 3 + Number(fight.id) + mitigationIndex) % 7;
@@ -538,10 +615,70 @@ function addTestMitigationCasts(report, actors, reportIndex) {
     return {
       ...fight,
       friendlyPlayers,
-      events: [...retainedEvents, ...mitigationEvents].sort((first, second) => Number(first.timestamp) - Number(second.timestamp)),
+      events: addTestPlayerActionCasts(
+        fight,
+        actors,
+        [...retainedEvents, ...mitigationEvents],
+      ),
     };
   });
   return { ...report, fights, testActors: actors };
+}
+
+// Keep the cross-pull action viewer usable when FFLogs is unavailable. Every local
+// DMU pull gets a repeatable mixture of GCDs, abilities, and auto-attacks for every
+// test player, including deliberately close casts that exercise marker stacking.
+function addTestPlayerActionCasts(fight, actors, existingEvents) {
+  if (!isDmuPull(fight)) return existingEvents;
+  const durationMs = getFightDuration(fight);
+  // Use real Action-sheet identities so an icon never implies a different
+  // category than the seeded event. Auto-attack intentionally has no local
+  // icon and uses the normal unknown-icon fallback instead of borrowing one
+  // from an unrelated ability.
+  const actions = [
+    { abilityGameID: 16532, abilityName: 'Dia', actionCategory: 'Spell', icon: './assets/ability-icons/002641_hr1.png' },
+    { abilityGameID: 3569, abilityName: 'Asylum', actionCategory: 'Ability', icon: './assets/ability-icons/002632_hr1.png' },
+    { abilityGameID: 7549, abilityName: 'Feint', actionCategory: 'Ability', icon: './assets/ability-icons/000828_hr1.png' },
+    { abilityGameID: 7, abilityName: 'attack', actionCategory: 'Auto-attack' },
+  ];
+  const generated = actors
+    .filter((actor) => actor.type === 'Player')
+    .flatMap((actor, actorIndex) => {
+      const casts = [];
+      for (let elapsedMs = 1_000 + actorIndex * 125; elapsedMs <= durationMs; elapsedMs += 5_000) {
+        const actionIndex = (Math.floor(elapsedMs / 5_000) + actorIndex) % actions.length;
+        const action = actions[actionIndex];
+        const isCastTimeAction = action.actionCategory === 'Spell' && elapsedMs >= 2_000;
+        const isCancelled = isCastTimeAction
+          && (Math.floor(elapsedMs / 5_000) + actorIndex + Number(fight.id)) % 6 === 0;
+        if (isCastTimeAction) {
+          casts.push({
+            type: 'begincast',
+            ...action,
+            duration: 1_800,
+            sourceID: Number(actor.id),
+            timestamp: Number(fight.startTime) + elapsedMs - 1_800,
+          });
+        }
+        casts.push({
+          type: isCancelled ? 'castcancelled' : 'cast',
+          ...action,
+          sourceID: Number(actor.id),
+          timestamp: Number(fight.startTime) + elapsedMs - (isCancelled ? 550 : 0),
+        });
+        if (actionIndex === 1 && elapsedMs + 180 <= durationMs) {
+          casts.push({
+            type: 'cast',
+            ...actions[0],
+            sourceID: Number(actor.id),
+            timestamp: Number(fight.startTime) + elapsedMs + 180,
+          });
+        }
+      }
+      return casts;
+    });
+  return [...existingEvents, ...generated]
+    .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
 }
 
 async function materializePaginatedTestReport(report) {
@@ -762,7 +899,7 @@ function setMitigationFilterMode(mode) {
   document.querySelectorAll('.mitigation-tracker').forEach((tracker) => {
     const select = tracker.querySelector('.mitigation-filter-select');
     if (select) select.value = mode;
-    applyMitigationResultFilter(tracker);
+    updateWithSmoothHeight(tracker, () => applyMitigationResultFilter(tracker));
   });
 }
 
@@ -775,15 +912,17 @@ function selectMitigationSlotInTracker(tracker, requestedSlot) {
   const selectedSlot = availableSlots.includes(requestedSlot) ? requestedSlot : availableSlots[0];
   if (!selectedSlot) return;
 
-  slotSelect.value = selectedSlot;
-  for (const tab of tracker.querySelectorAll('.mitigation-tab')) {
-    const isSelected = tab.dataset.mitigationSlot === selectedSlot;
-    tab.setAttribute('aria-selected', String(isSelected));
-    tab.tabIndex = isSelected ? 0 : -1;
-  }
-  for (const panel of tracker.querySelectorAll('.mitigation-panel')) {
-    panel.hidden = panel.dataset.mitigationSlot !== selectedSlot;
-  }
+  updateWithSmoothHeight(tracker, () => {
+    slotSelect.value = selectedSlot;
+    for (const tab of tracker.querySelectorAll('.mitigation-tab')) {
+      const isSelected = tab.dataset.mitigationSlot === selectedSlot;
+      tab.setAttribute('aria-selected', String(isSelected));
+      tab.tabIndex = isSelected ? 0 : -1;
+    }
+    for (const panel of tracker.querySelectorAll('.mitigation-panel')) {
+      panel.hidden = panel.dataset.mitigationSlot !== selectedSlot;
+    }
+  });
 }
 
 function setMitigationSlot(slot) {
@@ -801,15 +940,68 @@ function setMitigationSlot(slot) {
 
 // Load and normalize the encounter plan once so every pull evaluates the same
 // chronologically ordered mitigation assignments.
-async function loadDancingMadMitigations() {
-  const response = await fetch('./fight-data/dancing-mad-mitigations.json');
+async function loadMitigationAbilities() {
+  const response = await fetch('./fight-data/fflogs-abilities.json');
   if (!response.ok) {
-    throw new Error(`Dancing Mad mitigation data returned ${response.status}.`);
+    throw new Error(`FFLogs ability data returned ${response.status}.`);
   }
 
-  const mitigations = await response.json();
+  const definitions = await response.json();
+  const abilities = Object.entries(definitions).map(([id, definition]) => ({
+    id: Number(id),
+    name: String(definition?.name ?? ''),
+    icon: String(definition?.icon ?? ''),
+  })).filter((ability) => Number.isFinite(ability.id) && ability.name);
+  const duplicateNames = abilities.map((ability) => ability.name)
+    .filter((name, index, names) => names.indexOf(name) !== index);
+  if (duplicateNames.length > 0) {
+    throw new Error(`FFLogs ability data contains duplicate names: ${[...new Set(duplicateNames)].join(', ')}.`);
+  }
+  mitigationAbilitiesById = new Map(abilities.map((ability) => [ability.id, ability]));
+  mitigationAbilitiesByName = new Map(abilities.map((ability) => [ability.name, ability]));
+}
+
+async function loadDancingMadMitigations() {
+  const directory = './fight-data/dancing-mad-mitigations';
+  const manifestResponse = await fetch(`${directory}/index.json`);
+  if (!manifestResponse.ok) {
+    throw new Error(`Dancing Mad mitigation manifest returned ${manifestResponse.status}.`);
+  }
+  const manifest = await manifestResponse.json();
+  if (!Array.isArray(manifest.roles) || manifest.roles.length === 0) {
+    throw new Error('Dancing Mad mitigation manifest does not list any role files.');
+  }
+  const roleFiles = await Promise.all(manifest.roles.map(async (assignedTo) => {
+    if (!PARTY_SLOT_ORDER.includes(assignedTo)) {
+      throw new Error(`Dancing Mad mitigation manifest lists unknown role ${assignedTo}.`);
+    }
+    const fileName = `${assignedTo}.json`;
+    const response = await fetch(`${directory}/${fileName}`);
+    if (!response.ok) {
+      throw new Error(`Dancing Mad mitigation file ${fileName} returned ${response.status}.`);
+    }
+    const entries = await response.json();
+    if (!Array.isArray(entries)) {
+      throw new Error(`Dancing Mad mitigation file ${fileName} is not an array.`);
+    }
+    if (entries.some((entry) => entry.assignedTo !== assignedTo)) {
+      throw new Error(`Dancing Mad mitigation file ${fileName} contains another role's assignment.`);
+    }
+    return entries;
+  }));
+  const mitigations = roleFiles.flat();
+  const unknownAbilities = [...new Set(mitigations
+    .map((entry) => entry.ability)
+    .filter((abilityName) => !mitigationAbilitiesByName.has(abilityName)))];
+  if (unknownAbilities.length > 0) {
+    throw new Error(`Dancing Mad mitigation data references unknown abilities: ${unknownAbilities.join(', ')}.`);
+  }
   dancingMadMitigations = mitigations
-    .filter((entry) => Number.isFinite(Number(entry.abilityId))
+    .map((entry) => ({
+      ...entry,
+      abilityId: mitigationAbilitiesByName.get(entry.ability)?.id,
+    }))
+    .filter((entry) => Number.isFinite(entry.abilityId)
       && Number.isFinite(Number(entry.phase))
       && Number.isFinite(Number(entry.startElapsedSeconds))
       && Number.isFinite(Number(entry.endElapsedSeconds))
@@ -829,9 +1021,14 @@ async function loadMitigationCooldowns() {
     throw new Error(`Mitigation cooldown data returned ${response.status}.`);
   }
   const cooldowns = await response.json();
+  const unknownAbilities = Object.keys(cooldowns)
+    .filter((abilityName) => !mitigationAbilitiesByName.has(abilityName));
+  if (unknownAbilities.length > 0) {
+    throw new Error(`Mitigation cooldown data references unknown abilities: ${unknownAbilities.join(', ')}.`);
+  }
   mitigationCooldowns = new Map(Object.entries(cooldowns)
-    .map(([abilityId, seconds]) => [Number(abilityId), Number(seconds)])
-    .filter(([abilityId, seconds]) => Number.isFinite(abilityId) && Number.isFinite(seconds) && seconds >= 0));
+    .map(([abilityName, seconds]) => [abilityName, Number(seconds)])
+    .filter(([, seconds]) => Number.isFinite(seconds) && seconds >= 0));
 }
 
 // Convert timeline percentages into pixel hitboxes, then place touching deaths and
@@ -1012,6 +1209,14 @@ function createDetailedReportView(report) {
     showReportMitigationHistoryOverview(report, mitigationOverviewButton);
   });
 
+  const playerActionsButton = document.createElement('button');
+  playerActionsButton.className = 'report-player-actions-button';
+  playerActionsButton.type = 'button';
+  playerActionsButton.textContent = 'View player actions';
+  playerActionsButton.addEventListener('click', () => {
+    showReportPlayerActionsOverview(report, playerActionsButton);
+  });
+
   const fightCount = document.createElement('span');
   fightCount.className = 'fight-count-pill';
   fightCount.textContent = formatFilteredFightCount(visibleFights.length, selectedReportPhase);
@@ -1023,7 +1228,7 @@ function createDetailedReportView(report) {
       ? 'No clears'
       : `No P${selectedReportPhase} wipes`;
   pullSummary.append(fightCount, createBestPullBadge(highlightedFight, emptyPullLabel));
-  actions.append(reloadButton, phaseFilter, mitigationOverviewButton, pullSummary);
+  actions.append(reloadButton, phaseFilter, mitigationOverviewButton, playerActionsButton, pullSummary);
   summary.append(info, actions);
 
   const fightList = document.createElement('div');
@@ -1380,6 +1585,9 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   const actorNames = new Map(actors.map((actor) => [Number(actor.id), actor.name]));
   const abilityNames = new Map((rawDetails?.masterData?.abilities ?? [])
     .map((ability) => [Number(ability.gameID), ability.name]));
+  const abilityIcons = new Map((rawDetails?.masterData?.abilities ?? [])
+    .filter((ability) => ability.icon)
+    .map((ability) => [Number(ability.gameID), ability.icon]));
   const rawFight = (rawDetails?.fights ?? []).find((fight) => Number(fight.id) === Number(fightId))
     ?? rawDetails?.fights?.[0];
   const friendlyPlayers = rawFight?.friendlyPlayers ?? [];
@@ -1401,6 +1609,10 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   const partyMembers = normalizePartyMembers(actors, friendlyIds);
   const tankSlots = inferTankPlanSlots(rawEvents, partyMembers);
   const mitigationCasts = extractTrackedMitigationCasts(rawEvents, actorNames);
+  const actionCasts = extractPlayerActionCasts(
+    rawEvents, actorNames, friendlyIds, abilityNames, abilityIcons,
+  );
+  const playerSpeedAttributes = extractPlayerSpeedAttributes(rawEvents, actorNames);
   const lifeEvents = extractPlayerLifeEvents(rawEvents);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, rawFight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1408,20 +1620,29 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
     actorNames,
     friendlyIds,
     abilityNames,
+    abilityIcons,
     partyMembers,
     rawFight,
     phaseStarts,
   );
-  return { status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots, mitigationCasts, lifeEvents };
+  return {
+    status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
+    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
+  };
 }
 
 function normalizeEmbeddedFightDetails(report, fight) {
+  if (fight.cachedDetails?.status === 'ready') return fight.cachedDetails;
   const actorNames = new Map((report.testActors ?? []).map((actor) => [Number(actor.id), actor.name]));
   const friendlyIds = new Set((fight.friendlyPlayers ?? []).map(Number));
   const phaseReferenceEvents = extractPhaseReferenceEvents(fight.events ?? [], actorNames);
   const partyMembers = normalizePartyMembers(report.testActors ?? [], friendlyIds);
   const tankSlots = inferTankPlanSlots(fight.events ?? [], partyMembers);
   const mitigationCasts = extractTrackedMitigationCasts(fight.events ?? [], actorNames);
+  const actionCasts = extractPlayerActionCasts(
+    fight.events ?? [], actorNames, friendlyIds, new Map(), new Map(),
+  );
+  const playerSpeedAttributes = extractPlayerSpeedAttributes(fight.events ?? [], actorNames);
   const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, fight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1429,11 +1650,15 @@ function normalizeEmbeddedFightDetails(report, fight) {
     actorNames,
     friendlyIds,
     new Map(),
+    new Map(),
     partyMembers,
     fight,
     phaseStarts,
   );
-  return { status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots, mitigationCasts, lifeEvents };
+  return {
+    status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
+    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
+  };
 }
 
 // Resolve display events and their causes together. DDs and deaths use the latest
@@ -1443,6 +1668,7 @@ function extractDisplayedFightEvents(
   actorNames,
   friendlyIds,
   abilityNames = new Map(),
+  abilityIcons = new Map(),
   partyMembers = [],
   fight = null,
   phaseStarts = new Map(),
@@ -1450,16 +1676,119 @@ function extractDisplayedFightEvents(
   const events = rawEvents
     .filter(isDisplayedFightEvent)
     .filter((event) => friendlyIds.size === 0 || friendlyIds.has(Number(event.targetID)))
-    .map((event) => ({
-      kind: event.type === 'death' ? 'Death' : 'Damage down',
-      player: actorNames.get(Number(event.targetID)) ?? event.targetName ?? `Actor ${event.targetID}`,
-      reason: event.type === 'death'
-        ? getDeathReason(rawEvents, event, abilityNames, partyMembers, fight, phaseStarts)
-        : findLastDamageAbility(rawEvents, event, abilityNames)
-          ?? getEventAbilityName(event, abilityNames),
-      timestamp: Number(event.timestamp),
-    }));
+    .map((event) => {
+      const causalDamage = findLastDamageEvent(
+        rawEvents,
+        event,
+        event.type === 'death' ? DEATH_REASON_DAMAGE_LOOKBACK_MS : Number.POSITIVE_INFINITY,
+      );
+      const snapshotEvent = causalDamage ?? event;
+      const snapshotTimestamp = Number(snapshotEvent.timestamp);
+      const snapshotEventIndex = rawEvents.indexOf(snapshotEvent);
+      const casterId = Number(
+        causalDamage?.sourceID
+          ?? causalDamage?.sourceId
+          ?? event.sourceID
+          ?? event.sourceId,
+      );
+      const playerId = Number(event.targetID ?? event.targetId);
+      return {
+        kind: event.type === 'death' ? 'Death' : 'Damage down',
+        player: actorNames.get(playerId) ?? event.targetName ?? `Actor ${event.targetID}`,
+        casterDebuffs: getActiveDebuffs(
+          rawEvents,
+          casterId,
+          snapshotTimestamp,
+          snapshotEventIndex,
+          abilityNames,
+          abilityIcons,
+        ),
+        playerDebuffs: getActiveDebuffs(
+          rawEvents,
+          playerId,
+          snapshotTimestamp,
+          snapshotEventIndex,
+          abilityNames,
+          abilityIcons,
+        ),
+        playerBuffs: getActiveStatuses(
+          rawEvents,
+          playerId,
+          snapshotTimestamp,
+          snapshotEventIndex,
+          abilityNames,
+          abilityIcons,
+          'buff',
+        ),
+        reason: event.type === 'death'
+          ? getDeathReason(rawEvents, event, abilityNames, partyMembers, fight, phaseStarts)
+          : getEventAbilityName(causalDamage, abilityNames)
+            ?? getEventAbilityName(event, abilityNames),
+        timestamp: Number(event.timestamp),
+      };
+    });
   return events;
+}
+
+// Reconstruct one actor's debuffs at an event timestamp from the ordered status
+// transitions FFLogs returns. This works for both enemy casters and party members.
+function getActiveDebuffs(rawEvents, targetId, timestamp, eventIndex, abilityNames, abilityIcons) {
+  return getActiveStatuses(
+    rawEvents,
+    targetId,
+    timestamp,
+    eventIndex,
+    abilityNames,
+    abilityIcons,
+    'debuff',
+  );
+}
+
+// Rebuild either buff or debuff state from FFLogs lifecycle events. Keeping this
+// in one path ensures the three status columns use the same timestamp semantics.
+function getActiveStatuses(
+  rawEvents,
+  targetId,
+  timestamp,
+  eventIndex,
+  abilityNames,
+  abilityIcons,
+  statusKind,
+) {
+  if (!Number.isFinite(targetId) || !Number.isFinite(timestamp)) return [];
+  const activeStatuses = new Map();
+  const eventTypes = statusKind === 'buff'
+    ? new Set(['applybuff', 'refreshbuff', 'removebuff'])
+    : new Set(['applydebuff', 'refreshdebuff', 'removedebuff']);
+  // Death cleanup and the killing hit often share a timestamp. Cutting the raw
+  // stream at the hit preserves same-millisecond applications before the hit,
+  // while excluding removal events that FFLogs lists immediately after it.
+  const eventsBeforeSnapshot = eventIndex >= 0
+    ? rawEvents.slice(0, eventIndex)
+    : rawEvents.filter((event) => Number(event.timestamp) < timestamp);
+  const statusEvents = eventsBeforeSnapshot
+    .filter((event) => Number(event.targetID ?? event.targetId) === targetId)
+    .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+  for (const event of statusEvents) {
+    const type = String(event.type ?? event.eventType ?? '').replace(/\s+/g, '').toLowerCase();
+    if (!eventTypes.has(type)) continue;
+    const abilityId = Number(event.abilityGameID ?? event.abilityGameId ?? event.ability?.gameID);
+    const name = getEventAbilityName(event, abilityNames);
+    if (!name) continue;
+    const key = Number.isFinite(abilityId) ? abilityId : name;
+    if (type === `remove${statusKind}`) {
+      activeStatuses.delete(key);
+    } else {
+      activeStatuses.set(key, {
+        name,
+        icon: getFflogsAbilityIconUrl(
+          event.ability?.icon ?? abilityIcons.get(abilityId),
+          name,
+        ),
+      });
+    }
+  }
+  return [...activeStatuses.values()].sort((first, second) => first.name.localeCompare(second.name));
 }
 
 // FFLogs includes a dedicated killing blow on ordinary deaths. Environmental
@@ -1606,7 +1935,7 @@ function discardChangedFightDetails(report) {
 function getFightDetailsCacheVersion() {
   const abilityIds = dancingMadMitigations.map((entry) => Number(entry.abilityId)).sort((a, b) => a - b);
   const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-  return JSON.stringify({ version: 9, abilityIds, phaseReferences });
+  return JSON.stringify({ version: 26, abilityIds, phaseReferences });
 }
 
 function getPersistentFightDetailsKey(reportCode, fight) {
@@ -1734,6 +2063,61 @@ function extractTrackedMitigationCasts(events, actorNames) {
     .filter((event) => Number.isFinite(event.timestamp));
 }
 
+function extractPlayerSpeedAttributes(events, actorNames) {
+  return events
+    .filter((event) => normalizeEventType(event.eventType ?? event.type) === 'combatantinfo')
+    .map((event) => ({
+      sourceId: Number(event.sourceID ?? event.sourceId),
+      source: event.source ?? event.sourceName
+        ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
+      skillSpeed: Number(event.skillSpeed),
+      spellSpeed: Number(event.spellSpeed),
+    }))
+    .filter((entry) => entry.source
+      && (Number.isFinite(entry.skillSpeed) || Number.isFinite(entry.spellSpeed)));
+}
+
+// Keep every friendly cast for the cross-pull player-action viewer. These rows
+// are display-ready so opening the dialog never reinterprets FFLogs data.
+function extractPlayerActionCasts(
+  events,
+  actorNames,
+  friendlyIds,
+  abilityNames,
+  abilityIcons,
+) {
+  const supportedEventTypes = new Set([
+    'begincast', 'cast', 'cancelcast', 'castcancel', 'cancelledcast', 'castcancelled',
+  ]);
+  return events
+    .filter((event) => supportedEventTypes.has(normalizeEventType(event.eventType ?? event.type)))
+    .filter((event) => friendlyIds.size === 0
+      || friendlyIds.has(Number(event.sourceID ?? event.sourceId)))
+    .map((event) => {
+      const abilityId = Number(event.abilityId ?? event.abilityGameID ?? event.ability?.id);
+      const ability = getEventAbilityName(event, abilityNames)
+        ?? mitigationAbilitiesById.get(abilityId)?.name
+        ?? `Ability ${Number.isFinite(abilityId) ? abilityId : '?'}`;
+      return {
+        eventType: normalizeEventType(event.eventType ?? event.type),
+        abilityId,
+        ability,
+        icon: getFflogsAbilityIconUrl(
+          event.ability?.icon ?? event.icon ?? abilityIcons.get(abilityId),
+          ability,
+        ),
+        category: event.actionCategory,
+        sourceId: Number(event.sourceID ?? event.sourceId),
+        source: event.source ?? event.sourceName
+          ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
+        timestamp: Number(event.timestamp),
+        duration: Number(event.duration),
+      };
+    })
+    .filter((event) => event.source && Number.isFinite(event.timestamp))
+    .sort((first, second) => first.timestamp - second.timestamp);
+}
+
 function isDisplayedFightEvent(event) {
   return event.type === 'death'
     || (event.type === 'applydebuff' && Number(event.abilityGameID) === 1002911);
@@ -1810,10 +2194,39 @@ function createMitigationTrackerView(report, fight, state) {
   const tracker = document.createElement('section');
   tracker.className = 'mitigation-tracker';
 
+  const fightKey = `${report.code}:${fight.id}`;
+  const tanksSwapped = swappedTankAssignmentsByFight.get(fightKey) === true;
+  const trackerState = tanksSwapped
+    ? {
+      ...state,
+      tankSlots: {
+        ...state.tankSlots,
+        MT: state.tankSlots?.OT ?? null,
+        OT: state.tankSlots?.MT ?? null,
+      },
+    }
+    : state;
+
   const header = document.createElement('div');
   header.className = 'mitigation-header';
+  const titleControls = document.createElement('div');
+  titleControls.className = 'mitigation-title-controls';
   const heading = document.createElement('h4');
   heading.textContent = 'Mitigation tracker';
+  const swapTanksLabel = document.createElement('label');
+  swapTanksLabel.className = 'mitigation-swap-tanks-control';
+  swapTanksLabel.title = 'This assignment will not be saved to local storage and will not apply to other pulls.';
+  const swapTanksCheckbox = document.createElement('input');
+  swapTanksCheckbox.type = 'checkbox';
+  swapTanksCheckbox.checked = tanksSwapped;
+  swapTanksCheckbox.disabled = !state.tankSlots?.MT || !state.tankSlots?.OT;
+  swapTanksCheckbox.addEventListener('change', () => {
+    if (swapTanksCheckbox.checked) swappedTankAssignmentsByFight.set(fightKey, true);
+    else swappedTankAssignmentsByFight.delete(fightKey);
+    renderLookupResult();
+  });
+  swapTanksLabel.append(swapTanksCheckbox, 'Swap MT/OT');
+  titleControls.append(heading, swapTanksLabel);
   const filterSelect = document.createElement('select');
   filterSelect.className = 'mitigation-filter-select';
   filterSelect.setAttribute('aria-label', 'Mitigation result filter');
@@ -1829,7 +2242,7 @@ function createMitigationTrackerView(report, fight, state) {
   }
   filterSelect.value = mitigationFilterMode;
   filterSelect.addEventListener('change', () => setMitigationFilterMode(filterSelect.value));
-  header.append(heading, filterSelect);
+  header.append(titleControls, filterSelect);
   tracker.append(header);
 
   const assignedSlots = PARTY_SLOT_ORDER.filter((slot) =>
@@ -1871,7 +2284,7 @@ function createMitigationTrackerView(report, fight, state) {
   allOption.textContent = 'All';
   slotSelect.append(allOption);
 
-  const allPanel = createAllMitigationsPanel(report, fight, state, assignedSlots);
+  const allPanel = createAllMitigationsPanel(report, fight, trackerState, assignedSlots);
   allPanel.id = `mitigation-panel-${fight.id}-all`;
   allPanel.setAttribute('role', 'tabpanel');
   allPanel.setAttribute('aria-labelledby', allTab.id);
@@ -1881,7 +2294,7 @@ function createMitigationTrackerView(report, fight, state) {
 
   assignedSlots.forEach((slot) => {
     const tab = document.createElement('button');
-    const panel = createPartySlotMitigationPanel(report, fight, state, slot);
+    const panel = createPartySlotMitigationPanel(report, fight, trackerState, slot);
     const selected = slot === initialSlot;
     const tabId = `mitigation-tab-${fight.id}-${slot}`;
     const panelId = `mitigation-panel-${fight.id}-${slot}`;
@@ -2033,7 +2446,7 @@ function createMitigationResultsTable(report, results, { showRole = false } = {}
     const windowCell = document.createElement('td');
     windowCell.textContent = `${formatFightDuration(result.startMs)}–${formatFightDuration(result.endMs)}`;
     const abilityCell = document.createElement('td');
-    const abilityName = result.mitigation.formalName || result.mitigation.ability;
+    const abilityName = result.mitigation.nickname || result.mitigation.ability;
     const abilityContent = document.createElement('span');
     abilityContent.className = 'mitigation-ability-content';
     const abilityLabel = document.createElement('span');
@@ -2103,7 +2516,7 @@ function createMitigationResultHistory(report, result) {
   mitigationHistoryPopupId += 1;
   tooltip.id = `mitigation-result-history-${mitigationHistoryPopupId}`;
   tooltip.setAttribute('role', 'dialog');
-  tooltip.setAttribute('aria-label', `${result.mitigation.formalName ?? result.mitigation.ability} result history`);
+  tooltip.setAttribute('aria-label', `${result.mitigation.nickname ?? result.mitigation.ability} result history`);
   tooltip.textContent = 'Loading pull history…';
   anchor.setAttribute('aria-controls', tooltip.id);
   anchor.historyTooltip = tooltip;
@@ -2164,7 +2577,7 @@ async function showReportMitigationHistoryOverview(report, button) {
     Number(first.phase) - Number(second.phase)
       || Number(first.startElapsedSeconds) - Number(second.startElapsedSeconds)
       || PARTY_SLOT_ORDER.indexOf(first.assignedTo) - PARTY_SLOT_ORDER.indexOf(second.assignedTo)
-      || String(first.formalName ?? first.ability).localeCompare(String(second.formalName ?? second.ability)));
+      || String(first.nickname ?? first.ability).localeCompare(String(second.nickname ?? second.ability)));
 
   const dialog = document.createElement('dialog');
   dialog.className = 'mitigation-overview-dialog';
@@ -2206,29 +2619,12 @@ async function showReportMitigationHistoryOverview(report, button) {
   dialog.showModal();
 
   try {
-    // The first history request fills any missing pull-detail cache entries. Once it
-    // finishes, every remaining history can reuse those details without duplicating
-    // FFLogs event requests for the same pulls.
-    if (mitigations.length > 0) {
-      await loadMitigationResultHistory(filteredReport, mitigations[0]);
-    }
-    const histories = await Promise.all(mitigations.map(async (mitigation) => ({
-      mitigation,
-      rows: await loadMitigationResultHistory(filteredReport, mitigation),
-    })));
-    const populatedHistories = histories.filter(({ rows }) => rows.length > 0);
-
-    if (populatedHistories.length === 0) {
-      loading.textContent = `No mitigation histories have eligible ${phaseFilterLabel.toLowerCase()} data.`;
-      return;
-    }
-
-    const populatedRoles = PARTY_SLOT_ORDER.filter((role) =>
-      populatedHistories.some(({ mitigation }) => mitigation.assignedTo === role));
+    const configuredRoles = PARTY_SLOT_ORDER.filter((role) =>
+      mitigations.some((mitigation) => mitigation.assignedTo === role));
     const savedRole = loadMitigationSlot();
-    let activeRole = savedRole === 'all' || populatedRoles.includes(savedRole)
+    let activeRole = savedRole === 'all' || configuredRoles.includes(savedRole)
       ? savedRole
-      : populatedRoles[0];
+      : configuredRoles[0] ?? 'all';
     const tabs = document.createElement('div');
     tabs.className = 'mitigation-tabs mitigation-overview-tabs';
     tabs.setAttribute('role', 'tablist');
@@ -2236,14 +2632,18 @@ async function showReportMitigationHistoryOverview(report, button) {
     const strip = document.createElement('div');
     strip.className = 'mitigation-overview-strip';
     strip.setAttribute('role', 'tabpanel');
+    const loadedHistories = [];
+    const mitigationOrder = new Map(mitigations.map((mitigation, index) =>
+      [mitigationIdentity(mitigation), index]));
 
     const createHistoryCard = ({ mitigation, rows }) => {
       const card = document.createElement('section');
       card.className = 'mitigation-overview-card';
+      card.dataset.mitigationOrder = String(mitigationOrder.get(mitigationIdentity(mitigation)));
       const cardHeader = document.createElement('div');
       cardHeader.className = 'mitigation-overview-card-header';
       const title = document.createElement('h4');
-      const abilityName = mitigation.formalName ?? mitigation.ability;
+      const abilityName = mitigation.nickname ?? mitigation.ability;
       title.append(createMitigationAbilityIcon(mitigation.abilityId, abilityName), abilityName);
       const details = document.createElement('span');
       // History rows already contain the assignment window after its phase start has
@@ -2266,12 +2666,21 @@ async function showReportMitigationHistoryOverview(report, button) {
         tab.setAttribute('aria-selected', String(selected));
         tab.tabIndex = selected ? 0 : -1;
       });
-      strip.replaceChildren(...populatedHistories
+      strip.replaceChildren(...loadedHistories
         .filter(({ mitigation }) => activeRole === 'all' || mitigation.assignedTo === activeRole)
+        .sort((first, second) => mitigationOrder.get(mitigationIdentity(first.mitigation))
+          - mitigationOrder.get(mitigationIdentity(second.mitigation)))
         .map(createHistoryCard));
     };
+    const insertHistoryCard = (history) => {
+      const card = createHistoryCard(history);
+      const order = Number(card.dataset.mitigationOrder);
+      const nextCard = [...strip.children]
+        .find((candidate) => Number(candidate.dataset.mitigationOrder) > order);
+      strip.insertBefore(card, nextCard ?? null);
+    };
 
-    for (const role of ['all', ...populatedRoles]) {
+    for (const role of ['all', ...configuredRoles]) {
       const tab = document.createElement('button');
       tab.className = 'mitigation-tab';
       tab.type = 'button';
@@ -2287,12 +2696,819 @@ async function showReportMitigationHistoryOverview(report, button) {
     }
     const phaseFilterNotice = document.createElement('p');
     phaseFilterNotice.className = 'mitigation-overview-filter-notice';
-    phaseFilterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
+    phaseFilterNotice.textContent = `Loading ${phaseFilterLabel.toLowerCase()} mitigations…`;
     renderRole();
-    content.replaceChildren(tabs, phaseFilterNotice, strip);
+    updateWithSmoothHeight(content, () => {
+      content.replaceChildren(tabs, phaseFilterNotice, strip);
+    });
+
+    // Load the selected tab first, then fill the other tabs. Each group retains the
+    // phase-aware chronological order established above, while yielding between
+    // cards keeps the dialog responsive and lets completed graphs paint immediately.
+    const preferredMitigations = activeRole === 'all'
+      ? mitigations
+      : mitigations.filter((mitigation) => mitigation.assignedTo === activeRole);
+    const remainingMitigations = activeRole === 'all'
+      ? []
+      : mitigations.filter((mitigation) => mitigation.assignedTo !== activeRole);
+    const loadOrder = [...preferredMitigations, ...remainingMitigations];
+    for (const mitigation of loadOrder) {
+      if (!dialog.isConnected) return;
+      const rows = await loadMitigationResultHistory(filteredReport, mitigation);
+      if (rows.length > 0) {
+        const history = { mitigation, rows };
+        loadedHistories.push(history);
+        if (activeRole === 'all' || mitigation.assignedTo === activeRole) {
+          insertHistoryCard(history);
+        }
+      }
+      phaseFilterNotice.textContent = `Loaded ${loadedHistories.length} of ${mitigations.length} mitigations · ${phaseFilterLabel}`;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+
+    if (loadedHistories.length === 0) {
+      phaseFilterNotice.textContent = `No mitigation histories have eligible ${phaseFilterLabel.toLowerCase()} data.`;
+      return;
+    }
+    phaseFilterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
   } catch (error) {
     loading.textContent = `Could not load mitigation histories: ${error.message}`;
   }
+}
+
+async function showReportPlayerActionsOverview(report, button) {
+  const phaseFilter = selectedReportPhase;
+  const fights = filterReportFightsByOutcome(report.fights ?? [], phaseFilter)
+    .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID);
+  const phaseFilterLabel = phaseFilter === 'all'
+    ? 'All pulls'
+    : phaseFilter === 'clears'
+      ? 'Clears'
+      : `Phase ${phaseFilter} wipes`;
+
+  const dialog = document.createElement('dialog');
+  dialog.className = 'mitigation-overview-dialog player-actions-dialog';
+  dialog.setAttribute('aria-labelledby', 'player-actions-title');
+  const header = document.createElement('div');
+  header.className = 'mitigation-overview-header';
+  const heading = document.createElement('h3');
+  heading.id = 'player-actions-title';
+  heading.textContent = 'Player actions by pull';
+  const closeButton = document.createElement('button');
+  closeButton.className = 'mitigation-overview-close';
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  closeButton.addEventListener('click', () => dialog.close());
+  header.append(heading, closeButton);
+
+  const content = document.createElement('div');
+  content.className = 'mitigation-overview-content player-actions-content';
+  const loading = document.createElement('p');
+  loading.className = 'mitigation-overview-status';
+  loading.textContent = `Loading player actions for ${phaseFilterLabel.toLowerCase()}…`;
+  content.append(loading);
+  dialog.append(header, content);
+  document.body.append(dialog);
+  button.disabled = true;
+  dialog.addEventListener('close', () => {
+    button.disabled = false;
+    dialog.remove();
+  }, { once: true });
+  dialog.addEventListener('click', (event) => {
+    if (event.target === dialog) dialog.close();
+  });
+  dialog.showModal();
+
+  try {
+    await ensureReportFightDetails(report, fights);
+    await loadPlayerActionCategories(fights.flatMap((fight) =>
+      fightDetails.get(`${report.code}:${fight.id}`)?.actionCasts ?? []));
+    const playerNames = [...new Set(fights.flatMap((fight) => {
+      const state = fightDetails.get(`${report.code}:${fight.id}`);
+      return (state?.partyMembers ?? [])
+        .filter((member) => member.role)
+        .map((member) => member.name);
+    }))].sort((first, second) => first.localeCompare(second));
+    if (playerNames.length === 0) {
+      loading.textContent = `No player action data is available for ${phaseFilterLabel.toLowerCase()}.`;
+      return;
+    }
+
+    const controls = document.createElement('form');
+    controls.className = 'player-actions-controls';
+    const savedView = reportPlayerActionViewStates.get(report.code);
+    const playerLabel = createPlayerActionsControlLabel('Player');
+    const playerSelect = document.createElement('select');
+    playerSelect.setAttribute('aria-label', 'Player');
+    playerSelect.append(new Option('Choose player…', ''));
+    for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
+    playerSelect.value = playerNames.includes(savedView?.player) ? savedView.player : '';
+    playerLabel.append(playerSelect);
+    const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
+    const phaseAnchorSelect = document.createElement('select');
+    phaseAnchorSelect.setAttribute('aria-label', 'Phase anchor');
+    phaseAnchorSelect.append(new Option('Fight start', 'fight'));
+    for (let phase = 1; phase <= 5; phase += 1) {
+      phaseAnchorSelect.append(new Option(`Phase ${phase}`, String(phase)));
+    }
+    phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(savedView?.phaseAnchor)
+      ? savedView.phaseAnchor
+      : 'fight';
+    phaseAnchorLabel.append(phaseAnchorSelect);
+    const getMaximumAnchoredDuration = () => Math.max(0, ...fights.map((fight) => {
+      const state = fightDetails.get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchorSelect.value);
+      return Number.isFinite(anchorMs) ? getFightDuration(fight) - anchorMs : 0;
+    }));
+    const maximumFightDurationMs = getMaximumAnchoredDuration();
+    const startControl = createPlayerActionsTimeControl(
+      'Start',
+      savedView?.start ?? '',
+      maximumFightDurationMs,
+      0,
+    );
+    const { label: startLabel, textInput: startInput, rangeInput: startRange } = startControl;
+    const endControl = createPlayerActionsTimeControl(
+      'End',
+      savedView?.end ?? '',
+      maximumFightDurationMs,
+      maximumFightDurationMs,
+    );
+    const { label: endLabel, textInput: endInput, rangeInput: endRange } = endControl;
+    const updateButton = document.createElement('button');
+    updateButton.type = 'submit';
+    updateButton.textContent = 'Update';
+    const filterNotice = document.createElement('span');
+    filterNotice.className = 'player-actions-filter-notice';
+    filterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
+    controls.append(playerLabel, phaseAnchorLabel, startLabel, endLabel, updateButton, filterNotice);
+
+    const status = document.createElement('p');
+    status.className = 'player-actions-status';
+    const rows = document.createElement('div');
+    rows.className = 'player-actions-rows';
+    const saveView = () => {
+      reportPlayerActionViewStates.set(report.code, {
+        player: playerSelect.value,
+        phaseAnchor: phaseAnchorSelect.value,
+        start: startInput.value,
+        end: endInput.value,
+      });
+    };
+    const render = ({ showErrors = true } = {}) => {
+      const startMs = parseFightTimeInput(startInput.value);
+      const endMs = parseFightTimeInput(endInput.value);
+      const maximumAnchoredDurationMs = getMaximumAnchoredDuration();
+      startRange.max = String(maximumAnchoredDurationMs);
+      endRange.max = String(maximumAnchoredDurationMs);
+      if (!playerSelect.value
+        || !Number.isFinite(startMs)
+        || !Number.isFinite(endMs)
+        || startMs < 0
+        || endMs > maximumAnchoredDurationMs
+        || endMs <= startMs) {
+        status.className = `player-actions-status${showErrors ? ' error' : ''}`;
+        status.textContent = showErrors
+          ? `Choose a player and enter a valid range from 0:00–${formatFightDuration(maximumAnchoredDurationMs)}; the end must be after the start.`
+          : 'Choose a player, start time, and end time.';
+        updateWithSmoothHeight(rows, () => rows.replaceChildren());
+        return;
+      }
+      status.className = 'player-actions-status';
+      startInput.value = formatFightDuration(startMs);
+      endInput.value = formatFightDuration(endMs);
+      syncPlayerActionsTimeControl(startControl, startMs);
+      syncPlayerActionsTimeControl(endControl, endMs);
+      saveView();
+      const trackWidth = Math.max(
+        1,
+        ((endMs - startMs) / 1000) * PLAYER_ACTION_PIXELS_PER_SECOND,
+      );
+      rows.style.setProperty('--player-actions-track-width', `${trackWidth}px`);
+      const eligibleFights = fights
+        .map((fight) => ({
+          fight,
+          anchorMs: getPlayerActionsPhaseAnchorMs(
+            fight,
+            fightDetails.get(`${report.code}:${fight.id}`),
+            phaseAnchorSelect.value,
+          ),
+        }))
+        .filter(({ fight, anchorMs }) => Number.isFinite(anchorMs)
+          && getFightDuration(fight) >= anchorMs + endMs)
+        .sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+      const anchorName = phaseAnchorSelect.value === 'fight'
+        ? 'fight start'
+        : `P${phaseAnchorSelect.value}`;
+      const gcd = estimatePlayerGcd(fights, report, playerSelect.value);
+      status.textContent = `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
+      updateWithSmoothHeight(rows, () => {
+        rows.replaceChildren(...eligibleFights.map(({ fight, anchorMs }) => createPlayerActionsPullRow(
+          report,
+          fight,
+          playerSelect.value,
+          anchorMs + startMs,
+          anchorMs + endMs,
+          anchorMs,
+        )));
+        if (eligibleFights.length === 0) {
+          const empty = document.createElement('p');
+          empty.className = 'player-actions-empty';
+          empty.textContent = 'No pulls reached the end of this time range.';
+          rows.append(empty);
+        }
+      });
+    };
+    controls.addEventListener('submit', (event) => {
+      event.preventDefault();
+      render();
+    });
+    playerSelect.addEventListener('change', saveView);
+    phaseAnchorSelect.addEventListener('change', () => {
+      saveView();
+      render({ showErrors: false });
+    });
+    for (const control of [startControl, endControl]) {
+      control.textInput.addEventListener('input', () => {
+        const milliseconds = parseFightTimeInput(control.textInput.value);
+        if (Number.isFinite(milliseconds)
+          && milliseconds >= 0
+          && milliseconds <= maximumFightDurationMs) {
+          syncPlayerActionsTimeControl(control, milliseconds, { preserveText: true });
+        } else {
+          control.rangeInput.classList.add('unset');
+        }
+        saveView();
+      });
+      control.rangeInput.addEventListener('input', () => {
+        syncPlayerActionsTimeControl(control, Number(control.rangeInput.value));
+        saveView();
+      });
+    }
+    updateWithSmoothHeight(content, () => {
+      content.replaceChildren(controls, status, rows);
+    });
+    render({ showErrors: false });
+  } catch (error) {
+    loading.textContent = `Could not load player actions: ${error.message}`;
+  }
+}
+
+function createPlayerActionsControlLabel(text) {
+  const label = document.createElement('label');
+  const caption = document.createElement('span');
+  caption.textContent = text;
+  label.append(caption);
+  return label;
+}
+
+function createPlayerActionsTimeControl(labelText, value, maximumMs, unsetValueMs) {
+  const label = createPlayerActionsControlLabel(labelText);
+  label.classList.add('player-actions-time-control');
+  const fields = document.createElement('span');
+  fields.className = 'player-actions-time-fields';
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.inputMode = 'numeric';
+  textInput.value = value;
+  textInput.placeholder = 'm:ss';
+  textInput.setAttribute('aria-label', `Time range ${labelText.toLowerCase()} text`);
+  const rangeInput = document.createElement('input');
+  rangeInput.type = 'range';
+  rangeInput.min = '0';
+  rangeInput.max = String(maximumMs);
+  rangeInput.step = '100';
+  rangeInput.value = String(unsetValueMs);
+  rangeInput.className = 'unset';
+  rangeInput.setAttribute('aria-label', `Time range ${labelText.toLowerCase()} slider`);
+  fields.append(textInput, rangeInput);
+  label.append(fields);
+  const control = { label, textInput, rangeInput };
+  const milliseconds = parseFightTimeInput(value);
+  if (Number.isFinite(milliseconds) && milliseconds >= 0 && milliseconds <= maximumMs) {
+    syncPlayerActionsTimeControl(control, milliseconds, { preserveText: true });
+  }
+  return control;
+}
+
+function syncPlayerActionsTimeControl(control, milliseconds, { preserveText = false } = {}) {
+  control.rangeInput.value = String(milliseconds);
+  control.rangeInput.classList.remove('unset');
+  if (!preserveText) control.textInput.value = formatFightDuration(milliseconds);
+}
+
+function getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor) {
+  if (phaseAnchor === 'fight') return 0;
+  const phase = Number(phaseAnchor);
+  if (!Number.isInteger(phase) || phase < 1 || phase > 5) return Number.NaN;
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  return phaseStarts.get(phase) ?? Number.NaN;
+}
+
+// FFLogs' ability `type` is a damage/healing school, not FFXIV's action
+// category. Resolve the real category in bulk so healing abilities such as
+// Asylum are not mistaken for spells. A failed lookup falls back gracefully.
+async function loadPlayerActionCategories(actions) {
+  const unknownIds = [...new Set(actions
+    .map((action) => Number(action.abilityId))
+    .filter((abilityId) => Number.isFinite(abilityId)
+      && !playerActionGameDataById.has(abilityId)))];
+  const pseudoActionIds = unknownIds.filter((abilityId) => abilityId >= FFLOGS_PSEUDO_ACTION_ID_MIN);
+  for (const abilityId of pseudoActionIds) {
+    playerActionGameDataById.set(abilityId, { category: 'Ability' });
+  }
+  const xivapiActionIds = unknownIds.filter((abilityId) => abilityId < FFLOGS_PSEUDO_ACTION_ID_MIN);
+  const chunks = [];
+  for (let index = 0; index < xivapiActionIds.length; index += 100) {
+    chunks.push(xivapiActionIds.slice(index, index + 100));
+  }
+  await Promise.all(chunks.map(async (abilityIds) => {
+    try {
+      const params = new URLSearchParams({
+        rows: abilityIds.join(','),
+        fields: 'ActionCategory.Name,Recast100ms,CooldownGroup,AdditionalCooldownGroup',
+      });
+      const response = await fetch(`https://v2.xivapi.com/api/sheet/Action?${params}`);
+      if (!response.ok) {
+        console.warn('XIVAPI action-category request returned an error.', {
+          abilityIds,
+          status: response.status,
+          statusText: response.statusText,
+          responseBody: await response.text(),
+        });
+        return;
+      }
+      const payload = await response.json();
+      for (const row of payload.rows ?? []) {
+        const abilityId = Number(row.row_id);
+        const category = row.fields?.ActionCategory?.fields?.Name;
+        if (Number.isFinite(abilityId) && category) {
+          playerActionGameDataById.set(abilityId, {
+            category,
+            recastMs: Number(row.fields?.Recast100ms) * 100,
+            cooldownGroup: Number(row.fields?.CooldownGroup),
+            additionalCooldownGroup: Number(row.fields?.AdditionalCooldownGroup),
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to load XIVAPI action categories.', {
+        abilityIds,
+        error,
+      });
+      // The timeline remains usable with FFLogs' best-effort fallback styling.
+    }
+  }));
+}
+
+function getPlayerActionGameData(action) {
+  const loaded = playerActionGameDataById.get(Number(action.abilityId));
+  if (loaded) return loaded;
+  const category = action.category;
+  const normalizedCategory = String(category ?? '').trim().toLowerCase();
+  const isFallbackGcd = normalizedCategory === 'spell' || normalizedCategory === 'weaponskill';
+  return {
+    category,
+    recastMs: isFallbackGcd ? PLAYER_ACTION_BASE_GCD_MS : Number.NaN,
+    cooldownGroup: isFallbackGcd ? PLAYER_ACTION_GCD_COOLDOWN_GROUP : Number.NaN,
+    additionalCooldownGroup: Number.NaN,
+  };
+}
+
+function getPlayerActionMarkerCategory(action) {
+  // FFLogs/test fixtures may include an actionCategory hint, but the game-data
+  // category is authoritative whenever XIVAPI returned one for this action ID.
+  const category = getPlayerActionGameData(action).category;
+  const normalizedCategory = String(category ?? '').trim().toLowerCase();
+  if (normalizedCategory === 'auto-attack') return 'auto-attack';
+  if (normalizedCategory === 'spell' || normalizedCategory === 'weaponskill') {
+    return 'spell-or-weaponskill';
+  }
+  // FFLogs represents consumables with pseudo-action IDs that have no Action
+  // sheet row. Non-GCD/unresolved actions therefore share the Ability treatment;
+  // only authoritative Spell and Weaponskill categories use the baseline style.
+  return 'ability';
+}
+
+function isPlayerActionGcd(action) {
+  const data = getPlayerActionGameData(action);
+  return data.cooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP
+    || data.additionalCooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP;
+}
+
+function getPlayerActionSpeedType(action) {
+  const category = String(getPlayerActionGameData(action).category ?? '').trim().toLowerCase();
+  if (category === 'spell') return 'spellSpeed';
+  if (category === 'weaponskill') return 'skillSpeed';
+  return null;
+}
+
+function getPlayerPrimarySpeedType(fights, report, playerName) {
+  for (const fight of fights) {
+    const member = fightDetails.get(`${report.code}:${fight.id}`)?.partyMembers
+      ?.find((entry) => entry.name === playerName);
+    if (member?.job) {
+      return PLAYER_ACTION_SPELL_SPEED_JOBS.has(member.job) ? 'spellSpeed' : 'skillSpeed';
+    }
+  }
+  return null;
+}
+
+function getSpeedStatAdjustedDuration(speedStat, baseDurationMs = PLAYER_ACTION_BASE_GCD_MS) {
+  if (!Number.isFinite(speedStat)) return Number.NaN;
+  const attributeMultiplier = 1_000 - Math.floor(130 * (speedStat - 420) / 2_780);
+  const adjustedDuration = Math.floor(attributeMultiplier * baseDurationMs / 1_000);
+  return Math.floor(adjustedDuration / 10) * 10;
+}
+
+function getProvidedPlayerGcd(fights, report, playerName, speedType) {
+  if (!speedType) return null;
+  for (const fight of fights) {
+    const state = fightDetails.get(`${report.code}:${fight.id}`);
+    const attributes = state?.playerSpeedAttributes
+      ?.find((entry) => entry.source === playerName);
+    const speedStat = Number(attributes?.[speedType]);
+    if (!Number.isFinite(speedStat)) continue;
+    const durationMs = getSpeedStatAdjustedDuration(speedStat);
+    if (Number.isFinite(durationMs)) return { durationMs, estimated: false, sampleCount: 0 };
+  }
+  return null;
+}
+
+function collectCompletedPlayerGcds(actions, speedType) {
+  const { visibleActions, castSpans } = pairPlayerActionEvents(actions);
+  const completedSpansByEnd = new Map(castSpans
+    .filter((span) => span.outcome === 'completed')
+    .map((span) => [span.end, span]));
+  return visibleActions
+    .filter((action) => action.eventType === 'cast'
+      && isPlayerActionGcd(action)
+      && (!speedType || getPlayerActionSpeedType(action) === speedType))
+    .map((action) => {
+      const span = completedSpansByEnd.get(action);
+      return {
+        action,
+        timestamp: Number(span?.begin.timestamp ?? action.timestamp),
+        castDurationMs: Number(span?.begin.duration),
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.timestamp))
+    .sort((first, second) => first.timestamp - second.timestamp);
+}
+
+function estimateGcdFromIntervals(intervals) {
+  if (intervals.length < 3) return null;
+  const batches = new Map();
+  for (const interval of intervals) {
+    const batch = Math.floor(interval / PLAYER_ACTION_LOG_BATCH_MS);
+    batches.set(batch, (batches.get(batch) ?? 0) + 1);
+  }
+  const modeBatch = [...batches.entries()]
+    .reduce((best, entry) => entry[1] > best[1] ? entry : best)[0];
+  let weightedTotal = 0;
+  let sampleCount = 0;
+  for (let batch = modeBatch - 2; batch <= modeBatch + 2; batch += 1) {
+    const count = batches.get(batch) ?? 0;
+    if (count === 0) continue;
+    const midpoint = batch * PLAYER_ACTION_LOG_BATCH_MS + (PLAYER_ACTION_LOG_BATCH_MS - 1) / 2;
+    weightedTotal += midpoint * count;
+    sampleCount += count;
+  }
+  if (sampleCount < 3) return null;
+  return {
+    durationMs: Math.round((weightedTotal / sampleCount) / 10) * 10,
+    estimated: true,
+    sampleCount,
+  };
+}
+
+function estimatePlayerGcd(fights, report, playerName) {
+  const speedType = getPlayerPrimarySpeedType(fights, report, playerName);
+  const provided = getProvidedPlayerGcd(fights, report, playerName, speedType);
+  if (provided) return provided;
+  const intervals = [];
+  for (const fight of fights) {
+    const actions = (fightDetails.get(`${report.code}:${fight.id}`)?.actionCasts ?? [])
+      .filter((action) => action.source === playerName);
+    const gcds = collectCompletedPlayerGcds(actions, speedType);
+    for (let index = 1; index < gcds.length; index += 1) {
+      const previous = gcds[index - 1];
+      const current = gcds[index];
+      const gameData = getPlayerActionGameData(previous.action);
+      const baseRecastMs = Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
+        ? gameData.recastMs
+        : PLAYER_ACTION_BASE_GCD_MS;
+      const hasLongCast = Number.isFinite(previous.castDurationMs)
+        && previous.castDurationMs >= PLAYER_ACTION_BASE_GCD_MS;
+      const intervalBaseMs = hasLongCast ? previous.castDurationMs : baseRecastMs;
+      const rawIntervalMs = current.timestamp - previous.timestamp
+        - (hasLongCast ? PLAYER_ACTION_CAST_ANIMATION_LOCK_MS : 0);
+      const normalizedIntervalMs = rawIntervalMs / (intervalBaseMs / PLAYER_ACTION_BASE_GCD_MS);
+      if (normalizedIntervalMs >= 1_000 && normalizedIntervalMs <= 4_000) {
+        intervals.push(normalizedIntervalMs);
+      }
+    }
+  }
+  return estimateGcdFromIntervals(intervals);
+}
+
+function formatPlayerGcdSummary(gcd) {
+  if (!gcd) return 'GCD unavailable';
+  const duration = `${(gcd.durationMs / 1_000).toFixed(2)}s`;
+  return gcd.estimated
+    ? `Estimated GCD: ${duration} (${gcd.sampleCount} samples)`
+    : `GCD: ${duration} (FFLogs stats)`;
+}
+
+function parseFightTimeInput(value) {
+  const match = String(value ?? '').trim().match(/^(?:(\d+):)?(\d+(?:\.\d+)?)$/);
+  if (!match) return Number.NaN;
+  const seconds = Number(match[2]);
+  if (match[1] === undefined) return Number.isFinite(seconds) ? seconds * 1000 : Number.NaN;
+  const minutes = Number(match[1]);
+  if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || seconds >= 60) return Number.NaN;
+  return (minutes * 60 + seconds) * 1000;
+}
+
+const PLAYER_ACTION_CANCEL_EVENT_TYPES = new Set([
+  'cancelcast', 'castcancel', 'cancelledcast', 'castcancelled',
+]);
+
+function pairPlayerActionEvents(actions) {
+  const visibleActions = [];
+  const castSpans = [];
+  const pendingBySource = new Map();
+  const sortedActions = [...actions].sort((first, second) => first.timestamp - second.timestamp);
+
+  const finishPending = (pending, endAction, outcome) => {
+    if (!pending) return;
+    castSpans.push({ begin: pending, end: endAction, outcome });
+    const sourceKey = String(pending.sourceId ?? pending.source);
+    const sourcePending = pendingBySource.get(sourceKey) ?? [];
+    sourcePending.splice(sourcePending.indexOf(pending), 1);
+  };
+
+  for (const action of sortedActions) {
+    const eventType = action.eventType ?? 'cast';
+    const sourceKey = String(action.sourceId ?? action.source);
+    const sourcePending = pendingBySource.get(sourceKey) ?? [];
+    if (eventType === 'begincast') {
+      for (const pending of [...sourcePending]) finishPending(pending, action, 'cancelled');
+      sourcePending.push(action);
+      pendingBySource.set(sourceKey, sourcePending);
+      visibleActions.push(action);
+      continue;
+    }
+
+    const matchingPending = [...sourcePending].reverse().find((pending) => (
+      Number(pending.abilityId) === Number(action.abilityId)
+    ));
+    if (PLAYER_ACTION_CANCEL_EVENT_TYPES.has(eventType)) {
+      finishPending(matchingPending, action, 'cancelled');
+      continue;
+    }
+
+    if (eventType === 'cast') {
+      for (const pending of [...sourcePending]) {
+        finishPending(pending, action, pending === matchingPending ? 'completed' : 'cancelled');
+      }
+      visibleActions.push(action);
+    }
+  }
+
+  return { visibleActions, castSpans };
+}
+
+function appendPlayerActionMechanicTicks(track, fight, state, startMs, endMs, displayAnchorMs = 0) {
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  let visibleMechanicIndex = 0;
+  for (const mechanic of dancingMadMechanics) {
+    const elapsedMs = getEncounterRelativeTimestamp(mechanic, phaseStarts);
+    if (elapsedMs < startMs || elapsedMs > endMs) continue;
+    const position = ((elapsedMs - startMs) / (endMs - startMs)) * 100;
+    const tick = document.createElement('span');
+    tick.className = 'player-actions-mechanic-tick';
+    tick.classList.add(`label-tier-${visibleMechanicIndex % 2}`);
+    tick.style.left = `${position}%`;
+    tick.title = `${mechanic.mechanic} · ${formatPreciseFightDuration(elapsedMs - displayAnchorMs)}`;
+    tick.setAttribute('aria-label', tick.title);
+    const label = document.createElement('span');
+    label.className = 'player-actions-mechanic-label';
+    label.textContent = mechanic.mechanic;
+    tick.append(label);
+    track.append(tick);
+    visibleMechanicIndex += 1;
+  }
+}
+
+function createPlayerActionsPullRow(
+  report,
+  fight,
+  playerName,
+  startMs,
+  endMs,
+  displayAnchorMs = 0,
+) {
+  const row = document.createElement('section');
+  row.className = 'player-actions-row';
+  const identity = document.createElement('div');
+  identity.className = 'player-actions-pull';
+  const pullNumber = document.createElement('strong');
+  pullNumber.textContent = `Pull ${fight.id}`;
+  identity.append(pullNumber, createBestPullBadge(fight));
+
+  const trackWrap = document.createElement('div');
+  trackWrap.className = 'player-actions-track-wrap';
+  const track = document.createElement('div');
+  track.className = 'player-actions-track';
+  const state = fightDetails.get(`${report.code}:${fight.id}`);
+  const playerActions = (state?.actionCasts ?? []).filter((cast) => cast.source === playerName);
+  const { visibleActions, castSpans } = pairPlayerActionEvents(playerActions);
+  appendPlayerActionMechanicTicks(track, fight, state, startMs, endMs, displayAnchorMs);
+  for (const castSpan of castSpans) {
+    const beginMs = castSpan.begin.timestamp - Number(fight.startTime);
+    const endCastMs = castSpan.end.timestamp - Number(fight.startTime);
+    const clippedStart = Math.max(startMs, beginMs);
+    const clippedEnd = Math.min(endMs, endCastMs);
+    if (clippedEnd <= clippedStart) continue;
+    const span = document.createElement('span');
+    span.className = `player-actions-cast-span ${castSpan.outcome}`;
+    span.classList.add(getPlayerActionMarkerCategory(castSpan.begin));
+    span.style.left = `${((clippedStart - startMs) / (endMs - startMs)) * 100}%`;
+    span.style.width = `${((clippedEnd - clippedStart) / (endMs - startMs)) * 100}%`;
+    span.title = `${castSpan.begin.ability} · ${castSpan.outcome} · ${formatPreciseFightDuration(beginMs - displayAnchorMs)}–${formatPreciseFightDuration(endCastMs - displayAnchorMs)}`;
+    track.append(span);
+  }
+  const actions = visibleActions.filter((cast) => {
+    const elapsedMs = cast.timestamp - Number(fight.startTime);
+    return elapsedMs >= startMs && elapsedMs <= endMs;
+  });
+  const stackCounts = new Map();
+  for (const action of actions) {
+    const elapsedMs = action.timestamp - Number(fight.startTime);
+    const position = ((elapsedMs - startMs) / (endMs - startMs)) * 100;
+    const bucket = Math.round(elapsedMs / 250);
+    const stackIndex = stackCounts.get(bucket) ?? 0;
+    stackCounts.set(bucket, stackIndex + 1);
+    const marker = document.createElement('span');
+    marker.className = 'player-actions-marker';
+    marker.classList.add(getPlayerActionMarkerCategory(action));
+    if (action.eventType === 'begincast') marker.classList.add('begin-cast');
+    marker.style.left = `${position}%`;
+    marker.style.setProperty('--action-offset', `${stackIndex * -5}px`);
+    marker.style.zIndex = String(3 + stackIndex);
+    const timingDescription = getTrackedPlayerActionTimingDescription(
+      report,
+      fight,
+      state,
+      playerName,
+      action,
+      elapsedMs,
+    );
+    marker.append(createPlayerActionIcon(action, elapsedMs - displayAnchorMs, timingDescription));
+    track.append(marker);
+  }
+  const hoverLine = document.createElement('span');
+  hoverLine.className = 'player-actions-hover-line';
+  const hoverTime = document.createElement('span');
+  hoverTime.className = 'player-actions-hover-time';
+  track.addEventListener('mousemove', (event) => {
+    const rectangle = track.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rectangle.left) / rectangle.width));
+    const hoveredMs = startMs + ratio * (endMs - startMs);
+    hoverLine.style.left = `${ratio * 100}%`;
+    hoverTime.style.left = `${ratio * 100}%`;
+    hoverTime.textContent = formatPreciseFightDuration(hoveredMs - displayAnchorMs);
+    track.classList.add('show-hover-time');
+  });
+  track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
+  track.append(hoverLine, hoverTime);
+  trackWrap.append(track);
+  row.append(identity, trackWrap);
+  return row;
+}
+
+function getTrackedPlayerActionTimingDescription(report, fight, state, playerName, action, elapsedMs) {
+  if (action.eventType === 'begincast') return null;
+  const abilityMitigations = dancingMadMitigations.filter((mitigation) => (
+    Number(mitigation.abilityId) === Number(action.abilityId)
+  ));
+  if (abilityMitigations.length === 0) return null;
+
+  const fightKey = `${report.code}:${fight.id}`;
+  const tanksSwapped = swappedTankAssignmentsByFight.get(fightKey) === true;
+  const tankSlots = tanksSwapped
+    ? { MT: state?.tankSlots?.OT ?? null, OT: state?.tankSlots?.MT ?? null }
+    : state?.tankSlots;
+  const partySlots = mapPartyMembersToPlanSlots(state?.partyMembers ?? [], tankSlots);
+  const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
+  const assignedSlots = PARTY_SLOT_ORDER.filter((slot) => partySlots.get(slot)?.name === playerName);
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  const windows = abilityMitigations
+    .filter((mitigation) => assignedSlots.includes(mitigation.assignedTo))
+    .filter((mitigation) => {
+      const requiredJobs = getMitigationJobs(mitigation);
+      return requiredJobs.length === 0 || requiredJobs.includes(player?.job);
+    })
+    .map((mitigation) => {
+      const phaseStartMs = phaseStarts.get(Number(mitigation.phase));
+      if (!Number.isFinite(phaseStartMs)) return null;
+      return {
+        mitigation,
+        startMs: phaseStartMs + Number(mitigation.startElapsedSeconds) * 1000,
+        endMs: phaseStartMs + Number(mitigation.endElapsedSeconds) * 1000,
+      };
+    })
+    .filter(Boolean)
+    .filter((window) => window.startMs <= getFightDuration(fight))
+    .sort((first, second) => first.startMs - second.startMs || first.endMs - second.endMs);
+
+  const associatedWindow = windows
+    .map((window, index) => ({
+      ...window,
+      index,
+      distanceMs: mitigationCastDistance(elapsedMs, window.startMs, window.endMs),
+    }))
+    .filter((window) => window.distanceMs <= MITIGATION_GRACE_SECONDS * 1000)
+    .sort((first, second) => first.distanceMs - second.distanceMs)[0] ?? null;
+
+  let timingText = "Didn't enter into any window";
+  if (associatedWindow && elapsedMs < associatedWindow.startMs) {
+    timingText = `${formatTooltipSeconds((associatedWindow.startMs - elapsedMs) / 1000)} early`;
+  } else if (associatedWindow && elapsedMs > associatedWindow.endMs) {
+    timingText = `${formatTooltipSeconds((elapsedMs - associatedWindow.endMs) / 1000)} late`;
+  } else if (associatedWindow) {
+    timingText = `On time (${formatTooltipSeconds((elapsedMs - associatedWindow.startMs) / 1000)} through ${formatTooltipSecondAdjective((associatedWindow.endMs - associatedWindow.startMs) / 1000)} window)`;
+  }
+
+  if (action.ability === 'Dia') return timingText;
+  const cooldownSeconds = mitigationCooldowns.get(action.ability);
+  if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return timingText;
+  const nextWindow = associatedWindow
+    ? windows[associatedWindow.index + 1]
+    : windows.find((window) => window.startMs > elapsedMs);
+  if (!nextWindow) return timingText;
+
+  const cooldownEndMs = elapsedMs + cooldownSeconds * 1000;
+  if (cooldownEndMs <= nextWindow.startMs) return timingText;
+  if (cooldownEndMs <= nextWindow.endMs) {
+    return `${timingText}. Caused the mit to be on cooldown until ${formatTooltipSeconds((nextWindow.endMs - cooldownEndMs) / 1000)} before the next window's maximum.`;
+  }
+  return `${timingText}. Caused the mit to be on cooldown until ${formatTooltipSeconds((cooldownEndMs - nextWindow.endMs) / 1000)} after the next window's maximum.`;
+}
+
+function formatTooltipSeconds(seconds) {
+  const rounded = Math.round(Math.max(0, Number(seconds) || 0) * 10) / 10;
+  const value = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  return `${value} ${rounded === 1 ? 'second' : 'seconds'}`;
+}
+
+function formatTooltipSecondAdjective(seconds) {
+  const rounded = Math.round(Math.max(0, Number(seconds) || 0) * 10) / 10;
+  const value = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  return `${value}-second`;
+}
+
+function createPlayerActionIcon(action, elapsedMs, timingDescription = null) {
+  const eventSuffix = action.eventType === 'begincast' ? ' · begins' : '';
+  const timingSuffix = timingDescription ? ` · ${timingDescription}` : '';
+  const label = `${action.ability}${eventSuffix} · ${formatPreciseFightDuration(elapsedMs)}${timingSuffix}`;
+  if (!action.icon || isUnknownFflogsStatus(action.ability, action.icon)) {
+    const fallback = createFightEventStatusFallback(label);
+    fallback.classList.add('player-action-icon');
+    return fallback;
+  }
+  const icon = document.createElement('img');
+  icon.className = 'player-action-icon';
+  icon.src = action.icon;
+  icon.alt = '';
+  icon.loading = 'lazy';
+  attachFightEventStatusTooltip(icon, label);
+  icon.addEventListener('error', () => {
+    const fallback = createFightEventStatusFallback(label);
+    fallback.classList.add('player-action-icon');
+    icon.replaceWith(fallback);
+  }, { once: true });
+  return icon;
+}
+
+function formatPreciseFightDuration(milliseconds) {
+  const totalSeconds = Math.max(0, Number(milliseconds) || 0) / 1000;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+  return `${minutes}:${seconds.toFixed(1).padStart(4, '0')}`;
 }
 
 function closeOpenMitigationHistoryPopups(except = null) {
@@ -2458,6 +3674,21 @@ function createMitigationHistorySummary(rows) {
     svg.append(tick);
   }
   timingGraph.append(svg);
+  attachMitigationHistoryZoom(timingGraph, {
+    timedRows,
+    timedSamples,
+    densityScale,
+    domainStart: -20,
+    domainEnd: windowSeconds + 20,
+    minimumElapsedSeconds: Number(referenceResult?.startMs ?? 0) / 1000,
+    windowSeconds,
+    gradientStops,
+    statusCounts: [
+      ['missed', missedCount, 'Missed'],
+      ['dead', deadCount, 'Dead'],
+      ['on-cooldown', onCooldownCount, 'On CD'],
+    ],
+  });
 
   graph.append(timingGraph);
   for (const [statusClass, count, label] of [
@@ -2501,6 +3732,256 @@ function createMitigationHistorySummary(rows) {
   chart.append(graph, labels);
   summary.append(totals, chart);
   return summary;
+}
+
+// Hovering the compact density plot opens a pixel-sampled 20-second slice. A click
+// pins it so the expanded graph can report an exact timestamp under its own cursor.
+function attachMitigationHistoryZoom(timingGraph, chartData) {
+  let preview = null;
+  let pinned = false;
+  const closePreview = () => {
+    const closingPreview = preview;
+    preview = null;
+    pinned = false;
+    if (!closingPreview) return;
+    const pinnedIndex = pinnedMitigationHistoryZoomPreviews
+      .findIndex((entry) => entry.preview === closingPreview);
+    if (pinnedIndex >= 0) pinnedMitigationHistoryZoomPreviews.splice(pinnedIndex, 1);
+    closingPreview.classList.remove('pinned');
+    closingPreview.classList.add('closing');
+    window.setTimeout(() => closingPreview.remove(), 120);
+  };
+  const hide = () => {
+    if (!pinned) closePreview();
+  };
+  const show = (event) => {
+    if (pinned) return;
+    const bounds = timingGraph.getBoundingClientRect();
+    if (bounds.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const hoveredSeconds = chartData.domainStart
+      + ratio * (chartData.domainEnd - chartData.domainStart);
+    const halfRange = 10;
+    const zoomStart = Math.max(
+      chartData.domainStart,
+      Math.min(hoveredSeconds - halfRange, chartData.domainEnd - halfRange * 2),
+    );
+    const zoomEnd = Math.min(chartData.domainEnd, zoomStart + halfRange * 2);
+    preview?.remove();
+    preview = createMitigationHistoryZoomPreview(chartData, zoomStart, zoomEnd);
+    // A modal dialog lives in the browser's top layer, above every normal body
+    // child regardless of z-index. Keep its graph preview inside that dialog so
+    // the preview remains above the mitigation overview that owns it.
+    const popupHost = timingGraph.closest('dialog') ?? document.body;
+    popupHost.append(preview);
+    preview.querySelector('.mitigation-history-zoom-close')?.addEventListener('click', (closeEvent) => {
+      closeEvent.stopPropagation();
+      closePreview();
+    });
+    positionMitigationHistoryZoomPreview(preview, event);
+  };
+  const togglePinned = (event) => {
+    event.stopPropagation();
+    if (!preview) show(event);
+    if (pinned) {
+      closePreview();
+      return;
+    }
+    pinned = true;
+    preview?.classList.add('pinned');
+    pinnedMitigationHistoryZoomPreviews.push({ preview, close: closePreview });
+    for (let index = pinnedMitigationHistoryZoomPreviews.length - 1; index >= 0; index -= 1) {
+      if (!pinnedMitigationHistoryZoomPreviews[index].preview.isConnected) {
+        pinnedMitigationHistoryZoomPreviews.splice(index, 1);
+      }
+    }
+    while (pinnedMitigationHistoryZoomPreviews.length > 2) {
+      pinnedMitigationHistoryZoomPreviews[0].close();
+    }
+  };
+  timingGraph.classList.add('zoomable');
+  timingGraph.addEventListener('mouseenter', show);
+  timingGraph.addEventListener('mousemove', show);
+  timingGraph.addEventListener('mouseleave', hide);
+  timingGraph.addEventListener('click', togglePinned);
+}
+
+function createMitigationHistoryZoomPreview(data, zoomStart, zoomEnd) {
+  const graphWidth = 564;
+  const graphBaseline = 88;
+  const graphTop = 10;
+  const preview = document.createElement('div');
+  preview.className = 'mitigation-history-zoom-preview';
+  preview.setAttribute('role', 'tooltip');
+  const previewHeader = document.createElement('div');
+  previewHeader.className = 'mitigation-history-zoom-header';
+  const heading = document.createElement('strong');
+  heading.textContent = `${formatFightDuration((data.minimumElapsedSeconds + zoomStart) * 1000)}–${formatFightDuration((data.minimumElapsedSeconds + zoomEnd) * 1000)}`;
+  const closeButton = document.createElement('button');
+  closeButton.className = 'mitigation-history-zoom-close';
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  closeButton.setAttribute('aria-label', 'Close mitigation graph');
+  previewHeader.append(heading, closeButton);
+  const layout = document.createElement('div');
+  layout.className = 'mitigation-history-zoom-layout';
+  const timing = document.createElement('div');
+  timing.className = 'mitigation-history-zoom-timing';
+
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNamespace, 'svg');
+  svg.classList.add('mitigation-history-zoom-svg');
+  svg.setAttribute('viewBox', `0 0 ${graphWidth} 124`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+  const defs = document.createElementNS(svgNamespace, 'defs');
+  const gradient = document.createElementNS(svgNamespace, 'linearGradient');
+  const gradientId = `mitigation-zoom-gradient-${mitigationHistoryPopupId++}`;
+  gradient.id = gradientId;
+  gradient.setAttribute('x1', '0%');
+  gradient.setAttribute('x2', '100%');
+  for (const [seconds, color] of data.gradientStops) {
+    const stop = document.createElementNS(svgNamespace, 'stop');
+    const position = ((seconds - zoomStart) / (zoomEnd - zoomStart)) * 100;
+    stop.setAttribute('offset', `${Math.max(0, Math.min(100, position))}%`);
+    stop.setAttribute('stop-color', color);
+    gradient.append(stop);
+  }
+  defs.append(gradient);
+  svg.append(defs);
+
+  // One density sample per rendered graph pixel, including both endpoints.
+  const sampleCount = graphWidth + 1;
+  const densities = Array.from({ length: sampleCount }, (_, index) => {
+    const seconds = zoomStart + (index / (sampleCount - 1)) * (zoomEnd - zoomStart);
+    return data.timedSamples.reduce((total, sample) =>
+      total + Math.max(1 - Math.abs(seconds - sample) / 0.5, 0), 0);
+  });
+  const points = densities.map((density, index) => [
+    index,
+    graphBaseline - (density / data.densityScale) * (graphBaseline - graphTop),
+  ]);
+  const area = document.createElementNS(svgNamespace, 'path');
+  area.classList.add('mitigation-history-density-area');
+  area.setAttribute('fill', `url(#${gradientId})`);
+  area.setAttribute('d', `M 0 ${graphBaseline} ${points.map(([x, y]) => `L ${x} ${y.toFixed(2)}`).join(' ')} L ${graphWidth} ${graphBaseline} Z`);
+  svg.append(area);
+
+  const maximumGuide = document.createElementNS(svgNamespace, 'line');
+  maximumGuide.classList.add('mitigation-history-zoom-maximum-guide');
+  maximumGuide.setAttribute('x1', '0');
+  maximumGuide.setAttribute('x2', graphWidth);
+  maximumGuide.setAttribute('y1', graphTop);
+  maximumGuide.setAttribute('y2', graphTop);
+  svg.append(maximumGuide);
+  const maximumLabel = document.createElementNS(svgNamespace, 'text');
+  maximumLabel.classList.add('mitigation-history-zoom-maximum-label');
+  maximumLabel.setAttribute('x', graphWidth - 3);
+  maximumLabel.setAttribute('y', graphTop - 2);
+  maximumLabel.textContent = String(Number.isInteger(data.densityScale)
+    ? data.densityScale
+    : data.densityScale.toFixed(1));
+  svg.append(maximumLabel);
+
+  for (const [seconds, className] of [[0, 'minimum'], [data.windowSeconds, 'maximum']]) {
+    if (seconds < zoomStart || seconds > zoomEnd) continue;
+    const guide = document.createElementNS(svgNamespace, 'line');
+    const x = ((seconds - zoomStart) / (zoomEnd - zoomStart)) * graphWidth;
+    guide.classList.add('mitigation-history-density-guide', className);
+    guide.setAttribute('x1', x);
+    guide.setAttribute('x2', x);
+    guide.setAttribute('y1', '4');
+    guide.setAttribute('y2', graphBaseline);
+    svg.append(guide);
+  }
+
+  data.timedSamples.forEach((seconds, index) => {
+    if (seconds < zoomStart || seconds > zoomEnd) return;
+    const row = data.timedRows[index];
+    const tick = document.createElementNS(svgNamespace, 'line');
+    const x = ((seconds - zoomStart) / (zoomEnd - zoomStart)) * graphWidth;
+    tick.classList.add('mitigation-history-density-rug');
+    tick.setAttribute('x1', x);
+    tick.setAttribute('x2', x);
+    tick.setAttribute('y1', graphBaseline - 5);
+    tick.setAttribute('y2', graphBaseline + 5);
+    tick.setAttribute('stroke', getPullPhaseColor(row.fight));
+    svg.append(tick);
+  });
+
+  const absoluteStart = data.minimumElapsedSeconds + zoomStart;
+  const absoluteEnd = data.minimumElapsedSeconds + zoomEnd;
+  const firstEighth = Math.ceil((absoluteStart - 1e-7) * 8);
+  const lastEighth = Math.floor((absoluteEnd + 1e-7) * 8);
+  for (let eighth = firstEighth; eighth <= lastEighth; eighth += 1) {
+    const absoluteSeconds = eighth / 8;
+    const x = ((absoluteSeconds - absoluteStart) / (absoluteEnd - absoluteStart)) * graphWidth;
+    const remainder = ((eighth % 8) + 8) % 8;
+    const tickClass = remainder === 0 ? 'second' : remainder === 4 ? 'half' : remainder % 2 === 0 ? 'quarter' : 'eighth';
+    const tick = document.createElementNS(svgNamespace, 'line');
+    tick.classList.add('mitigation-history-zoom-axis-tick', tickClass);
+    tick.setAttribute('x1', x);
+    tick.setAttribute('x2', x);
+    tick.setAttribute('y1', graphBaseline);
+    tick.setAttribute('y2', graphBaseline + ({ second: 14, half: 10, quarter: 7, eighth: 4 })[tickClass]);
+    svg.append(tick);
+    if (tickClass === 'second') {
+      const label = document.createElementNS(svgNamespace, 'text');
+      label.classList.add('mitigation-history-zoom-axis-label');
+      label.setAttribute('x', x);
+      label.setAttribute('y', '116');
+      label.textContent = formatFightDuration(absoluteSeconds * 1000);
+      svg.append(label);
+    }
+  }
+
+  const cursor = document.createElement('div');
+  cursor.className = 'mitigation-history-zoom-cursor';
+  const cursorLabel = document.createElement('span');
+  cursor.append(cursorLabel);
+  timing.append(svg, cursor);
+  timing.addEventListener('mousemove', (event) => {
+    if (!preview.classList.contains('pinned')) return;
+    const bounds = timing.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const absoluteSeconds = absoluteStart + ratio * (absoluteEnd - absoluteStart);
+    cursor.style.left = `${ratio * 100}%`;
+    cursorLabel.textContent = formatMitigationHistoryTimestamp(absoluteSeconds * 1000);
+    cursor.classList.add('visible');
+  });
+  timing.addEventListener('mouseleave', () => cursor.classList.remove('visible'));
+
+  layout.append(timing);
+  for (const [statusClass, count, label] of data.statusCounts) {
+    const status = document.createElement('div');
+    status.className = `mitigation-history-zoom-status ${statusClass}`;
+    const bar = document.createElement('span');
+    bar.style.height = `${(count / data.densityScale) * (graphBaseline - graphTop)}px`;
+    const statusLabel = document.createElement('small');
+    statusLabel.textContent = label;
+    status.append(bar, statusLabel);
+    layout.append(status);
+  }
+  preview.append(previewHeader, layout);
+  return preview;
+}
+
+function formatMitigationHistoryTimestamp(durationMs) {
+  const safeMilliseconds = Math.max(0, Math.round(Number(durationMs) || 0));
+  const minutes = Math.floor(safeMilliseconds / 60_000);
+  const seconds = Math.floor((safeMilliseconds % 60_000) / 1000);
+  const milliseconds = safeMilliseconds % 1000;
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
+}
+
+function positionMitigationHistoryZoomPreview(preview, event) {
+  const gap = 14;
+  const bounds = preview.getBoundingClientRect();
+  const left = Math.max(10, Math.min(event.clientX - bounds.width / 2, window.innerWidth - bounds.width - 10));
+  const roomAbove = event.clientY - gap - bounds.height;
+  const top = roomAbove >= 10 ? roomAbove : Math.min(event.clientY + gap, window.innerHeight - bounds.height - 10);
+  preview.style.left = `${left}px`;
+  preview.style.top = `${Math.max(10, top)}px`;
 }
 
 function getPullPhaseColor(fight) {
@@ -2576,48 +4057,7 @@ async function loadMitigationResultHistory(report, mitigation) {
       const rows = [];
       const fights = (report.fights ?? [])
         .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID);
-      const initiallyUncachedFights = fights.filter((fight) => {
-        const detailKey = `${report.code}:${fight.id}`;
-        return !isReadyCurrentFightDetailState(fightDetails.get(detailKey), fight);
-      });
-
-      if (usingTestData) {
-        for (const fight of initiallyUncachedFights) {
-          fightDetails.set(
-            `${report.code}:${fight.id}`,
-            attachFightFingerprint(normalizeEmbeddedFightDetails(report, fight), fight),
-          );
-        }
-      } else {
-        await Promise.all(initiallyUncachedFights.map(async (fight) => {
-          const cachedDetails = await readCachedFightDetails(report.code, fight);
-          if (cachedDetails) fightDetails.set(`${report.code}:${fight.id}`, cachedDetails);
-        }));
-        const uncachedFights = initiallyUncachedFights.filter((fight) => (
-          !isReadyCurrentFightDetailState(fightDetails.get(`${report.code}:${fight.id}`), fight)
-        ));
-        if (uncachedFights.length === 0) {
-          // Every pull was restored locally; FFLogs does not need another event query.
-        } else {
-          const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
-          const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-          const batchSize = 3;
-          for (let index = 0; index < uncachedFights.length; index += batchSize) {
-            const batch = uncachedFights.slice(index, index + batchSize);
-            await Promise.all(batch.map(async (fight) => {
-              const rawDetails = await fetchFightEventDetails(
-                report.code,
-                fight.id,
-                abilityIds,
-                phaseReferences,
-              );
-              const normalizedDetails = attachFightFingerprint(normalizeFightDetails(rawDetails, fight.id), fight);
-              fightDetails.set(`${report.code}:${fight.id}`, normalizedDetails);
-              await writeCachedFightDetails(report.code, fight, normalizedDetails);
-            }));
-          }
-        }
-      }
+      await ensureReportFightDetails(report, fights);
 
       for (const fight of fights) {
         const state = fightDetails.get(`${report.code}:${fight.id}`);
@@ -2632,17 +4072,56 @@ async function loadMitigationResultHistory(report, mitigation) {
   return mitigationHistoryPromises.get(cacheKey);
 }
 
+// Populate the shared per-pull cache for report-wide comparison views. Restored
+// pulls cost no FFLogs usage; genuinely missing pulls are fetched in small batches.
+async function ensureReportFightDetails(report, fights) {
+  const initiallyUncachedFights = fights.filter((fight) => {
+    const detailKey = `${report.code}:${fight.id}`;
+    return !isReadyCurrentFightDetailState(fightDetails.get(detailKey), fight);
+  });
+  if (usingTestData) {
+    for (const fight of initiallyUncachedFights) {
+      fightDetails.set(
+        `${report.code}:${fight.id}`,
+        attachFightFingerprint(normalizeEmbeddedFightDetails(report, fight), fight),
+      );
+    }
+    return;
+  }
+
+  await Promise.all(initiallyUncachedFights.map(async (fight) => {
+    const cachedDetails = await readCachedFightDetails(report.code, fight);
+    if (cachedDetails) fightDetails.set(`${report.code}:${fight.id}`, cachedDetails);
+  }));
+  const uncachedFights = initiallyUncachedFights.filter((fight) => (
+    !isReadyCurrentFightDetailState(fightDetails.get(`${report.code}:${fight.id}`), fight)
+  ));
+  const abilityIds = [...new Set(dancingMadMitigations.map((entry) => Number(entry.abilityId)))];
+  const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
+  const batchSize = 3;
+  for (let index = 0; index < uncachedFights.length; index += batchSize) {
+    const batch = uncachedFights.slice(index, index + batchSize);
+    await Promise.all(batch.map(async (fight) => {
+      const rawDetails = await fetchFightEventDetails(report.code, fight.id, abilityIds, phaseReferences);
+      const normalizedDetails = attachFightFingerprint(normalizeFightDetails(rawDetails, fight.id), fight);
+      fightDetails.set(`${report.code}:${fight.id}`, normalizedDetails);
+      await writeCachedFightDetails(report.code, fight, normalizedDetails);
+    }));
+  }
+}
+
 function createMitigationAbilityIcon(abilityId, abilityName) {
   const icon = document.createElement('span');
   icon.className = 'mitigation-ability-icon';
-  const iconUrl = MITIGATION_ABILITY_ICON_URLS.get(Number(abilityId))
+  const abilityDefinition = mitigationAbilitiesById.get(Number(abilityId));
+  const iconUrl = abilityDefinition?.icon
     ?? UNKNOWN_MITIGATION_ABILITY_ICON_URL;
 
   const image = document.createElement('img');
   image.src = iconUrl;
   image.alt = '';
   image.loading = 'lazy';
-  if (!MITIGATION_ABILITY_ICON_URLS.has(Number(abilityId))) {
+  if (!abilityDefinition?.icon) {
     icon.setAttribute('aria-label', `Unknown ability icon for ${abilityName}`);
   }
   image.addEventListener('error', () => icon.replaceChildren(), { once: true });
@@ -2667,10 +4146,13 @@ function evaluatePartySlotMitigations(fight, state, assignedTo) {
   for (const mitigation of dancingMadMitigations.filter((entry) => entry.assignedTo === assignedTo)) {
     const requiredJobs = getMitigationJobs(mitigation);
     const assignedPlayer = partySlots.get(assignedTo);
+    const isTankSlot = ['MT', 'OT'].includes(assignedTo);
     const player = requiredJobs.length > 0
       ? (requiredJobs.includes(assignedPlayer?.job)
         ? assignedPlayer
-        : (state.partyMembers ?? []).find((member) => requiredJobs.includes(member.job)))
+        : isTankSlot
+          ? null
+          : (state.partyMembers ?? []).find((member) => requiredJobs.includes(member.job)))
       : assignedPlayer;
     if (!player) continue;
 
@@ -2758,7 +4240,7 @@ function isPlayerDeadAt(lifeEvents, casts, player, timestamp) {
 }
 
 function isMitigationOnCooldown(casts, mitigation, player, fight, windowEndMs) {
-  const cooldownSeconds = mitigationCooldowns.get(Number(mitigation.abilityId));
+  const cooldownSeconds = mitigationCooldowns.get(mitigation.ability);
   if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return false;
   const fightStart = Number(fight.startTime);
   const previousCast = casts
@@ -2911,14 +4393,7 @@ function createFightDetailsTable(fight, state) {
   const table = document.createElement('table');
   table.className = 'fight-details-table';
   const head = document.createElement('thead');
-  const headingRow = document.createElement('tr');
-  for (const heading of FIGHT_EVENT_TABLE_HEADINGS) {
-    const cell = document.createElement('th');
-    cell.scope = 'col';
-    cell.textContent = heading;
-    headingRow.append(cell);
-  }
-  head.append(headingRow);
+  head.append(createFightEventTableHeadingRow());
 
   const body = document.createElement('tbody');
   const phaseStarts = resolveEncounterPhaseStarts(
@@ -2939,14 +4414,29 @@ function createFightDetailsTable(fight, state) {
     mechanicCell.textContent = mechanic ? `P${mechanic.phase}.${mechanic.mechanic}` : '—';
     const playerCell = document.createElement('td');
     playerCell.textContent = event.player;
+    const casterDebuffsCell = document.createElement('td');
+    setFightEventDebuffsCell(casterDebuffsCell, event.casterDebuffs, 'caster');
+    const playerDebuffsCell = document.createElement('td');
+    setFightEventDebuffsCell(playerDebuffsCell, event.playerDebuffs, 'player');
+    const playerBuffsCell = document.createElement('td');
+    setFightEventStatusesCell(playerBuffsCell, event.playerBuffs, 'player', 'buffs');
     const reasonCell = document.createElement('td');
     setFightEventReasonCell(reasonCell, event);
-    row.append(timeCell, eventCell, mechanicCell, playerCell, reasonCell);
+    row.append(
+      timeCell,
+      eventCell,
+      mechanicCell,
+      playerCell,
+      casterDebuffsCell,
+      playerDebuffsCell,
+      playerBuffsCell,
+      reasonCell,
+    );
     body.append(row);
   }
 
   table.append(head, body);
-  return table;
+  return createFightEventTableScrollArea(table);
 }
 
 function createFightTimeline(fight, state) {
@@ -3103,6 +4593,7 @@ function createTimelineEventMarker(event, mechanic, elapsedMs, position) {
 
   const tooltip = document.createElement('span');
   tooltip.className = `fight-timeline-tooltip fight-timeline-table-tooltip${position < 18 ? ' align-start' : position > 82 ? ' align-end' : ''}`;
+  tooltip.addEventListener('click', (clickEvent) => clickEvent.stopPropagation());
   tooltip.append(createTimelineEventTable([{ event, mechanic, elapsedMs }]));
   marker.append(tooltip);
   enableAdaptiveTimelineTooltip(marker);
@@ -3163,6 +4654,9 @@ function createTimelineEventGroupMarker(groups, layout, canvas) {
 
   const tooltip = document.createElement('span');
   tooltip.className = `fight-timeline-tooltip fight-timeline-table-tooltip${layout.position < 18 ? ' align-start' : layout.position > 82 ? ' align-end' : ''}`;
+  // Interacting with the scrollbar must not bubble to the grouped marker and
+  // toggle its pinned state closed.
+  tooltip.addEventListener('click', (clickEvent) => clickEvent.stopPropagation());
   const tableItems = groups
     .flatMap((group) => group.items)
     .sort((first, second) => first.elapsedMs - second.elapsedMs);
@@ -3179,14 +4673,7 @@ function createTimelineEventTable(items) {
   const table = document.createElement('table');
   table.className = 'fight-timeline-event-table';
   const head = document.createElement('thead');
-  const headingRow = document.createElement('tr');
-  for (const label of FIGHT_EVENT_TABLE_HEADINGS) {
-    const heading = document.createElement('th');
-    heading.scope = 'col';
-    heading.textContent = label;
-    headingRow.append(heading);
-  }
-  head.append(headingRow);
+  head.append(createFightEventTableHeadingRow());
   const body = document.createElement('tbody');
   for (const item of items) {
     const row = document.createElement('tr');
@@ -3198,13 +4685,154 @@ function createTimelineEventTable(items) {
     mechanic.textContent = item.mechanic?.mechanic || 'Before first mechanic';
     const player = document.createElement('td');
     player.textContent = item.event.player;
+    const casterDebuffs = document.createElement('td');
+    setFightEventDebuffsCell(casterDebuffs, item.event.casterDebuffs, 'caster');
+    const playerDebuffs = document.createElement('td');
+    setFightEventDebuffsCell(playerDebuffs, item.event.playerDebuffs, 'player');
+    const playerBuffs = document.createElement('td');
+    setFightEventStatusesCell(playerBuffs, item.event.playerBuffs, 'player', 'buffs');
     const reason = document.createElement('td');
     setFightEventReasonCell(reason, item.event);
-    row.append(time, event, mechanic, player, reason);
+    row.append(time, event, mechanic, player, casterDebuffs, playerDebuffs, playerBuffs, reason);
     body.append(row);
   }
   table.append(head, body);
-  return table;
+  return createFightEventTableScrollArea(table);
+}
+
+// Use one grouped heading while keeping caster and player statuses in distinct
+// body columns. The short center rule visually carries the split into the rows.
+function createFightEventTableHeadingRow() {
+  const row = document.createElement('tr');
+  for (const label of FIGHT_EVENT_TABLE_HEADINGS) {
+    const heading = document.createElement('th');
+    heading.scope = 'col';
+    heading.textContent = label;
+    row.append(heading);
+  }
+  const debuffsHeading = document.createElement('th');
+  debuffsHeading.className = 'fight-event-debuffs-heading';
+  debuffsHeading.colSpan = 2;
+  debuffsHeading.scope = 'colgroup';
+  debuffsHeading.textContent = 'Debuffs';
+  debuffsHeading.title = FIGHT_EVENT_DEBUFFS_TOOLTIP;
+  debuffsHeading.setAttribute('aria-label', FIGHT_EVENT_DEBUFFS_TOOLTIP);
+  const buffsHeading = document.createElement('th');
+  buffsHeading.className = 'fight-event-buffs-heading';
+  buffsHeading.scope = 'col';
+  buffsHeading.textContent = 'Buffs';
+  buffsHeading.title = FIGHT_EVENT_BUFFS_TOOLTIP;
+  buffsHeading.setAttribute('aria-label', FIGHT_EVENT_BUFFS_TOOLTIP);
+  const reasonHeading = document.createElement('th');
+  reasonHeading.scope = 'col';
+  reasonHeading.textContent = 'Reason';
+  row.append(debuffsHeading, buffsHeading, reasonHeading);
+  return row;
+}
+
+function createFightEventTableScrollArea(table) {
+  const scrollArea = document.createElement('div');
+  scrollArea.className = 'fight-event-table-scroll';
+  scrollArea.tabIndex = 0;
+  scrollArea.setAttribute('aria-label', 'Scrollable fight events table');
+  scrollArea.append(table);
+  return scrollArea;
+}
+
+function setFightEventDebuffsCell(cell, debuffs, subject) {
+  setFightEventStatusesCell(cell, debuffs, subject, 'debuffs');
+}
+
+function setFightEventStatusesCell(cell, values, subject, statusKind) {
+  const statuses = Array.isArray(values) ? values : [];
+  cell.className = `fight-event-statuses-cell fight-event-${statusKind}-cell ${subject}`;
+  cell.setAttribute('aria-label', statuses.length > 0
+    ? `${statusKind} on ${subject}: ${statuses.map((status) => status.name).join(', ')}`
+    : `${statusKind} on ${subject}: none`);
+  if (statuses.length === 0) {
+    cell.textContent = '—';
+    return;
+  }
+  const list = document.createElement('span');
+  list.className = 'fight-event-status-list';
+  for (const status of statuses) {
+    if (!status.icon || isUnknownFflogsStatus(status.name, status.icon)) {
+      list.append(createFightEventStatusFallback(status.name));
+      continue;
+    }
+    const icon = document.createElement('img');
+    icon.className = 'fight-event-status-icon';
+    icon.loading = 'lazy';
+    icon.alt = '';
+    icon.src = status.icon;
+    attachFightEventStatusTooltip(icon, status.name);
+    icon.addEventListener('error', () => {
+      icon.replaceWith(createFightEventStatusFallback(status.name));
+    }, { once: true });
+    list.append(icon);
+  }
+  cell.append(list);
+}
+
+function createFightEventStatusFallback(name) {
+  const fallback = document.createElement('img');
+  fallback.className = 'fight-event-status-icon fallback';
+  fallback.alt = '';
+  fallback.src = UNKNOWN_MITIGATION_ABILITY_ICON_URL;
+  fallback.loading = 'lazy';
+  attachFightEventStatusTooltip(fallback, name);
+  return fallback;
+}
+
+// Native title bubbles have a noticeable delay. Render this tooltip at the
+// viewport level so status names appear immediately and escape table clipping.
+// A modal dialog occupies the browser's top layer, so a tooltip for content in
+// that dialog must be its descendant rather than a high-z-index body child.
+function attachFightEventStatusTooltip(anchor, name) {
+  anchor.tabIndex = 0;
+  anchor.setAttribute('aria-label', name);
+  let tooltip = null;
+  const show = () => {
+    tooltip?.remove();
+    tooltip = document.createElement('span');
+    tooltip.className = 'fight-event-status-tooltip';
+    tooltip.setAttribute('role', 'tooltip');
+    tooltip.textContent = name;
+    (anchor.closest('dialog') ?? document.body).append(tooltip);
+    const anchorRect = anchor.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const left = Math.max(8, Math.min(
+      window.innerWidth - tooltipRect.width - 8,
+      anchorRect.left + (anchorRect.width - tooltipRect.width) / 2,
+    ));
+    const fitsAbove = anchorRect.top >= tooltipRect.height + 10;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = fitsAbove
+      ? `${anchorRect.top - tooltipRect.height - 6}px`
+      : `${anchorRect.bottom + 6}px`;
+  };
+  const hide = () => {
+    tooltip?.remove();
+    tooltip = null;
+  };
+  anchor.addEventListener('mouseenter', show);
+  anchor.addEventListener('mouseleave', hide);
+  anchor.addEventListener('focus', show);
+  anchor.addEventListener('blur', hide);
+}
+
+// ReportAbility.icon is normally a filename; turn it into FFLogs' public asset
+// URL while preserving complete URLs and local test-data paths unchanged.
+function getFflogsAbilityIconUrl(icon, abilityName = '') {
+  const value = String(icon ?? '').trim();
+  if (!value || isUnknownFflogsStatus(abilityName, value)) return '';
+  if (/^(?:https?:|data:|blob:|\/|\.\/|\.\.\/)/i.test(value)) return value;
+  return `https://assets.rpglogs.com/img/ff/abilities/${encodeURIComponent(value)}`;
+}
+
+function isUnknownFflogsStatus(name, icon) {
+  return /^unknown(?:_|$)/i.test(String(name ?? ''))
+    || /(?:^|\/)000000-000405\.png(?:$|[?#])/i.test(String(icon ?? ''));
 }
 
 function setFightEventReasonCell(cell, event) {
