@@ -53,6 +53,17 @@ const FIGHT_EVENT_BUFFS_TOOLTIP = 'Displays the buffs on the player.';
 const UNKNOWN_DEATH_REASON_TOOLTIP = 'No listed cause of death from FFLogs, most likely falling off';
 const DEATH_REASON_DAMAGE_LOOKBACK_MS = 2_500;
 const PLAYER_ACTION_PIXELS_PER_SECOND = 50;
+const PLAYER_ACTION_BASE_GCD_MS = 2_500;
+const PLAYER_ACTION_LOG_BATCH_MS = 45;
+const PLAYER_ACTION_CAST_ANIMATION_LOCK_MS = 100;
+const PLAYER_ACTION_GCD_COOLDOWN_GROUP = 58;
+const PLAYER_ACTION_SPELL_SPEED_JOBS = new Set([
+  'WHM', 'SCH', 'AST', 'SGE', 'BLM', 'SMN', 'RDM', 'PCT', 'BLU',
+]);
+// FFLogs encodes consumables as large pseudo-action IDs (for example, HQ
+// tinctures in the 34-million range). They are not rows in XIVAPI's Action
+// sheet, and including one makes XIVAPI reject the entire bulk request.
+const FFLOGS_PSEUDO_ACTION_ID_MIN = 10_000_000;
 const TANK_FORTY_PERCENT_BUFFS = new Set(['Guardian', 'Damnation', 'Shadowed Vigil', 'Great Nebula']);
 const PARTY_SLOT_ORDER = ['MT', 'OT', 'H1', 'H2', 'M1', 'M2', 'R1', 'R2'];
 const DANCING_MAD_ENCOUNTER_NAME = 'Dancing Mad';
@@ -68,10 +79,13 @@ let dancingMadMechanics = [];
 let dancingMadMitigations = [];
 let mitigationAbilitiesById = new Map();
 let mitigationAbilitiesByName = new Map();
-const playerActionCategoriesById = new Map();
+const playerActionGameDataById = new Map();
 // Deliberately session-only: each report remembers its own viewer controls until
 // this page is reloaded, without making later visits load player-action data.
 const reportPlayerActionViewStates = new Map();
+// Pull-specific display override only. This intentionally never touches localStorage
+// because a tank swap in one pull should not change any other pull or later visit.
+const swappedTankAssignmentsByFight = new Map();
 const pinnedMitigationHistoryZoomPreviews = [];
 let mitigationCooldowns = new Map();
 let fightDetails = new Map();
@@ -634,11 +648,23 @@ function addTestPlayerActionCasts(fight, actors, existingEvents) {
       for (let elapsedMs = 1_000 + actorIndex * 125; elapsedMs <= durationMs; elapsedMs += 5_000) {
         const actionIndex = (Math.floor(elapsedMs / 5_000) + actorIndex) % actions.length;
         const action = actions[actionIndex];
+        const isCastTimeAction = action.actionCategory === 'Spell' && elapsedMs >= 2_000;
+        const isCancelled = isCastTimeAction
+          && (Math.floor(elapsedMs / 5_000) + actorIndex + Number(fight.id)) % 6 === 0;
+        if (isCastTimeAction) {
+          casts.push({
+            type: 'begincast',
+            ...action,
+            duration: 1_800,
+            sourceID: Number(actor.id),
+            timestamp: Number(fight.startTime) + elapsedMs - 1_800,
+          });
+        }
         casts.push({
-          type: 'cast',
+          type: isCancelled ? 'castcancelled' : 'cast',
           ...action,
           sourceID: Number(actor.id),
-          timestamp: Number(fight.startTime) + elapsedMs,
+          timestamp: Number(fight.startTime) + elapsedMs - (isCancelled ? 550 : 0),
         });
         if (actionIndex === 1 && elapsedMs + 180 <= durationMs) {
           casts.push({
@@ -1586,6 +1612,7 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   const actionCasts = extractPlayerActionCasts(
     rawEvents, actorNames, friendlyIds, abilityNames, abilityIcons,
   );
+  const playerSpeedAttributes = extractPlayerSpeedAttributes(rawEvents, actorNames);
   const lifeEvents = extractPlayerLifeEvents(rawEvents);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, rawFight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1600,7 +1627,7 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   );
   return {
     status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
-    mitigationCasts, actionCasts, lifeEvents,
+    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
   };
 }
 
@@ -1615,6 +1642,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
   const actionCasts = extractPlayerActionCasts(
     fight.events ?? [], actorNames, friendlyIds, new Map(), new Map(),
   );
+  const playerSpeedAttributes = extractPlayerSpeedAttributes(fight.events ?? [], actorNames);
   const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, fight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1629,7 +1657,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
   );
   return {
     status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
-    mitigationCasts, actionCasts, lifeEvents,
+    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
   };
 }
 
@@ -1907,7 +1935,7 @@ function discardChangedFightDetails(report) {
 function getFightDetailsCacheVersion() {
   const abilityIds = dancingMadMitigations.map((entry) => Number(entry.abilityId)).sort((a, b) => a - b);
   const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-  return JSON.stringify({ version: 24, abilityIds, phaseReferences });
+  return JSON.stringify({ version: 26, abilityIds, phaseReferences });
 }
 
 function getPersistentFightDetailsKey(reportCode, fight) {
@@ -2035,6 +2063,20 @@ function extractTrackedMitigationCasts(events, actorNames) {
     .filter((event) => Number.isFinite(event.timestamp));
 }
 
+function extractPlayerSpeedAttributes(events, actorNames) {
+  return events
+    .filter((event) => normalizeEventType(event.eventType ?? event.type) === 'combatantinfo')
+    .map((event) => ({
+      sourceId: Number(event.sourceID ?? event.sourceId),
+      source: event.source ?? event.sourceName
+        ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
+      skillSpeed: Number(event.skillSpeed),
+      spellSpeed: Number(event.spellSpeed),
+    }))
+    .filter((entry) => entry.source
+      && (Number.isFinite(entry.skillSpeed) || Number.isFinite(entry.spellSpeed)));
+}
+
 // Keep every friendly cast for the cross-pull player-action viewer. These rows
 // are display-ready so opening the dialog never reinterprets FFLogs data.
 function extractPlayerActionCasts(
@@ -2044,15 +2086,20 @@ function extractPlayerActionCasts(
   abilityNames,
   abilityIcons,
 ) {
+  const supportedEventTypes = new Set([
+    'begincast', 'cast', 'cancelcast', 'castcancel', 'cancelledcast', 'castcancelled',
+  ]);
   return events
-    .filter((event) => normalizeEventType(event.eventType ?? event.type) === 'cast')
+    .filter((event) => supportedEventTypes.has(normalizeEventType(event.eventType ?? event.type)))
     .filter((event) => friendlyIds.size === 0
       || friendlyIds.has(Number(event.sourceID ?? event.sourceId)))
     .map((event) => {
       const abilityId = Number(event.abilityId ?? event.abilityGameID ?? event.ability?.id);
       const ability = getEventAbilityName(event, abilityNames)
+        ?? mitigationAbilitiesById.get(abilityId)?.name
         ?? `Ability ${Number.isFinite(abilityId) ? abilityId : '?'}`;
       return {
+        eventType: normalizeEventType(event.eventType ?? event.type),
         abilityId,
         ability,
         icon: getFflogsAbilityIconUrl(
@@ -2064,6 +2111,7 @@ function extractPlayerActionCasts(
         source: event.source ?? event.sourceName
           ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
         timestamp: Number(event.timestamp),
+        duration: Number(event.duration),
       };
     })
     .filter((event) => event.source && Number.isFinite(event.timestamp))
@@ -2146,10 +2194,39 @@ function createMitigationTrackerView(report, fight, state) {
   const tracker = document.createElement('section');
   tracker.className = 'mitigation-tracker';
 
+  const fightKey = `${report.code}:${fight.id}`;
+  const tanksSwapped = swappedTankAssignmentsByFight.get(fightKey) === true;
+  const trackerState = tanksSwapped
+    ? {
+      ...state,
+      tankSlots: {
+        ...state.tankSlots,
+        MT: state.tankSlots?.OT ?? null,
+        OT: state.tankSlots?.MT ?? null,
+      },
+    }
+    : state;
+
   const header = document.createElement('div');
   header.className = 'mitigation-header';
+  const titleControls = document.createElement('div');
+  titleControls.className = 'mitigation-title-controls';
   const heading = document.createElement('h4');
   heading.textContent = 'Mitigation tracker';
+  const swapTanksLabel = document.createElement('label');
+  swapTanksLabel.className = 'mitigation-swap-tanks-control';
+  swapTanksLabel.title = 'This assignment will not be saved to local storage and will not apply to other pulls.';
+  const swapTanksCheckbox = document.createElement('input');
+  swapTanksCheckbox.type = 'checkbox';
+  swapTanksCheckbox.checked = tanksSwapped;
+  swapTanksCheckbox.disabled = !state.tankSlots?.MT || !state.tankSlots?.OT;
+  swapTanksCheckbox.addEventListener('change', () => {
+    if (swapTanksCheckbox.checked) swappedTankAssignmentsByFight.set(fightKey, true);
+    else swappedTankAssignmentsByFight.delete(fightKey);
+    renderLookupResult();
+  });
+  swapTanksLabel.append(swapTanksCheckbox, 'Swap MT/OT');
+  titleControls.append(heading, swapTanksLabel);
   const filterSelect = document.createElement('select');
   filterSelect.className = 'mitigation-filter-select';
   filterSelect.setAttribute('aria-label', 'Mitigation result filter');
@@ -2165,7 +2242,7 @@ function createMitigationTrackerView(report, fight, state) {
   }
   filterSelect.value = mitigationFilterMode;
   filterSelect.addEventListener('change', () => setMitigationFilterMode(filterSelect.value));
-  header.append(heading, filterSelect);
+  header.append(titleControls, filterSelect);
   tracker.append(header);
 
   const assignedSlots = PARTY_SLOT_ORDER.filter((slot) =>
@@ -2207,7 +2284,7 @@ function createMitigationTrackerView(report, fight, state) {
   allOption.textContent = 'All';
   slotSelect.append(allOption);
 
-  const allPanel = createAllMitigationsPanel(report, fight, state, assignedSlots);
+  const allPanel = createAllMitigationsPanel(report, fight, trackerState, assignedSlots);
   allPanel.id = `mitigation-panel-${fight.id}-all`;
   allPanel.setAttribute('role', 'tabpanel');
   allPanel.setAttribute('aria-labelledby', allTab.id);
@@ -2217,7 +2294,7 @@ function createMitigationTrackerView(report, fight, state) {
 
   assignedSlots.forEach((slot) => {
     const tab = document.createElement('button');
-    const panel = createPartySlotMitigationPanel(report, fight, state, slot);
+    const panel = createPartySlotMitigationPanel(report, fight, trackerState, slot);
     const selected = slot === initialSlot;
     const tabId = `mitigation-tab-${fight.id}-${slot}`;
     const panelId = `mitigation-panel-${fight.id}-${slot}`;
@@ -2727,29 +2804,44 @@ async function showReportPlayerActionsOverview(report, button) {
     for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
     playerSelect.value = playerNames.includes(savedView?.player) ? savedView.player : '';
     playerLabel.append(playerSelect);
-    const startLabel = createPlayerActionsControlLabel('Start');
-    const startInput = document.createElement('input');
-    startInput.type = 'text';
-    startInput.inputMode = 'numeric';
-    startInput.value = savedView?.start ?? '';
-    startInput.placeholder = 'm:ss';
-    startInput.setAttribute('aria-label', 'Time range start');
-    startLabel.append(startInput);
-    const endLabel = createPlayerActionsControlLabel('End');
-    const endInput = document.createElement('input');
-    endInput.type = 'text';
-    endInput.inputMode = 'numeric';
-    endInput.value = savedView?.end ?? '';
-    endInput.placeholder = 'm:ss';
-    endInput.setAttribute('aria-label', 'Time range end');
-    endLabel.append(endInput);
+    const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
+    const phaseAnchorSelect = document.createElement('select');
+    phaseAnchorSelect.setAttribute('aria-label', 'Phase anchor');
+    phaseAnchorSelect.append(new Option('Fight start', 'fight'));
+    for (let phase = 1; phase <= 5; phase += 1) {
+      phaseAnchorSelect.append(new Option(`Phase ${phase}`, String(phase)));
+    }
+    phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(savedView?.phaseAnchor)
+      ? savedView.phaseAnchor
+      : 'fight';
+    phaseAnchorLabel.append(phaseAnchorSelect);
+    const getMaximumAnchoredDuration = () => Math.max(0, ...fights.map((fight) => {
+      const state = fightDetails.get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchorSelect.value);
+      return Number.isFinite(anchorMs) ? getFightDuration(fight) - anchorMs : 0;
+    }));
+    const maximumFightDurationMs = getMaximumAnchoredDuration();
+    const startControl = createPlayerActionsTimeControl(
+      'Start',
+      savedView?.start ?? '',
+      maximumFightDurationMs,
+      0,
+    );
+    const { label: startLabel, textInput: startInput, rangeInput: startRange } = startControl;
+    const endControl = createPlayerActionsTimeControl(
+      'End',
+      savedView?.end ?? '',
+      maximumFightDurationMs,
+      maximumFightDurationMs,
+    );
+    const { label: endLabel, textInput: endInput, rangeInput: endRange } = endControl;
     const updateButton = document.createElement('button');
     updateButton.type = 'submit';
     updateButton.textContent = 'Update';
     const filterNotice = document.createElement('span');
     filterNotice.className = 'player-actions-filter-notice';
     filterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
-    controls.append(playerLabel, startLabel, endLabel, updateButton, filterNotice);
+    controls.append(playerLabel, phaseAnchorLabel, startLabel, endLabel, updateButton, filterNotice);
 
     const status = document.createElement('p');
     status.className = 'player-actions-status';
@@ -2758,6 +2850,7 @@ async function showReportPlayerActionsOverview(report, button) {
     const saveView = () => {
       reportPlayerActionViewStates.set(report.code, {
         player: playerSelect.value,
+        phaseAnchor: phaseAnchorSelect.value,
         start: startInput.value,
         end: endInput.value,
       });
@@ -2765,10 +2858,18 @@ async function showReportPlayerActionsOverview(report, button) {
     const render = ({ showErrors = true } = {}) => {
       const startMs = parseFightTimeInput(startInput.value);
       const endMs = parseFightTimeInput(endInput.value);
-      if (!playerSelect.value || !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      const maximumAnchoredDurationMs = getMaximumAnchoredDuration();
+      startRange.max = String(maximumAnchoredDurationMs);
+      endRange.max = String(maximumAnchoredDurationMs);
+      if (!playerSelect.value
+        || !Number.isFinite(startMs)
+        || !Number.isFinite(endMs)
+        || startMs < 0
+        || endMs > maximumAnchoredDurationMs
+        || endMs <= startMs) {
         status.className = `player-actions-status${showErrors ? ' error' : ''}`;
         status.textContent = showErrors
-          ? 'Choose a player and enter a valid range such as 1:30–2:15; the end must be after the start.'
+          ? `Choose a player and enter a valid range from 0:00–${formatFightDuration(maximumAnchoredDurationMs)}; the end must be after the start.`
           : 'Choose a player, start time, and end time.';
         updateWithSmoothHeight(rows, () => rows.replaceChildren());
         return;
@@ -2776,6 +2877,8 @@ async function showReportPlayerActionsOverview(report, button) {
       status.className = 'player-actions-status';
       startInput.value = formatFightDuration(startMs);
       endInput.value = formatFightDuration(endMs);
+      syncPlayerActionsTimeControl(startControl, startMs);
+      syncPlayerActionsTimeControl(endControl, endMs);
       saveView();
       const trackWidth = Math.max(
         1,
@@ -2783,16 +2886,30 @@ async function showReportPlayerActionsOverview(report, button) {
       );
       rows.style.setProperty('--player-actions-track-width', `${trackWidth}px`);
       const eligibleFights = fights
-        .filter((fight) => getFightDuration(fight) >= endMs)
-        .sort((first, second) => Number(first.id) - Number(second.id));
-      status.textContent = `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${formatFightDuration(endMs)}.`;
+        .map((fight) => ({
+          fight,
+          anchorMs: getPlayerActionsPhaseAnchorMs(
+            fight,
+            fightDetails.get(`${report.code}:${fight.id}`),
+            phaseAnchorSelect.value,
+          ),
+        }))
+        .filter(({ fight, anchorMs }) => Number.isFinite(anchorMs)
+          && getFightDuration(fight) >= anchorMs + endMs)
+        .sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+      const anchorName = phaseAnchorSelect.value === 'fight'
+        ? 'fight start'
+        : `P${phaseAnchorSelect.value}`;
+      const gcd = estimatePlayerGcd(fights, report, playerSelect.value);
+      status.textContent = `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
       updateWithSmoothHeight(rows, () => {
-        rows.replaceChildren(...eligibleFights.map((fight) => createPlayerActionsPullRow(
+        rows.replaceChildren(...eligibleFights.map(({ fight, anchorMs }) => createPlayerActionsPullRow(
           report,
           fight,
           playerSelect.value,
-          startMs,
-          endMs,
+          anchorMs + startMs,
+          anchorMs + endMs,
+          anchorMs,
         )));
         if (eligibleFights.length === 0) {
           const empty = document.createElement('p');
@@ -2807,8 +2924,27 @@ async function showReportPlayerActionsOverview(report, button) {
       render();
     });
     playerSelect.addEventListener('change', saveView);
-    startInput.addEventListener('input', saveView);
-    endInput.addEventListener('input', saveView);
+    phaseAnchorSelect.addEventListener('change', () => {
+      saveView();
+      render({ showErrors: false });
+    });
+    for (const control of [startControl, endControl]) {
+      control.textInput.addEventListener('input', () => {
+        const milliseconds = parseFightTimeInput(control.textInput.value);
+        if (Number.isFinite(milliseconds)
+          && milliseconds >= 0
+          && milliseconds <= maximumFightDurationMs) {
+          syncPlayerActionsTimeControl(control, milliseconds, { preserveText: true });
+        } else {
+          control.rangeInput.classList.add('unset');
+        }
+        saveView();
+      });
+      control.rangeInput.addEventListener('input', () => {
+        syncPlayerActionsTimeControl(control, Number(control.rangeInput.value));
+        saveView();
+      });
+    }
     updateWithSmoothHeight(content, () => {
       content.replaceChildren(controls, status, rows);
     });
@@ -2826,6 +2962,53 @@ function createPlayerActionsControlLabel(text) {
   return label;
 }
 
+function createPlayerActionsTimeControl(labelText, value, maximumMs, unsetValueMs) {
+  const label = createPlayerActionsControlLabel(labelText);
+  label.classList.add('player-actions-time-control');
+  const fields = document.createElement('span');
+  fields.className = 'player-actions-time-fields';
+  const textInput = document.createElement('input');
+  textInput.type = 'text';
+  textInput.inputMode = 'numeric';
+  textInput.value = value;
+  textInput.placeholder = 'm:ss';
+  textInput.setAttribute('aria-label', `Time range ${labelText.toLowerCase()} text`);
+  const rangeInput = document.createElement('input');
+  rangeInput.type = 'range';
+  rangeInput.min = '0';
+  rangeInput.max = String(maximumMs);
+  rangeInput.step = '100';
+  rangeInput.value = String(unsetValueMs);
+  rangeInput.className = 'unset';
+  rangeInput.setAttribute('aria-label', `Time range ${labelText.toLowerCase()} slider`);
+  fields.append(textInput, rangeInput);
+  label.append(fields);
+  const control = { label, textInput, rangeInput };
+  const milliseconds = parseFightTimeInput(value);
+  if (Number.isFinite(milliseconds) && milliseconds >= 0 && milliseconds <= maximumMs) {
+    syncPlayerActionsTimeControl(control, milliseconds, { preserveText: true });
+  }
+  return control;
+}
+
+function syncPlayerActionsTimeControl(control, milliseconds, { preserveText = false } = {}) {
+  control.rangeInput.value = String(milliseconds);
+  control.rangeInput.classList.remove('unset');
+  if (!preserveText) control.textInput.value = formatFightDuration(milliseconds);
+}
+
+function getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor) {
+  if (phaseAnchor === 'fight') return 0;
+  const phase = Number(phaseAnchor);
+  if (!Number.isInteger(phase) || phase < 1 || phase > 5) return Number.NaN;
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  return phaseStarts.get(phase) ?? Number.NaN;
+}
+
 // FFLogs' ability `type` is a damage/healing school, not FFXIV's action
 // category. Resolve the real category in bulk so healing abilities such as
 // Asylum are not mistaken for spells. A failed lookup falls back gracefully.
@@ -2833,37 +3016,73 @@ async function loadPlayerActionCategories(actions) {
   const unknownIds = [...new Set(actions
     .map((action) => Number(action.abilityId))
     .filter((abilityId) => Number.isFinite(abilityId)
-      && !playerActionCategoriesById.has(abilityId)))];
+      && !playerActionGameDataById.has(abilityId)))];
+  const pseudoActionIds = unknownIds.filter((abilityId) => abilityId >= FFLOGS_PSEUDO_ACTION_ID_MIN);
+  for (const abilityId of pseudoActionIds) {
+    playerActionGameDataById.set(abilityId, { category: 'Ability' });
+  }
+  const xivapiActionIds = unknownIds.filter((abilityId) => abilityId < FFLOGS_PSEUDO_ACTION_ID_MIN);
   const chunks = [];
-  for (let index = 0; index < unknownIds.length; index += 100) {
-    chunks.push(unknownIds.slice(index, index + 100));
+  for (let index = 0; index < xivapiActionIds.length; index += 100) {
+    chunks.push(xivapiActionIds.slice(index, index + 100));
   }
   await Promise.all(chunks.map(async (abilityIds) => {
     try {
       const params = new URLSearchParams({
         rows: abilityIds.join(','),
-        fields: 'ActionCategory.Name',
+        fields: 'ActionCategory.Name,Recast100ms,CooldownGroup,AdditionalCooldownGroup',
       });
       const response = await fetch(`https://v2.xivapi.com/api/sheet/Action?${params}`);
-      if (!response.ok) return;
+      if (!response.ok) {
+        console.warn('XIVAPI action-category request returned an error.', {
+          abilityIds,
+          status: response.status,
+          statusText: response.statusText,
+          responseBody: await response.text(),
+        });
+        return;
+      }
       const payload = await response.json();
       for (const row of payload.rows ?? []) {
         const abilityId = Number(row.row_id);
         const category = row.fields?.ActionCategory?.fields?.Name;
         if (Number.isFinite(abilityId) && category) {
-          playerActionCategoriesById.set(abilityId, category);
+          playerActionGameDataById.set(abilityId, {
+            category,
+            recastMs: Number(row.fields?.Recast100ms) * 100,
+            cooldownGroup: Number(row.fields?.CooldownGroup),
+            additionalCooldownGroup: Number(row.fields?.AdditionalCooldownGroup),
+          });
         }
       }
-    } catch {
+    } catch (error) {
+      console.warn('Failed to load XIVAPI action categories.', {
+        abilityIds,
+        error,
+      });
       // The timeline remains usable with FFLogs' best-effort fallback styling.
     }
   }));
 }
 
+function getPlayerActionGameData(action) {
+  const loaded = playerActionGameDataById.get(Number(action.abilityId));
+  if (loaded) return loaded;
+  const category = action.category;
+  const normalizedCategory = String(category ?? '').trim().toLowerCase();
+  const isFallbackGcd = normalizedCategory === 'spell' || normalizedCategory === 'weaponskill';
+  return {
+    category,
+    recastMs: isFallbackGcd ? PLAYER_ACTION_BASE_GCD_MS : Number.NaN,
+    cooldownGroup: isFallbackGcd ? PLAYER_ACTION_GCD_COOLDOWN_GROUP : Number.NaN,
+    additionalCooldownGroup: Number.NaN,
+  };
+}
+
 function getPlayerActionMarkerCategory(action) {
   // FFLogs/test fixtures may include an actionCategory hint, but the game-data
   // category is authoritative whenever XIVAPI returned one for this action ID.
-  const category = playerActionCategoriesById.get(Number(action.abilityId)) ?? action.category;
+  const category = getPlayerActionGameData(action).category;
   const normalizedCategory = String(category ?? '').trim().toLowerCase();
   if (normalizedCategory === 'auto-attack') return 'auto-attack';
   if (normalizedCategory === 'spell' || normalizedCategory === 'weaponskill') {
@@ -2873,6 +3092,136 @@ function getPlayerActionMarkerCategory(action) {
   // sheet row. Non-GCD/unresolved actions therefore share the Ability treatment;
   // only authoritative Spell and Weaponskill categories use the baseline style.
   return 'ability';
+}
+
+function isPlayerActionGcd(action) {
+  const data = getPlayerActionGameData(action);
+  return data.cooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP
+    || data.additionalCooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP;
+}
+
+function getPlayerActionSpeedType(action) {
+  const category = String(getPlayerActionGameData(action).category ?? '').trim().toLowerCase();
+  if (category === 'spell') return 'spellSpeed';
+  if (category === 'weaponskill') return 'skillSpeed';
+  return null;
+}
+
+function getPlayerPrimarySpeedType(fights, report, playerName) {
+  for (const fight of fights) {
+    const member = fightDetails.get(`${report.code}:${fight.id}`)?.partyMembers
+      ?.find((entry) => entry.name === playerName);
+    if (member?.job) {
+      return PLAYER_ACTION_SPELL_SPEED_JOBS.has(member.job) ? 'spellSpeed' : 'skillSpeed';
+    }
+  }
+  return null;
+}
+
+function getSpeedStatAdjustedDuration(speedStat, baseDurationMs = PLAYER_ACTION_BASE_GCD_MS) {
+  if (!Number.isFinite(speedStat)) return Number.NaN;
+  const attributeMultiplier = 1_000 - Math.floor(130 * (speedStat - 420) / 2_780);
+  const adjustedDuration = Math.floor(attributeMultiplier * baseDurationMs / 1_000);
+  return Math.floor(adjustedDuration / 10) * 10;
+}
+
+function getProvidedPlayerGcd(fights, report, playerName, speedType) {
+  if (!speedType) return null;
+  for (const fight of fights) {
+    const state = fightDetails.get(`${report.code}:${fight.id}`);
+    const attributes = state?.playerSpeedAttributes
+      ?.find((entry) => entry.source === playerName);
+    const speedStat = Number(attributes?.[speedType]);
+    if (!Number.isFinite(speedStat)) continue;
+    const durationMs = getSpeedStatAdjustedDuration(speedStat);
+    if (Number.isFinite(durationMs)) return { durationMs, estimated: false, sampleCount: 0 };
+  }
+  return null;
+}
+
+function collectCompletedPlayerGcds(actions, speedType) {
+  const { visibleActions, castSpans } = pairPlayerActionEvents(actions);
+  const completedSpansByEnd = new Map(castSpans
+    .filter((span) => span.outcome === 'completed')
+    .map((span) => [span.end, span]));
+  return visibleActions
+    .filter((action) => action.eventType === 'cast'
+      && isPlayerActionGcd(action)
+      && (!speedType || getPlayerActionSpeedType(action) === speedType))
+    .map((action) => {
+      const span = completedSpansByEnd.get(action);
+      return {
+        action,
+        timestamp: Number(span?.begin.timestamp ?? action.timestamp),
+        castDurationMs: Number(span?.begin.duration),
+      };
+    })
+    .filter((entry) => Number.isFinite(entry.timestamp))
+    .sort((first, second) => first.timestamp - second.timestamp);
+}
+
+function estimateGcdFromIntervals(intervals) {
+  if (intervals.length < 3) return null;
+  const batches = new Map();
+  for (const interval of intervals) {
+    const batch = Math.floor(interval / PLAYER_ACTION_LOG_BATCH_MS);
+    batches.set(batch, (batches.get(batch) ?? 0) + 1);
+  }
+  const modeBatch = [...batches.entries()]
+    .reduce((best, entry) => entry[1] > best[1] ? entry : best)[0];
+  let weightedTotal = 0;
+  let sampleCount = 0;
+  for (let batch = modeBatch - 2; batch <= modeBatch + 2; batch += 1) {
+    const count = batches.get(batch) ?? 0;
+    if (count === 0) continue;
+    const midpoint = batch * PLAYER_ACTION_LOG_BATCH_MS + (PLAYER_ACTION_LOG_BATCH_MS - 1) / 2;
+    weightedTotal += midpoint * count;
+    sampleCount += count;
+  }
+  if (sampleCount < 3) return null;
+  return {
+    durationMs: Math.round((weightedTotal / sampleCount) / 10) * 10,
+    estimated: true,
+    sampleCount,
+  };
+}
+
+function estimatePlayerGcd(fights, report, playerName) {
+  const speedType = getPlayerPrimarySpeedType(fights, report, playerName);
+  const provided = getProvidedPlayerGcd(fights, report, playerName, speedType);
+  if (provided) return provided;
+  const intervals = [];
+  for (const fight of fights) {
+    const actions = (fightDetails.get(`${report.code}:${fight.id}`)?.actionCasts ?? [])
+      .filter((action) => action.source === playerName);
+    const gcds = collectCompletedPlayerGcds(actions, speedType);
+    for (let index = 1; index < gcds.length; index += 1) {
+      const previous = gcds[index - 1];
+      const current = gcds[index];
+      const gameData = getPlayerActionGameData(previous.action);
+      const baseRecastMs = Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
+        ? gameData.recastMs
+        : PLAYER_ACTION_BASE_GCD_MS;
+      const hasLongCast = Number.isFinite(previous.castDurationMs)
+        && previous.castDurationMs >= PLAYER_ACTION_BASE_GCD_MS;
+      const intervalBaseMs = hasLongCast ? previous.castDurationMs : baseRecastMs;
+      const rawIntervalMs = current.timestamp - previous.timestamp
+        - (hasLongCast ? PLAYER_ACTION_CAST_ANIMATION_LOCK_MS : 0);
+      const normalizedIntervalMs = rawIntervalMs / (intervalBaseMs / PLAYER_ACTION_BASE_GCD_MS);
+      if (normalizedIntervalMs >= 1_000 && normalizedIntervalMs <= 4_000) {
+        intervals.push(normalizedIntervalMs);
+      }
+    }
+  }
+  return estimateGcdFromIntervals(intervals);
+}
+
+function formatPlayerGcdSummary(gcd) {
+  if (!gcd) return 'GCD unavailable';
+  const duration = `${(gcd.durationMs / 1_000).toFixed(2)}s`;
+  return gcd.estimated
+    ? `Estimated GCD: ${duration} (${gcd.sampleCount} samples)`
+    : `GCD: ${duration} (FFLogs stats)`;
 }
 
 function parseFightTimeInput(value) {
@@ -2885,7 +3234,89 @@ function parseFightTimeInput(value) {
   return (minutes * 60 + seconds) * 1000;
 }
 
-function createPlayerActionsPullRow(report, fight, playerName, startMs, endMs) {
+const PLAYER_ACTION_CANCEL_EVENT_TYPES = new Set([
+  'cancelcast', 'castcancel', 'cancelledcast', 'castcancelled',
+]);
+
+function pairPlayerActionEvents(actions) {
+  const visibleActions = [];
+  const castSpans = [];
+  const pendingBySource = new Map();
+  const sortedActions = [...actions].sort((first, second) => first.timestamp - second.timestamp);
+
+  const finishPending = (pending, endAction, outcome) => {
+    if (!pending) return;
+    castSpans.push({ begin: pending, end: endAction, outcome });
+    const sourceKey = String(pending.sourceId ?? pending.source);
+    const sourcePending = pendingBySource.get(sourceKey) ?? [];
+    sourcePending.splice(sourcePending.indexOf(pending), 1);
+  };
+
+  for (const action of sortedActions) {
+    const eventType = action.eventType ?? 'cast';
+    const sourceKey = String(action.sourceId ?? action.source);
+    const sourcePending = pendingBySource.get(sourceKey) ?? [];
+    if (eventType === 'begincast') {
+      for (const pending of [...sourcePending]) finishPending(pending, action, 'cancelled');
+      sourcePending.push(action);
+      pendingBySource.set(sourceKey, sourcePending);
+      visibleActions.push(action);
+      continue;
+    }
+
+    const matchingPending = [...sourcePending].reverse().find((pending) => (
+      Number(pending.abilityId) === Number(action.abilityId)
+    ));
+    if (PLAYER_ACTION_CANCEL_EVENT_TYPES.has(eventType)) {
+      finishPending(matchingPending, action, 'cancelled');
+      continue;
+    }
+
+    if (eventType === 'cast') {
+      for (const pending of [...sourcePending]) {
+        finishPending(pending, action, pending === matchingPending ? 'completed' : 'cancelled');
+      }
+      visibleActions.push(action);
+    }
+  }
+
+  return { visibleActions, castSpans };
+}
+
+function appendPlayerActionMechanicTicks(track, fight, state, startMs, endMs, displayAnchorMs = 0) {
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  let visibleMechanicIndex = 0;
+  for (const mechanic of dancingMadMechanics) {
+    const elapsedMs = getEncounterRelativeTimestamp(mechanic, phaseStarts);
+    if (elapsedMs < startMs || elapsedMs > endMs) continue;
+    const position = ((elapsedMs - startMs) / (endMs - startMs)) * 100;
+    const tick = document.createElement('span');
+    tick.className = 'player-actions-mechanic-tick';
+    tick.classList.add(`label-tier-${visibleMechanicIndex % 2}`);
+    tick.style.left = `${position}%`;
+    tick.title = `${mechanic.mechanic} · ${formatPreciseFightDuration(elapsedMs - displayAnchorMs)}`;
+    tick.setAttribute('aria-label', tick.title);
+    const label = document.createElement('span');
+    label.className = 'player-actions-mechanic-label';
+    label.textContent = mechanic.mechanic;
+    tick.append(label);
+    track.append(tick);
+    visibleMechanicIndex += 1;
+  }
+}
+
+function createPlayerActionsPullRow(
+  report,
+  fight,
+  playerName,
+  startMs,
+  endMs,
+  displayAnchorMs = 0,
+) {
   const row = document.createElement('section');
   row.className = 'player-actions-row';
   const identity = document.createElement('div');
@@ -2898,16 +3329,27 @@ function createPlayerActionsPullRow(report, fight, playerName, startMs, endMs) {
   trackWrap.className = 'player-actions-track-wrap';
   const track = document.createElement('div');
   track.className = 'player-actions-track';
-  const startLabel = document.createElement('span');
-  startLabel.className = 'player-actions-range-label start';
-  startLabel.textContent = formatFightDuration(startMs);
-  const endLabel = document.createElement('span');
-  endLabel.className = 'player-actions-range-label end';
-  endLabel.textContent = formatFightDuration(endMs);
   const state = fightDetails.get(`${report.code}:${fight.id}`);
-  const actions = (state?.actionCasts ?? []).filter((cast) => {
+  const playerActions = (state?.actionCasts ?? []).filter((cast) => cast.source === playerName);
+  const { visibleActions, castSpans } = pairPlayerActionEvents(playerActions);
+  appendPlayerActionMechanicTicks(track, fight, state, startMs, endMs, displayAnchorMs);
+  for (const castSpan of castSpans) {
+    const beginMs = castSpan.begin.timestamp - Number(fight.startTime);
+    const endCastMs = castSpan.end.timestamp - Number(fight.startTime);
+    const clippedStart = Math.max(startMs, beginMs);
+    const clippedEnd = Math.min(endMs, endCastMs);
+    if (clippedEnd <= clippedStart) continue;
+    const span = document.createElement('span');
+    span.className = `player-actions-cast-span ${castSpan.outcome}`;
+    span.classList.add(getPlayerActionMarkerCategory(castSpan.begin));
+    span.style.left = `${((clippedStart - startMs) / (endMs - startMs)) * 100}%`;
+    span.style.width = `${((clippedEnd - clippedStart) / (endMs - startMs)) * 100}%`;
+    span.title = `${castSpan.begin.ability} · ${castSpan.outcome} · ${formatPreciseFightDuration(beginMs - displayAnchorMs)}–${formatPreciseFightDuration(endCastMs - displayAnchorMs)}`;
+    track.append(span);
+  }
+  const actions = visibleActions.filter((cast) => {
     const elapsedMs = cast.timestamp - Number(fight.startTime);
-    return cast.source === playerName && elapsedMs >= startMs && elapsedMs <= endMs;
+    return elapsedMs >= startMs && elapsedMs <= endMs;
   });
   const stackCounts = new Map();
   for (const action of actions) {
@@ -2919,10 +3361,19 @@ function createPlayerActionsPullRow(report, fight, playerName, startMs, endMs) {
     const marker = document.createElement('span');
     marker.className = 'player-actions-marker';
     marker.classList.add(getPlayerActionMarkerCategory(action));
+    if (action.eventType === 'begincast') marker.classList.add('begin-cast');
     marker.style.left = `${position}%`;
     marker.style.setProperty('--action-offset', `${stackIndex * -5}px`);
     marker.style.zIndex = String(3 + stackIndex);
-    marker.append(createPlayerActionIcon(action, elapsedMs));
+    const timingDescription = getTrackedPlayerActionTimingDescription(
+      report,
+      fight,
+      state,
+      playerName,
+      action,
+      elapsedMs,
+    );
+    marker.append(createPlayerActionIcon(action, elapsedMs - displayAnchorMs, timingDescription));
     track.append(marker);
   }
   const hoverLine = document.createElement('span');
@@ -2935,19 +3386,107 @@ function createPlayerActionsPullRow(report, fight, playerName, startMs, endMs) {
     const hoveredMs = startMs + ratio * (endMs - startMs);
     hoverLine.style.left = `${ratio * 100}%`;
     hoverTime.style.left = `${ratio * 100}%`;
-    hoverTime.textContent = formatPreciseFightDuration(hoveredMs);
+    hoverTime.textContent = formatPreciseFightDuration(hoveredMs - displayAnchorMs);
     track.classList.add('show-hover-time');
   });
   track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
   track.append(hoverLine, hoverTime);
-  trackWrap.append(track, startLabel, endLabel);
+  trackWrap.append(track);
   row.append(identity, trackWrap);
   return row;
 }
 
-function createPlayerActionIcon(action, elapsedMs) {
+function getTrackedPlayerActionTimingDescription(report, fight, state, playerName, action, elapsedMs) {
+  if (action.eventType === 'begincast') return null;
+  const abilityMitigations = dancingMadMitigations.filter((mitigation) => (
+    Number(mitigation.abilityId) === Number(action.abilityId)
+  ));
+  if (abilityMitigations.length === 0) return null;
+
+  const fightKey = `${report.code}:${fight.id}`;
+  const tanksSwapped = swappedTankAssignmentsByFight.get(fightKey) === true;
+  const tankSlots = tanksSwapped
+    ? { MT: state?.tankSlots?.OT ?? null, OT: state?.tankSlots?.MT ?? null }
+    : state?.tankSlots;
+  const partySlots = mapPartyMembersToPlanSlots(state?.partyMembers ?? [], tankSlots);
+  const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
+  const assignedSlots = PARTY_SLOT_ORDER.filter((slot) => partySlots.get(slot)?.name === playerName);
+  const phaseStarts = resolveEncounterPhaseStarts(
+    DANCING_MAD_ENCOUNTER_NAME,
+    fight,
+    state?.phaseReferenceEvents ?? [],
+  );
+  const windows = abilityMitigations
+    .filter((mitigation) => assignedSlots.includes(mitigation.assignedTo))
+    .filter((mitigation) => {
+      const requiredJobs = getMitigationJobs(mitigation);
+      return requiredJobs.length === 0 || requiredJobs.includes(player?.job);
+    })
+    .map((mitigation) => {
+      const phaseStartMs = phaseStarts.get(Number(mitigation.phase));
+      if (!Number.isFinite(phaseStartMs)) return null;
+      return {
+        mitigation,
+        startMs: phaseStartMs + Number(mitigation.startElapsedSeconds) * 1000,
+        endMs: phaseStartMs + Number(mitigation.endElapsedSeconds) * 1000,
+      };
+    })
+    .filter(Boolean)
+    .filter((window) => window.startMs <= getFightDuration(fight))
+    .sort((first, second) => first.startMs - second.startMs || first.endMs - second.endMs);
+
+  const associatedWindow = windows
+    .map((window, index) => ({
+      ...window,
+      index,
+      distanceMs: mitigationCastDistance(elapsedMs, window.startMs, window.endMs),
+    }))
+    .filter((window) => window.distanceMs <= MITIGATION_GRACE_SECONDS * 1000)
+    .sort((first, second) => first.distanceMs - second.distanceMs)[0] ?? null;
+
+  let timingText = "Didn't enter into any window";
+  if (associatedWindow && elapsedMs < associatedWindow.startMs) {
+    timingText = `${formatTooltipSeconds((associatedWindow.startMs - elapsedMs) / 1000)} early`;
+  } else if (associatedWindow && elapsedMs > associatedWindow.endMs) {
+    timingText = `${formatTooltipSeconds((elapsedMs - associatedWindow.endMs) / 1000)} late`;
+  } else if (associatedWindow) {
+    timingText = `On time (${formatTooltipSeconds((elapsedMs - associatedWindow.startMs) / 1000)} through ${formatTooltipSecondAdjective((associatedWindow.endMs - associatedWindow.startMs) / 1000)} window)`;
+  }
+
+  if (action.ability === 'Dia') return timingText;
+  const cooldownSeconds = mitigationCooldowns.get(action.ability);
+  if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return timingText;
+  const nextWindow = associatedWindow
+    ? windows[associatedWindow.index + 1]
+    : windows.find((window) => window.startMs > elapsedMs);
+  if (!nextWindow) return timingText;
+
+  const cooldownEndMs = elapsedMs + cooldownSeconds * 1000;
+  if (cooldownEndMs <= nextWindow.startMs) return timingText;
+  if (cooldownEndMs <= nextWindow.endMs) {
+    return `${timingText}. Caused the mit to be on cooldown until ${formatTooltipSeconds((nextWindow.endMs - cooldownEndMs) / 1000)} before the next window's maximum.`;
+  }
+  return `${timingText}. Caused the mit to be on cooldown until ${formatTooltipSeconds((cooldownEndMs - nextWindow.endMs) / 1000)} after the next window's maximum.`;
+}
+
+function formatTooltipSeconds(seconds) {
+  const rounded = Math.round(Math.max(0, Number(seconds) || 0) * 10) / 10;
+  const value = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  return `${value} ${rounded === 1 ? 'second' : 'seconds'}`;
+}
+
+function formatTooltipSecondAdjective(seconds) {
+  const rounded = Math.round(Math.max(0, Number(seconds) || 0) * 10) / 10;
+  const value = Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1);
+  return `${value}-second`;
+}
+
+function createPlayerActionIcon(action, elapsedMs, timingDescription = null) {
+  const eventSuffix = action.eventType === 'begincast' ? ' · begins' : '';
+  const timingSuffix = timingDescription ? ` · ${timingDescription}` : '';
+  const label = `${action.ability}${eventSuffix} · ${formatPreciseFightDuration(elapsedMs)}${timingSuffix}`;
   if (!action.icon || isUnknownFflogsStatus(action.ability, action.icon)) {
-    const fallback = createFightEventStatusFallback(`${action.ability} · ${formatPreciseFightDuration(elapsedMs)}`);
+    const fallback = createFightEventStatusFallback(label);
     fallback.classList.add('player-action-icon');
     return fallback;
   }
@@ -2956,9 +3495,9 @@ function createPlayerActionIcon(action, elapsedMs) {
   icon.src = action.icon;
   icon.alt = '';
   icon.loading = 'lazy';
-  attachFightEventStatusTooltip(icon, `${action.ability} · ${formatPreciseFightDuration(elapsedMs)}`);
+  attachFightEventStatusTooltip(icon, label);
   icon.addEventListener('error', () => {
-    const fallback = createFightEventStatusFallback(`${action.ability} · ${formatPreciseFightDuration(elapsedMs)}`);
+    const fallback = createFightEventStatusFallback(label);
     fallback.classList.add('player-action-icon');
     icon.replaceWith(fallback);
   }, { once: true });

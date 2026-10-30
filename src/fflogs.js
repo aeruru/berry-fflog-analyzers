@@ -195,6 +195,8 @@ export async function fetchFightEventDetails(
   const assignmentFilters = [
     '(type = "cast" AND ability.name = "Revolting Ruin III")',
     '(type = "cast" AND source.disposition = "friendly")',
+    '(type = "begincast" AND source.disposition = "friendly")',
+    '(type = "combatantinfo" AND source.disposition = "friendly")',
   ];
   // Only the defensive statuses used by programmed death explanations are fetched;
   // this keeps the shared fight-event response much smaller than all buff traffic.
