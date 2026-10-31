@@ -1,112 +1,245 @@
-const checklistElement = document.querySelector('#checklist');
-const titleElement = document.querySelector('#page-title');
-const progressLabel = document.querySelector('#progress-label');
+const checklist = document.querySelector('#checklist');
+const title = document.querySelector('#page-title');
+const progress = document.querySelector('#progress-label');
 const starProgress = document.querySelector('#star-progress');
-const resetButton = document.querySelector('#reset-button');
-const errorElement = document.querySelector('#error');
-const states = ['off', 'on', 'dash'];
+const error = document.querySelector('#error');
+const undoButton = document.querySelector('#undo-button');
+const markXButton = document.querySelector('#mark-x-button');
+const zoomSlider = document.querySelector('#zoom-slider');
+const zoomValue = document.querySelector('#zoom-value');
+
+const states = ['off', 'on', 'dash', 'x'];
+const history = [];
+const longPressed = new WeakSet();
 let storageKey = 'static-checklist';
+let config;
+let markAllUsed = false;
+let holdTimer;
 
-function savedStates() {
-  try { return JSON.parse(localStorage.getItem(storageKey)) ?? {}; }
-  catch { return {}; }
+function loadSaved() {
+  try {
+    const value = JSON.parse(localStorage.getItem(storageKey)) ?? {};
+    return value.boxes ? value : { boxes: value, markAllUsed: false, zoom: 100 };
+  } catch {
+    return { boxes: {}, markAllUsed: false, zoom: 100 };
+  }
 }
 
-function saveStates() {
-  const saved = {};
-  document.querySelectorAll('.state-box').forEach((box) => {
-    if (box.dataset.state !== 'off') saved[box.id] = box.dataset.state;
-  });
-  localStorage.setItem(storageKey, JSON.stringify(saved));
+function boxValue(box) {
+  return { state: box.dataset.state, locked: box.dataset.locked === 'true' };
 }
 
-function setBoxState(box, state) {
+function setState(box, state, locked = false) {
   box.dataset.state = state;
-  box.textContent = state === 'on' ? '✓' : state === 'dash' ? '−' : '';
+  box.dataset.locked = String(locked);
+  box.textContent = state === 'on' ? '✓' : state === 'dash' ? '−' : state === 'x' ? '×' : '';
   box.setAttribute('aria-checked', state === 'dash' ? 'mixed' : String(state === 'on'));
+}
+
+function snapshot() {
+  const boxes = {};
+  document.querySelectorAll('.state-box').forEach((box) => { boxes[box.id] = boxValue(box); });
+  return { boxes, markAllUsed };
+}
+
+function pushHistory() {
+  history.push(snapshot());
+  if (history.length > 3) history.shift();
+  undoButton.disabled = false;
+}
+
+function persist() {
+  const boxes = {};
+  document.querySelectorAll('.state-box').forEach((box) => {
+    const value = boxValue(box);
+    if (value.state !== 'off' || value.locked) boxes[box.id] = value;
+  });
+  localStorage.setItem(storageKey, JSON.stringify({ boxes, markAllUsed, zoom: Number(zoomSlider.value) }));
 }
 
 function fraction(boxes) {
   const counted = boxes.filter((box) => box.dataset.state !== 'dash');
-  const on = counted.filter((box) => box.dataset.state === 'on').length;
-  return `${on}/${counted.length}`;
+  return `${counted.filter((box) => box.dataset.state === 'on').length}/${counted.length}`;
 }
 
-function updateProgress() {
+function update() {
   const boxes = [...document.querySelectorAll('.state-box')];
-  progressLabel.textContent = fraction(boxes);
+  progress.textContent = fraction(boxes);
   starProgress.textContent = fraction(boxes.filter((box) => box.closest('.starred')));
+  markXButton.disabled = markAllUsed;
+  undoButton.disabled = history.length === 0;
 }
 
-function cycleBox(box) {
-  setBoxState(box, states[(states.indexOf(box.dataset.state) + 1) % states.length]);
-  saveStates();
-  updateProgress();
+function markEarlierEmptyBoxes(box) {
+  const boxes = [...box.closest('.line').querySelectorAll('.state-box')];
+  boxes.slice(0, boxes.indexOf(box)).forEach((earlier) => {
+    if (earlier.dataset.state === 'off' && earlier.dataset.locked !== 'true') setState(earlier, 'x');
+  });
 }
 
-function makeLine(text, lineIndex, saved) {
+function cycle(box) {
+  pushHistory();
+  markEarlierEmptyBoxes(box);
+  const state = box.dataset.state;
+  if (state === 'x') setState(box, 'off', true);
+  else setState(box, states[states.indexOf(state) + 1], false);
+  persist();
+  update();
+}
+
+function dashAhead(box) {
+  const boxes = [...box.closest('.line').querySelectorAll('.state-box')];
+  const ahead = boxes.slice(boxes.indexOf(box) + 1);
+  if (!ahead.some((candidate) => ['off', 'x'].includes(candidate.dataset.state))) return;
+  pushHistory();
+  ahead.forEach((candidate) => {
+    if (['off', 'x'].includes(candidate.dataset.state)) setState(candidate, 'dash');
+  });
+  persist();
+  update();
+}
+
+function attachBoxEvents(box) {
+  box.addEventListener('click', (event) => {
+    if (longPressed.delete(box) || event.detail > 1) return;
+    cycle(box);
+  });
+  box.addEventListener('dblclick', (event) => event.preventDefault());
+  box.addEventListener('pointerdown', () => {
+    if (box.dataset.state !== 'dash') return;
+    holdTimer = setTimeout(() => {
+      longPressed.add(box);
+      dashAhead(box);
+    }, 600);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((name) => {
+    box.addEventListener(name, () => clearTimeout(holdTimer));
+  });
+}
+
+function makeLine(text, lineIndex, stored) {
   const row = document.createElement('div');
-  const isIndented = /^\s/.test(text);
+  const indented = /^\s/.test(text);
   const trimmed = text.trimStart();
   const match = trimmed.match(/^(?:☐\s*)+/);
-  const boxCount = match ? (match[0].match(/☐/g) ?? []).length : 0;
-  let labelText = match ? trimmed.slice(match[0].length) : trimmed;
-  const isStarred = labelText.endsWith('⭐');
-  if (isStarred) labelText = labelText.slice(0, -1).trimEnd();
+  const count = match ? (match[0].match(/☐/g) ?? []).length : 0;
+  let label = match ? trimmed.slice(match[0].length) : trimmed;
+  const starred = label.endsWith('⭐');
+  if (starred) label = label.slice(0, -1).trimEnd();
+  row.className = `line${indented ? ' indented' : ''}${count ? '' : ' note'}${starred ? ' starred' : ''}`;
 
-  row.className = `line${isIndented ? ' indented' : ''}${boxCount ? '' : ' note'}${isStarred ? ' starred' : ''}`;
-  for (let boxIndex = 0; boxIndex < boxCount; boxIndex += 1) {
-    const id = `check-${lineIndex}-${boxIndex}`;
+  for (let index = 0; index < count; index += 1) {
     const box = document.createElement('button');
+    const id = `check-${lineIndex}-${index}`;
+    const savedValue = stored[id];
+    const value = typeof savedValue === 'string'
+      ? { state: savedValue, locked: false }
+      : savedValue ?? { state: 'off', locked: false };
     box.type = 'button';
     box.id = id;
     box.className = 'state-box';
     box.setAttribute('role', 'checkbox');
-    box.setAttribute('aria-label', labelText);
-    setBoxState(box, states.includes(saved[id]) ? saved[id] : 'off');
-    box.addEventListener('click', () => cycleBox(box));
+    box.setAttribute('aria-label', label);
+    setState(box, states.includes(value.state) ? value.state : 'off', Boolean(value.locked));
+    attachBoxEvents(box);
     row.append(box);
   }
-
-  const content = document.createElement('span');
-  content.className = 'line-text';
-  content.textContent = labelText;
-  row.append(content);
+  const span = document.createElement('span');
+  span.textContent = label;
+  row.append(span);
   return row;
 }
 
-function render(config) {
-  document.title = config.title || 'Checklist';
-  titleElement.textContent = config.title || 'Checklist';
-  storageKey = `static-checklist:${config.id || config.title || 'default'}`;
-  const saved = savedStates();
-  const sectionHeadings = new Set(config.sectionHeadings ?? []);
-  let section;
+function setZoom(value, save = true) {
+  const zoom = Math.min(500, Math.max(50, Number(value) || 100));
+  zoomSlider.value = String(zoom);
+  zoomValue.textContent = `${zoom}%`;
+  checklist.style.zoom = `${zoom}%`;
+  if (save) persist();
+}
 
-  config.lines.forEach((line, lineIndex) => {
+function render(value) {
+  config = value;
+  document.title = value.title || 'Checklist';
+  title.textContent = document.title;
+  storageKey = `static-checklist:${value.id || value.title || 'default'}`;
+  const saved = loadSaved();
+  markAllUsed = Boolean(saved.markAllUsed);
+  const headings = new Set(value.sectionHeadings ?? []);
+  let section;
+  value.lines.forEach((line, lineIndex) => {
     if (!line.trim()) return;
-    const isHeading = sectionHeadings.has(line.trim());
-    if (isHeading || !section) {
+    const heading = headings.has(line.trim());
+    if (heading || !section) {
       section = document.createElement('section');
       section.className = 'section';
-      checklistElement.append(section);
-      if (isHeading) {
-        const heading = document.createElement('h2');
-        heading.textContent = line.trim();
-        section.append(heading);
+      checklist.append(section);
+      if (heading) {
+        const h = document.createElement('h2');
+        h.textContent = line.trim();
+        section.append(h);
         return;
       }
     }
-    section.append(makeLine(line, lineIndex, saved));
+    section.append(makeLine(line, lineIndex, saved.boxes));
   });
-  checklistElement.setAttribute('aria-busy', 'false');
-  updateProgress();
+  setZoom(saved.zoom ?? 100, false);
+  checklist.setAttribute('aria-busy', 'false');
+  update();
 }
 
-resetButton.addEventListener('click', () => {
-  document.querySelectorAll('.state-box').forEach((box) => setBoxState(box, 'off'));
-  saveStates();
-  updateProgress();
+function exportText() {
+  if (!config) return;
+  const lines = config.lines.map((text, lineIndex) => {
+    const indent = text.match(/^\s*/)[0];
+    const trimmed = text.slice(indent.length);
+    const match = trimmed.match(/^(?:☐\s*)+/);
+    if (!match) return text;
+    const count = (match[0].match(/☐/g) ?? []).length;
+    const symbols = Array.from({ length: count }, (_, index) => {
+      const state = document.querySelector(`#check-${lineIndex}-${index}`)?.dataset.state ?? 'off';
+      return state === 'on' ? '☒ ' : state === 'dash' ? '- ' : '☐ ';
+    }).join('');
+    return `${indent}${symbols}${trimmed.slice(match[0].length)}`;
+  });
+  const blob = new Blob([`${lines.join('\r\n')}\r\n`], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = config.downloadFileName || `${config.id || 'checklist'}.txt`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+document.querySelector('#save-button').addEventListener('click', exportText);
+zoomSlider.addEventListener('input', () => setZoom(zoomSlider.value));
+markXButton.addEventListener('click', () => {
+  if (markAllUsed) return;
+  pushHistory();
+  document.querySelectorAll('.state-box[data-state="off"]').forEach((box) => setState(box, 'x'));
+  markAllUsed = true;
+  persist();
+  update();
+});
+document.querySelector('#reset-button').addEventListener('click', () => {
+  pushHistory();
+  document.querySelectorAll('.state-box').forEach((box) => setState(box, 'off'));
+  markAllUsed = false;
+  persist();
+  update();
+});
+undoButton.addEventListener('click', () => {
+  const previous = history.pop();
+  if (!previous) return;
+  Object.entries(previous.boxes).forEach(([id, value]) => {
+    const box = document.getElementById(id);
+    if (box) setState(box, value.state, value.locked);
+  });
+  markAllUsed = previous.markAllUsed;
+  persist();
+  update();
 });
 
 fetch('checklist.json')
@@ -115,8 +248,8 @@ fetch('checklist.json')
     return response.json();
   })
   .then(render)
-  .catch((error) => {
-    checklistElement.hidden = true;
-    errorElement.hidden = false;
-    errorElement.textContent = `${error.message}. Serve this folder through a local web server rather than opening index.html directly.`;
+  .catch((reason) => {
+    checklist.hidden = true;
+    error.hidden = false;
+    error.textContent = `${reason.message}. Serve this folder through a local web server.`;
   });
