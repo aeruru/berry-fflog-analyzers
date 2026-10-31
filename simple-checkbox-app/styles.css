@@ -1,0 +1,23 @@
+:root { color-scheme: dark; font-family: Arial, sans-serif; background: #101217; color: #eee; --muted: #9a9da6; --line: #292c34; --green: #55c98c; --yellow: #f0c84b; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: max-content; min-height: 100vh; padding-bottom: 4rem; background: #101217; }
+.page-header { display: flex; align-items: center; justify-content: space-between; padding: 1rem 1.25rem .7rem; border-bottom: 1px solid var(--line); }
+h1 { margin: 0; font-size: 1.35rem; }
+button { border: 1px solid #454a55; border-radius: .25rem; background: transparent; color: #ddd; cursor: pointer; }
+#reset-button { padding: .35rem .65rem; }
+#reset-button:hover { border-color: #888; }
+main { padding: .75rem 1.25rem 1.5rem; white-space: nowrap; }
+.section { margin: 0 0 1rem; }
+.section h2 { margin: .9rem 0 .35rem; padding-bottom: .2rem; border-bottom: 1px solid var(--line); color: #fff; font-size: 1rem; }
+.line { display: flex; align-items: center; gap: .3rem; min-height: 1.45rem; line-height: 1.25; white-space: nowrap; }
+.line.indented { margin-left: 1.2rem; }
+.line.note { color: var(--muted); font-size: .9rem; }
+.state-box { display: inline-grid; flex: 0 0 1rem; width: 1rem; height: 1rem; place-items: center; padding: 0; border: 1px solid #717681; border-radius: .15rem; font-size: .8rem; font-weight: bold; line-height: 1; }
+.state-box[data-state="on"] { border-color: var(--green); background: var(--green); color: #07150e; }
+.state-box[data-state="dash"] { border-color: var(--yellow); background: var(--yellow); color: #211b03; }
+.line.starred { color: #fff6b1; text-shadow: 0 0 .35rem rgba(255, 220, 70, .9); }
+.line.starred .state-box { box-shadow: 0 0 .45rem rgba(255, 218, 55, .85); }
+.error { margin: 1rem; color: #ff8b98; }
+footer { position: fixed; right: 0; bottom: 0; left: 0; display: flex; gap: 1.25rem; padding: .7rem 1.25rem; border-top: 1px solid var(--line); background: #101217; font-weight: bold; }
+.star-progress { color: #fff3a0; text-shadow: 0 0 .4rem rgba(255, 218, 55, .95); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; } }

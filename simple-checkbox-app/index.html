@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Grading Checklist</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <header class="page-header">
+      <div>
+        <h1 id="page-title">Grading Checklist</h1>
+      </div>
+      <button id="reset-button" type="button">Reset</button>
+    </header>
+
+    <main id="checklist" aria-busy="true"></main>
+    <p id="error" class="error" hidden></p>
+    <footer aria-live="polite">
+      <span id="progress-label">0/0</span>
+      <span id="star-progress" class="star-progress">0/0</span>
+    </footer>
+  </body>
+</html>
