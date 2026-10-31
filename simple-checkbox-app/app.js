@@ -13,25 +13,25 @@ const history = [];
 const longPressed = new WeakSet();
 let storageKey = 'static-checklist';
 let config;
-let markAllUsed = false;
 let holdTimer;
 
 function loadSaved() {
   try {
     const value = JSON.parse(localStorage.getItem(storageKey)) ?? {};
-    return value.boxes ? value : { boxes: value, markAllUsed: false, zoom: 100 };
+    return value.boxes ? value : { boxes: value, zoom: 100 };
   } catch {
-    return { boxes: {}, markAllUsed: false, zoom: 100 };
+    return { boxes: {}, zoom: 100 };
   }
 }
 
 function boxValue(box) {
-  return { state: box.dataset.state, locked: box.dataset.locked === 'true' };
+  return { state: box.dataset.state, locked: box.dataset.locked === 'true', xSource: box.dataset.xSource || '' };
 }
 
-function setState(box, state, locked = false) {
+function setState(box, state, locked = false, xSource = '') {
   box.dataset.state = state;
   box.dataset.locked = String(locked);
+  box.dataset.xSource = state === 'x' ? xSource : '';
   box.textContent = state === 'on' ? '✓' : state === 'dash' ? '−' : state === 'x' ? '×' : '';
   box.setAttribute('aria-checked', state === 'dash' ? 'mixed' : String(state === 'on'));
 }
@@ -39,7 +39,7 @@ function setState(box, state, locked = false) {
 function snapshot() {
   const boxes = {};
   document.querySelectorAll('.state-box').forEach((box) => { boxes[box.id] = boxValue(box); });
-  return { boxes, markAllUsed };
+  return { boxes };
 }
 
 function pushHistory() {
@@ -54,7 +54,7 @@ function persist() {
     const value = boxValue(box);
     if (value.state !== 'off' || value.locked) boxes[box.id] = value;
   });
-  localStorage.setItem(storageKey, JSON.stringify({ boxes, markAllUsed, zoom: Number(zoomSlider.value) }));
+  localStorage.setItem(storageKey, JSON.stringify({ boxes, zoom: Number(zoomSlider.value) }));
 }
 
 function fraction(boxes) {
@@ -66,14 +66,13 @@ function update() {
   const boxes = [...document.querySelectorAll('.state-box')];
   progress.textContent = fraction(boxes);
   starProgress.textContent = fraction(boxes.filter((box) => box.closest('.starred')));
-  markXButton.disabled = markAllUsed;
   undoButton.disabled = history.length === 0;
 }
 
 function markEarlierEmptyBoxes(box) {
-  const boxes = [...box.closest('.line').querySelectorAll('.state-box')];
+  const boxes = [...document.querySelectorAll('.state-box')];
   boxes.slice(0, boxes.indexOf(box)).forEach((earlier) => {
-    if (earlier.dataset.state === 'off' && earlier.dataset.locked !== 'true') setState(earlier, 'x');
+    if (earlier.dataset.state === 'off' && earlier.dataset.locked !== 'true') setState(earlier, 'x', false, 'auto');
   });
 }
 
@@ -81,14 +80,15 @@ function cycle(box) {
   pushHistory();
   markEarlierEmptyBoxes(box);
   const state = box.dataset.state;
-  if (state === 'x') setState(box, 'off', true);
+  if (state === 'x') setState(box, 'off', box.dataset.xSource !== 'dash');
+  else if (state === 'dash') setState(box, 'x', false, 'dash');
   else setState(box, states[states.indexOf(state) + 1], false);
   persist();
   update();
 }
 
 function dashAhead(box) {
-  const boxes = [...box.closest('.line').querySelectorAll('.state-box')];
+  const boxes = [...document.querySelectorAll('.state-box')];
   const ahead = boxes.slice(boxes.indexOf(box) + 1);
   if (!ahead.some((candidate) => ['off', 'x'].includes(candidate.dataset.state))) return;
   pushHistory();
@@ -140,7 +140,7 @@ function makeLine(text, lineIndex, stored) {
     box.className = 'state-box';
     box.setAttribute('role', 'checkbox');
     box.setAttribute('aria-label', label);
-    setState(box, states.includes(value.state) ? value.state : 'off', Boolean(value.locked));
+    setState(box, states.includes(value.state) ? value.state : 'off', Boolean(value.locked), value.xSource || '');
     attachBoxEvents(box);
     row.append(box);
   }
@@ -154,7 +154,7 @@ function setZoom(value, save = true) {
   const zoom = Math.min(500, Math.max(50, Number(value) || 100));
   zoomSlider.value = String(zoom);
   zoomValue.textContent = `${zoom}%`;
-  checklist.style.zoom = `${zoom}%`;
+  document.body.style.zoom = `${zoom}%`;
   if (save) persist();
 }
 
@@ -164,7 +164,6 @@ function render(value) {
   title.textContent = document.title;
   storageKey = `static-checklist:${value.id || value.title || 'default'}`;
   const saved = loadSaved();
-  markAllUsed = Boolean(saved.markAllUsed);
   const headings = new Set(value.sectionHeadings ?? []);
   let section;
   value.lines.forEach((line, lineIndex) => {
@@ -214,19 +213,19 @@ function exportText() {
 }
 
 document.querySelector('#save-button').addEventListener('click', exportText);
-zoomSlider.addEventListener('input', () => setZoom(zoomSlider.value));
+zoomSlider.addEventListener('input', () => { zoomValue.textContent = `${zoomSlider.value}%`; });
+zoomSlider.addEventListener('change', () => setZoom(zoomSlider.value));
 markXButton.addEventListener('click', () => {
-  if (markAllUsed) return;
+  const empty = [...document.querySelectorAll('.state-box[data-state="off"]')];
+  if (!empty.length) return;
   pushHistory();
-  document.querySelectorAll('.state-box[data-state="off"]').forEach((box) => setState(box, 'x'));
-  markAllUsed = true;
+  empty.forEach((box) => setState(box, 'x', false, 'bulk'));
   persist();
   update();
 });
 document.querySelector('#reset-button').addEventListener('click', () => {
   pushHistory();
   document.querySelectorAll('.state-box').forEach((box) => setState(box, 'off'));
-  markAllUsed = false;
   persist();
   update();
 });
@@ -237,7 +236,6 @@ undoButton.addEventListener('click', () => {
     const box = document.getElementById(id);
     if (box) setState(box, value.state, value.locked);
   });
-  markAllUsed = previous.markAllUsed;
   persist();
   update();
 });
