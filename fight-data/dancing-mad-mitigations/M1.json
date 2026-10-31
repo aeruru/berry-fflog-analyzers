@@ -1,0 +1,154 @@
+[
+  {
+    "startTime": "00:34.674",
+    "endTime": "00:37.389",
+    "startElapsedSeconds": 34.674,
+    "endElapsedSeconds": 37.389,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 1
+  },
+  {
+    "startTime": "01:57.525",
+    "endTime": "02:12.525",
+    "startElapsedSeconds": 117.525,
+    "endElapsedSeconds": 132.525,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 1
+  },
+  {
+    "startTime": "00:13.787",
+    "endTime": "00:28.787",
+    "startElapsedSeconds": 13.787,
+    "endElapsedSeconds": 28.787,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 2
+  },
+  {
+    "startTime": "02:00.111",
+    "endTime": "02:15.111",
+    "startElapsedSeconds": 120.111,
+    "endElapsedSeconds": 135.111,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 2
+  },
+  {
+    "startTime": "00:14.632",
+    "endTime": "00:29.632",
+    "startElapsedSeconds": 14.632,
+    "endElapsedSeconds": 29.632,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 3
+  },
+  {
+    "startTime": "02:03.888",
+    "endTime": "02:18.888",
+    "startElapsedSeconds": 123.888,
+    "endElapsedSeconds": 138.888,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 3
+  },
+  {
+    "startTime": "04:35.740",
+    "endTime": "04:45.155",
+    "startElapsedSeconds": 275.74,
+    "endElapsedSeconds": 285.155,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 3
+  },
+  {
+    "startTime": "01:20.101",
+    "endTime": "01:28.126",
+    "startElapsedSeconds": 80.101,
+    "endElapsedSeconds": 88.126,
+    "ability": "Feint",
+    "nickname": "Feint",
+    "role": "Melee",
+    "class": [
+      "MNK",
+      "DRG",
+      "NIN",
+      "SAM",
+      "RPR",
+      "VPR"
+    ],
+    "assignedTo": "M1",
+    "phase": 4
+  }
+]

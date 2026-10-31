@@ -42,6 +42,7 @@
                 <h2 id="reportsTitle">Reports</h2>
               </div>
               <div class="reports-actions">
+                <button class="refresh-reports-button" id="refreshReportsButton" type="button">Check for new reports</button>
                 <button class="test-data-button" id="testDataButton" type="button">Use test data</button>
                 <span class="report-count" id="reportCount">0 reports</span>
               </div>
@@ -64,10 +65,29 @@
                 >
                 <button id="loadReportButton" type="submit">Load report</button>
               </div>
-              <p>Paste an FFLogs report URL or enter its report code.</p>
+              <div class="report-search-meta">
+                <p class="report-search-hint">Paste an FFLogs report URL or enter its report code.</p>
+                <p class="lookup-status" id="lookupStatus" role="status" hidden></p>
+                <div
+                  class="report-details-view-control"
+                  id="detailsViewControl"
+                  title="The events timeline will always be shown."
+                >
+                  <span id="detailsViewLabel">Events table: Off</span>
+                  <button
+                    class="report-details-view-button"
+                    id="detailsViewButton"
+                    type="button"
+                    aria-label="Events table: off"
+                    aria-pressed="false"
+                    title="Show events table"
+                  >
+                    <span class="report-details-view-toggle-thumb" aria-hidden="true"></span>
+                  </button>
+                </div>
+              </div>
               <datalist id="recentReportCodes"></datalist>
             </form>
-            <p class="lookup-status" id="lookupStatus" role="status" hidden></p>
             <div class="lookup-result" id="lookupResult"></div>
           </section>
         </div>

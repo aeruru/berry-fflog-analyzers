@@ -1,0 +1,50 @@
+{
+  "Dancing Mad": {
+    "phases": [
+      {
+        "phase": 1,
+        "start": {
+          "type": "fixed",
+          "seconds": 0
+        }
+      },
+      {
+        "phase": 2,
+        "start": {
+          "type": "fixed",
+          "relativeToPhase": 1,
+          "seconds": 207
+        }
+      },
+      {
+        "phase": 3,
+        "start": {
+          "type": "fixed",
+          "relativeToPhase": 2,
+          "seconds": 214.054
+        }
+      },
+      {
+        "phase": 4,
+        "start": {
+          "type": "event",
+          "event": {
+            "eventType": "Begin Cast",
+            "ability": "Kefka Says",
+            "source": "Kefka",
+            "relativeToPhase": 0,
+            "minimumPullSeconds": 600
+          }
+        }
+      },
+      {
+        "phase": 5,
+        "start": {
+          "type": "fixed",
+          "relativeToPhase": 4,
+          "seconds": 150
+        }
+      }
+    ]
+  }
+}
