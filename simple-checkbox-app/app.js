@@ -125,8 +125,10 @@ function makeLine(text, lineIndex, stored) {
   const count = match ? (match[0].match(/☐/g) ?? []).length : 0;
   let label = match ? trimmed.slice(match[0].length) : trimmed;
   const starred = label.endsWith('⭐');
+  const blue = label.endsWith('🟦');
   if (starred) label = label.slice(0, -1).trimEnd();
-  row.className = `line${indented ? ' indented' : ''}${count ? '' : ' note'}${starred ? ' starred' : ''}`;
+  if (blue) label = label.slice(0, -2).trimEnd();
+  row.className = `line${indented ? ' indented' : ''}${count ? '' : ' note'}${starred ? ' starred' : ''}${blue ? ' blue' : ''}`;
 
   for (let index = 0; index < count; index += 1) {
     const box = document.createElement('button');

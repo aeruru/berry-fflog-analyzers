@@ -22,10 +22,15 @@ main { width: max-content; padding: .75rem 1.25rem 1.5rem; white-space: nowrap; 
 .state-box[data-state="dash"] { border-color: var(--yellow); background: var(--yellow); color: #211b03; }
 .state-box[data-state="x"] { border-color: var(--red); background: var(--red); color: #240507; }
 .line.starred { color: #fff6b1; text-shadow: 0 0 .35rem rgba(255,220,70,.9); }
-.line.starred .state-box { box-shadow: 0 0 .45rem rgba(255,255,255,.9); }
+.line.starred .state-box { box-shadow: 0 0 .45rem rgba(255, 255, 137, 0.9); }
 .line.starred .state-box[data-state="on"] { box-shadow: 0 0 .45rem var(--green); }
 .line.starred .state-box[data-state="dash"] { box-shadow: 0 0 .45rem var(--yellow); }
 .line.starred .state-box[data-state="x"] { box-shadow: 0 0 .45rem var(--red); }
+.line.blue { color: #83a5ff; text-shadow: 0 0 .35rem rgba(57, 115, 255, 0.9); }
+.line.blue .state-box { box-shadow: 0 0 .45rem rgba(148, 148, 255, 0.9); }
+.line.blue .state-box[data-state="on"] { box-shadow: 0 0 .45rem var(--green); }
+.line.blue .state-box[data-state="dash"] { box-shadow: 0 0 .45rem var(--yellow); }
+.line.blue .state-box[data-state="x"] { box-shadow: 0 0 .45rem var(--red); }
 #error { margin: 1rem; color: #ff8b98; }
 footer { position: fixed; right: 0; bottom: 0; left: 0; display: flex; gap: 1.25rem; padding: .7rem 1.25rem; border-top: 1px solid var(--line); background: #101217; font-weight: bold; }
 #star-progress { color: #fff3a0; text-shadow: 0 0 .4rem rgba(255,218,55,.95); }
