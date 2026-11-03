@@ -18,6 +18,7 @@
       },
       {
         "phase": 3,
+        "defaultDurationSeconds": 320,
         "start": {
           "type": "fixed",
           "relativeToPhase": 2,

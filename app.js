@@ -57,6 +57,17 @@ const PLAYER_ACTION_BASE_GCD_MS = 2_500;
 const PLAYER_ACTION_LOG_BATCH_MS = 45;
 const PLAYER_ACTION_CAST_ANIMATION_LOCK_MS = 100;
 const PLAYER_ACTION_GCD_COOLDOWN_GROUP = 58;
+const PLAYER_ACTION_JOB_SPEED_MODIFIERS = new Map([
+  ['MNK', 0.80],
+  ['NIN', 0.85],
+]);
+const PLAYER_ACTION_SPEED_STATUS_MODIFIERS = new Map([
+  [738, 0.85], // Circle of Power (Ley Lines)
+  [3689, 0.75], // Inspiration
+  [1299, 0.87], // Fuka
+  [3669, 0.85], // Swiftscaled
+  [157, 0.80], // Presence of Mind
+]);
 const PLAYER_ACTION_SPELL_SPEED_JOBS = new Set([
   'WHM', 'SCH', 'AST', 'SGE', 'BLM', 'SMN', 'RDM', 'PCT', 'BLU',
 ]);
@@ -748,8 +759,9 @@ function scheduleTimelineCollisionCheck() {
       }
 
       const endBounds = getTimelineTickLabelBounds(endTick);
+      const endTickLeft = endTick.getBoundingClientRect().left;
       const precedingTick = [...row.querySelectorAll('.fight-timeline-tick')]
-        .filter((tick) => tick !== endTick)
+        .filter((tick) => tick !== endTick && tick.getBoundingClientRect().left < endTickLeft - 1)
         .sort((first, second) => second.getBoundingClientRect().left - first.getBoundingClientRect().left)[0];
       const precedingBounds = getTimelineTickLabelBounds(precedingTick);
       if (endBounds && precedingBounds && precedingBounds.right - endBounds.left > 1) {
@@ -1613,6 +1625,7 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
     rawEvents, actorNames, friendlyIds, abilityNames, abilityIcons,
   );
   const playerSpeedAttributes = extractPlayerSpeedAttributes(rawEvents, actorNames);
+  const playerSpeedStatusEvents = extractPlayerSpeedStatusEvents(rawEvents, actorNames);
   const lifeEvents = extractPlayerLifeEvents(rawEvents);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, rawFight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1627,7 +1640,7 @@ function normalizeFightDetails(rawDetails, fightId = rawDetails?.fights?.[0]?.id
   );
   return {
     status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
-    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
+    mitigationCasts, actionCasts, playerSpeedAttributes, playerSpeedStatusEvents, lifeEvents,
   };
 }
 
@@ -1643,6 +1656,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
     fight.events ?? [], actorNames, friendlyIds, new Map(), new Map(),
   );
   const playerSpeedAttributes = extractPlayerSpeedAttributes(fight.events ?? [], actorNames);
+  const playerSpeedStatusEvents = extractPlayerSpeedStatusEvents(fight.events ?? [], actorNames);
   const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
   const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, fight, phaseReferenceEvents);
   const events = extractDisplayedFightEvents(
@@ -1657,7 +1671,7 @@ function normalizeEmbeddedFightDetails(report, fight) {
   );
   return {
     status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
-    mitigationCasts, actionCasts, playerSpeedAttributes, lifeEvents,
+    mitigationCasts, actionCasts, playerSpeedAttributes, playerSpeedStatusEvents, lifeEvents,
   };
 }
 
@@ -1935,7 +1949,7 @@ function discardChangedFightDetails(report) {
 function getFightDetailsCacheVersion() {
   const abilityIds = dancingMadMitigations.map((entry) => Number(entry.abilityId)).sort((a, b) => a - b);
   const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-  return JSON.stringify({ version: 26, abilityIds, phaseReferences });
+  return JSON.stringify({ version: 27, abilityIds, phaseReferences });
 }
 
 function getPersistentFightDetailsKey(reportCode, fight) {
@@ -2075,6 +2089,27 @@ function extractPlayerSpeedAttributes(events, actorNames) {
     }))
     .filter((entry) => entry.source
       && (Number.isFinite(entry.skillSpeed) || Number.isFinite(entry.spellSpeed)));
+}
+
+function extractPlayerSpeedStatusEvents(events, actorNames) {
+  return events
+    .map((event) => {
+      const eventType = normalizeEventType(event.eventType ?? event.type);
+      const statusId = Number(event.abilityId ?? event.abilityGameID ?? event.ability?.id);
+      const targetId = Number(event.targetID ?? event.targetId);
+      return {
+        eventType,
+        statusId,
+        targetId,
+        target: event.target ?? event.targetName ?? actorNames.get(targetId),
+        timestamp: Number(event.timestamp),
+      };
+    })
+    .filter((event) => ['applybuff', 'refreshbuff', 'removebuff'].includes(event.eventType)
+      && PLAYER_ACTION_SPEED_STATUS_MODIFIERS.has(event.statusId)
+      && event.target
+      && Number.isFinite(event.timestamp))
+    .sort((first, second) => first.timestamp - second.timestamp);
 }
 
 // Keep every friendly cast for the cross-pull player-action viewer. These rows
@@ -2789,6 +2824,7 @@ async function showReportPlayerActionsOverview(report, button) {
         .filter((member) => member.role)
         .map((member) => member.name);
     }))].sort((first, second) => first.localeCompare(second));
+    const abilityCatalog = createLoadedPlayerActionAbilityCatalog(fights, report);
     if (playerNames.length === 0) {
       loading.textContent = `No player action data is available for ${phaseFilterLabel.toLowerCase()}.`;
       return;
@@ -2835,56 +2871,100 @@ async function showReportPlayerActionsOverview(report, button) {
       maximumFightDurationMs,
     );
     const { label: endLabel, textInput: endInput, rangeInput: endRange } = endControl;
+    const showToEndLabel = document.createElement('label');
+    showToEndLabel.className = 'player-actions-show-to-end';
+    const showToEndCheckbox = document.createElement('input');
+    showToEndCheckbox.type = 'checkbox';
+    showToEndCheckbox.checked = savedView?.showToEnd === true;
+    showToEndCheckbox.setAttribute('aria-label', 'Show every pull to its end and sort by duration');
+    showToEndLabel.append(showToEndCheckbox, 'Show every pull to its end · shortest first');
     const updateButton = document.createElement('button');
     updateButton.type = 'submit';
     updateButton.textContent = 'Update';
     const filterNotice = document.createElement('span');
     filterNotice.className = 'player-actions-filter-notice';
     filterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
-    controls.append(playerLabel, phaseAnchorLabel, startLabel, endLabel, updateButton, filterNotice);
+    controls.append(
+      playerLabel,
+      phaseAnchorLabel,
+      startLabel,
+      endLabel,
+      updateButton,
+      showToEndLabel,
+      filterNotice,
+    );
 
     const status = document.createElement('p');
     status.className = 'player-actions-status';
     const rows = document.createElement('div');
     rows.className = 'player-actions-rows';
+    const selectedAbilityIds = new Set((savedView?.selectedAbilityIds ?? [])
+      .map(Number)
+      .filter((abilityId) => abilityCatalog.some((ability) => ability.id === abilityId)));
+    const abilityFilterState = {
+      hideUnhighlighted: savedView?.hideUnhighlighted === true,
+    };
+    const abilityFilter = createPlayerActionsAbilityFilter({
+      abilityCatalog,
+      selectedAbilityIds,
+      filterState: abilityFilterState,
+      onChange: () => {
+        saveView();
+        render({ showErrors: false });
+      },
+    });
     const saveView = () => {
       reportPlayerActionViewStates.set(report.code, {
         player: playerSelect.value,
         phaseAnchor: phaseAnchorSelect.value,
         start: startInput.value,
         end: endInput.value,
+        showToEnd: showToEndCheckbox.checked,
+        selectedAbilityIds: [...selectedAbilityIds],
+        hideUnhighlighted: abilityFilterState.hideUnhighlighted,
       });
     };
     const render = ({ showErrors = true } = {}) => {
       const startMs = parseFightTimeInput(startInput.value);
       const endMs = parseFightTimeInput(endInput.value);
+      const showToEnd = showToEndCheckbox.checked;
       const maximumAnchoredDurationMs = getMaximumAnchoredDuration();
       startRange.max = String(maximumAnchoredDurationMs);
       endRange.max = String(maximumAnchoredDurationMs);
       if (!playerSelect.value
         || !Number.isFinite(startMs)
-        || !Number.isFinite(endMs)
         || startMs < 0
-        || endMs > maximumAnchoredDurationMs
-        || endMs <= startMs) {
+        || startMs >= maximumAnchoredDurationMs
+        || (!showToEnd && (
+          !Number.isFinite(endMs)
+          || endMs > maximumAnchoredDurationMs
+          || endMs <= startMs
+        ))) {
         status.className = `player-actions-status${showErrors ? ' error' : ''}`;
         status.textContent = showErrors
-          ? `Choose a player and enter a valid range from 0:00–${formatFightDuration(maximumAnchoredDurationMs)}; the end must be after the start.`
-          : 'Choose a player, start time, and end time.';
+          ? showToEnd
+            ? `Choose a player and enter a start before ${formatFightDuration(maximumAnchoredDurationMs)}.`
+            : `Choose a player and enter a valid range from 0:00–${formatFightDuration(maximumAnchoredDurationMs)}; the end must be after the start.`
+          : showToEnd
+            ? 'Choose a player and start time.'
+            : 'Choose a player, start time, and end time.';
         updateWithSmoothHeight(rows, () => rows.replaceChildren());
         return;
       }
       status.className = 'player-actions-status';
       startInput.value = formatFightDuration(startMs);
-      endInput.value = formatFightDuration(endMs);
       syncPlayerActionsTimeControl(startControl, startMs);
-      syncPlayerActionsTimeControl(endControl, endMs);
+      if (!showToEnd) {
+        endInput.value = formatFightDuration(endMs);
+        syncPlayerActionsTimeControl(endControl, endMs);
+      }
       saveView();
-      const trackWidth = Math.max(
+      const defaultTrackWidth = Math.max(
         1,
-        ((endMs - startMs) / 1000) * PLAYER_ACTION_PIXELS_PER_SECOND,
+        (((showToEnd ? maximumAnchoredDurationMs : endMs) - startMs) / 1000)
+          * PLAYER_ACTION_PIXELS_PER_SECOND,
       );
-      rows.style.setProperty('--player-actions-track-width', `${trackWidth}px`);
+      rows.style.setProperty('--player-actions-track-width', `${defaultTrackWidth}px`);
       const eligibleFights = fights
         .map((fight) => ({
           fight,
@@ -2894,27 +2974,53 @@ async function showReportPlayerActionsOverview(report, button) {
             phaseAnchorSelect.value,
           ),
         }))
-        .filter(({ fight, anchorMs }) => Number.isFinite(anchorMs)
-          && getFightDuration(fight) >= anchorMs + endMs)
-        .sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+        .map((entry) => ({
+          ...entry,
+          anchoredDurationMs: getFightDuration(entry.fight) - entry.anchorMs,
+        }))
+        .filter(({ anchorMs, anchoredDurationMs }) => Number.isFinite(anchorMs)
+          && (showToEnd ? anchoredDurationMs > startMs : anchoredDurationMs >= endMs))
+        .sort((first, second) => showToEnd
+          ? first.anchoredDurationMs - second.anchoredDurationMs
+            || Number(first.fight.id) - Number(second.fight.id)
+          : Number(first.fight.id) - Number(second.fight.id));
       const anchorName = phaseAnchorSelect.value === 'fight'
         ? 'fight start'
         : `P${phaseAnchorSelect.value}`;
       const gcd = estimatePlayerGcd(fights, report, playerSelect.value);
-      status.textContent = `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
+      status.textContent = showToEnd
+        ? `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} shown from ${anchorName} + ${formatFightDuration(startMs)} to each pull's end, shortest first. ${formatPlayerGcdSummary(gcd)}.`
+        : `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
       updateWithSmoothHeight(rows, () => {
-        rows.replaceChildren(...eligibleFights.map(({ fight, anchorMs }) => createPlayerActionsPullRow(
-          report,
-          fight,
-          playerSelect.value,
-          anchorMs + startMs,
-          anchorMs + endMs,
-          anchorMs,
-        )));
+        rows.replaceChildren(...eligibleFights.map(({ fight, anchorMs, anchoredDurationMs }) => {
+          const rowEndMs = showToEnd ? getFightDuration(fight) : anchorMs + endMs;
+          const row = createPlayerActionsPullRow(
+            report,
+            fight,
+            playerSelect.value,
+            anchorMs + startMs,
+            rowEndMs,
+            anchorMs,
+            {
+              selectedAbilityIds,
+              hideUnhighlighted: abilityFilterState.hideUnhighlighted,
+            },
+          );
+          if (showToEnd) {
+            const width = Math.max(
+              1,
+              ((anchoredDurationMs - startMs) / 1000) * PLAYER_ACTION_PIXELS_PER_SECOND,
+            );
+            row.style.setProperty('--player-actions-track-width', `${width}px`);
+          }
+          return row;
+        }));
         if (eligibleFights.length === 0) {
           const empty = document.createElement('p');
           empty.className = 'player-actions-empty';
-          empty.textContent = 'No pulls reached the end of this time range.';
+          empty.textContent = showToEnd
+            ? 'No pulls reached the start of this time range.'
+            : 'No pulls reached the end of this time range.';
           rows.append(empty);
         }
       });
@@ -2925,6 +3031,19 @@ async function showReportPlayerActionsOverview(report, button) {
     });
     playerSelect.addEventListener('change', saveView);
     phaseAnchorSelect.addEventListener('change', () => {
+      saveView();
+      render({ showErrors: false });
+    });
+    const syncShowToEndControl = () => {
+      endInput.disabled = showToEndCheckbox.checked;
+      endRange.disabled = showToEndCheckbox.checked;
+      endLabel.classList.toggle('disabled', showToEndCheckbox.checked);
+    };
+    showToEndCheckbox.addEventListener('change', () => {
+      if (showToEndCheckbox.checked && !Number.isFinite(parseFightTimeInput(startInput.value))) {
+        syncPlayerActionsTimeControl(startControl, 0);
+      }
+      syncShowToEndControl();
       saveView();
       render({ showErrors: false });
     });
@@ -2946,12 +3065,213 @@ async function showReportPlayerActionsOverview(report, button) {
       });
     }
     updateWithSmoothHeight(content, () => {
-      content.replaceChildren(controls, status, rows);
+      content.replaceChildren(controls, status, rows, abilityFilter);
     });
+    syncShowToEndControl();
     render({ showErrors: false });
   } catch (error) {
     loading.textContent = `Could not load player actions: ${error.message}`;
   }
+}
+
+function createLoadedPlayerActionAbilityCatalog(fights, report) {
+  const abilitiesById = new Map();
+  for (const fight of fights) {
+    const actions = fightDetails.get(`${report.code}:${fight.id}`)?.actionCasts ?? [];
+    for (const action of actions) {
+      const id = Number(action.abilityId);
+      if (!Number.isFinite(id)
+        || id >= FFLOGS_PSEUDO_ACTION_ID_MIN
+        || !playerActionGameDataById.has(id)
+        || abilitiesById.has(id)) continue;
+      abilitiesById.set(id, {
+        id,
+        name: action.ability,
+        icon: action.icon,
+      });
+    }
+  }
+  return [...abilitiesById.values()]
+    .filter((ability) => ability.name)
+    .sort((first, second) => first.name.localeCompare(second.name));
+}
+
+function rankPlayerActionAbilities(abilities, query) {
+  const normalizedQuery = String(query ?? '').trim().toLocaleLowerCase();
+  if (!normalizedQuery) return [];
+  return abilities
+    .map((ability) => ({
+      ...ability,
+      matchIndex: ability.name.toLocaleLowerCase().indexOf(normalizedQuery),
+    }))
+    .filter((ability) => ability.matchIndex >= 0)
+    .sort((first, second) => first.matchIndex - second.matchIndex
+      || first.name.localeCompare(second.name));
+}
+
+function createPlayerActionsAbilityFilter({
+  abilityCatalog,
+  selectedAbilityIds,
+  filterState,
+  onChange,
+}) {
+  const section = document.createElement('section');
+  section.className = 'player-actions-ability-filter';
+  const heading = document.createElement('h4');
+  heading.textContent = 'Highlight abilities';
+  const form = document.createElement('form');
+  form.className = 'player-actions-ability-search';
+  const searchWrap = document.createElement('div');
+  searchWrap.className = 'player-actions-ability-search-wrap';
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Search loaded abilities…';
+  searchInput.autocomplete = 'off';
+  searchInput.setAttribute('aria-label', 'Search loaded abilities');
+  searchInput.setAttribute('aria-autocomplete', 'list');
+  const results = document.createElement('div');
+  results.className = 'player-actions-ability-results';
+  results.setAttribute('role', 'listbox');
+  results.hidden = true;
+
+  const positionResults = () => {
+    if (results.hidden || !searchWrap.isConnected) return;
+    const anchor = searchWrap.getBoundingClientRect();
+    const viewportGap = 8;
+    const popupGap = 4;
+    const maximumHeight = 260;
+    const spaceBelow = Math.max(0, window.innerHeight - anchor.bottom - popupGap - viewportGap);
+    const spaceAbove = Math.max(0, anchor.top - popupGap - viewportGap);
+    const desiredHeight = Math.min(maximumHeight, results.scrollHeight);
+    const opensUpward = desiredHeight > spaceBelow && spaceAbove > spaceBelow;
+    const availableHeight = opensUpward ? spaceAbove : spaceBelow;
+    results.classList.toggle('opens-upward', opensUpward);
+    results.style.left = `${anchor.left}px`;
+    results.style.width = `${anchor.width}px`;
+    results.style.maxHeight = `${Math.min(maximumHeight, availableHeight)}px`;
+    results.style.top = opensUpward
+      ? `${Math.max(viewportGap, anchor.top - popupGap - Math.min(desiredHeight, availableHeight))}px`
+      : `${anchor.bottom + popupGap}px`;
+  };
+
+  const createAbilityImage = (ability) => {
+    if (!ability.icon || isUnknownFflogsStatus(ability.name, ability.icon)) {
+      const fallback = createFightEventStatusFallback(ability.name);
+      fallback.classList.add('player-actions-ability-image');
+      return fallback;
+    }
+    const image = document.createElement('img');
+    image.className = 'player-actions-ability-image';
+    image.src = ability.icon;
+    image.alt = '';
+    image.loading = 'lazy';
+    return image;
+  };
+  const hideResults = () => {
+    results.hidden = true;
+    results.replaceChildren();
+  };
+  const renderResults = () => {
+    const matches = rankPlayerActionAbilities(abilityCatalog, searchInput.value).slice(0, 30);
+    results.replaceChildren(...matches.map((ability) => {
+      const option = document.createElement('div');
+      option.className = 'player-actions-ability-result';
+      option.setAttribute('role', 'option');
+      const choice = document.createElement('button');
+      choice.type = 'button';
+      choice.className = 'player-actions-ability-result-choice';
+      choice.append(createAbilityImage(ability), ability.name);
+      choice.addEventListener('click', () => {
+        searchInput.value = ability.name;
+        hideResults();
+        searchInput.focus();
+      });
+      const add = document.createElement('button');
+      add.type = 'button';
+      add.className = 'player-actions-ability-result-add';
+      add.textContent = '+';
+      add.title = `Add ${ability.name}`;
+      add.setAttribute('aria-label', `Add ${ability.name}`);
+      add.addEventListener('click', () => {
+        selectedAbilityIds.add(ability.id);
+        visibilityCheckbox.disabled = false;
+        renderSelected();
+        onChange();
+      });
+      option.append(choice, add);
+      return option;
+    }));
+    results.hidden = matches.length === 0;
+    positionResults();
+  };
+  searchInput.addEventListener('input', renderResults);
+  searchInput.addEventListener('focus', renderResults);
+  searchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') hideResults();
+  });
+  searchWrap.append(searchInput, results);
+  const visibilityLabel = document.createElement('label');
+  visibilityLabel.className = 'player-actions-hide-unhighlighted';
+  const visibilityCheckbox = document.createElement('input');
+  visibilityCheckbox.type = 'checkbox';
+  visibilityCheckbox.checked = filterState.hideUnhighlighted;
+  visibilityCheckbox.disabled = selectedAbilityIds.size === 0;
+  visibilityCheckbox.setAttribute('aria-label', 'Hide unhighlighted actions');
+  visibilityLabel.append(visibilityCheckbox, 'Hide unhighlighted actions');
+  form.append(searchWrap, visibilityLabel);
+  const selectedList = document.createElement('div');
+  selectedList.className = 'player-actions-selected-abilities';
+
+  const renderSelected = () => {
+    const selected = abilityCatalog.filter((ability) => selectedAbilityIds.has(ability.id));
+    selectedList.replaceChildren(...selected.map((ability) => {
+      const item = document.createElement('span');
+      item.className = 'player-actions-selected-ability';
+      item.append(createAbilityImage(ability), ability.name);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '×';
+      remove.title = `Remove ${ability.name}`;
+      remove.setAttribute('aria-label', `Remove ${ability.name}`);
+      remove.addEventListener('click', () => {
+        selectedAbilityIds.delete(ability.id);
+        if (selectedAbilityIds.size === 0) filterState.hideUnhighlighted = false;
+        visibilityCheckbox.checked = filterState.hideUnhighlighted;
+        visibilityCheckbox.disabled = selectedAbilityIds.size === 0;
+        renderSelected();
+        onChange();
+      });
+      item.append(remove);
+      return item;
+    }));
+    if (selected.length === 0) {
+      const empty = document.createElement('span');
+      empty.className = 'player-actions-selected-empty';
+      empty.textContent = 'No abilities highlighted.';
+      selectedList.append(empty);
+    }
+  };
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+  });
+  visibilityCheckbox.addEventListener('change', () => {
+    filterState.hideUnhighlighted = visibilityCheckbox.checked;
+    onChange();
+  });
+  const positionController = new AbortController();
+  document.addEventListener('scroll', positionResults, {
+    capture: true,
+    signal: positionController.signal,
+  });
+  window.addEventListener('resize', positionResults, { signal: positionController.signal });
+  queueMicrotask(() => section.closest('dialog')?.addEventListener(
+    'close',
+    () => positionController.abort(),
+    { once: true },
+  ));
+  section.append(heading, form, selectedList);
+  renderSelected();
+  return section;
 }
 
 function createPlayerActionsControlLabel(text) {
@@ -3139,6 +3459,40 @@ function getProvidedPlayerGcd(fights, report, playerName, speedType) {
   return null;
 }
 
+function getPlayerJob(fightState, playerName) {
+  return fightState?.partyMembers?.find((entry) => entry.name === playerName)?.job ?? null;
+}
+
+function buildPlayerSpeedModifierWindows(events, playerName) {
+  const windowsByStatus = new Map();
+  for (const event of events ?? []) {
+    if (event.target !== playerName) continue;
+    let windows = windowsByStatus.get(event.statusId);
+    if (!windows) {
+      windows = [];
+      windowsByStatus.set(event.statusId, windows);
+    }
+    const openWindow = windows.at(-1);
+    if (event.eventType === 'removebuff') {
+      if (openWindow && openWindow.end === null) openWindow.end = event.timestamp;
+    } else if (!openWindow || openWindow.end !== null) {
+      windows.push({ start: event.timestamp, end: null });
+    }
+  }
+  return windowsByStatus;
+}
+
+function getPlayerSpeedModifierAtTimestamp(windowsByStatus, job, timestamp) {
+  let modifier = PLAYER_ACTION_JOB_SPEED_MODIFIERS.get(job) ?? 1;
+  for (const [statusId, windows] of windowsByStatus) {
+    if (windows.some((window) => window.start < timestamp
+      && timestamp <= (window.end ?? Number.POSITIVE_INFINITY))) {
+      modifier *= PLAYER_ACTION_SPEED_STATUS_MODIFIERS.get(statusId) ?? 1;
+    }
+  }
+  return modifier;
+}
+
 function collectCompletedPlayerGcds(actions, speedType) {
   const { visibleActions, castSpans } = pairPlayerActionEvents(actions);
   const completedSpansByEnd = new Map(castSpans
@@ -3192,8 +3546,14 @@ function estimatePlayerGcd(fights, report, playerName) {
   if (provided) return provided;
   const intervals = [];
   for (const fight of fights) {
-    const actions = (fightDetails.get(`${report.code}:${fight.id}`)?.actionCasts ?? [])
+    const state = fightDetails.get(`${report.code}:${fight.id}`);
+    const actions = (state?.actionCasts ?? [])
       .filter((action) => action.source === playerName);
+    const speedModifierWindows = buildPlayerSpeedModifierWindows(
+      state?.playerSpeedStatusEvents,
+      playerName,
+    );
+    const playerJob = getPlayerJob(state, playerName);
     const gcds = collectCompletedPlayerGcds(actions, speedType);
     for (let index = 1; index < gcds.length; index += 1) {
       const previous = gcds[index - 1];
@@ -3207,7 +3567,14 @@ function estimatePlayerGcd(fights, report, playerName) {
       const intervalBaseMs = hasLongCast ? previous.castDurationMs : baseRecastMs;
       const rawIntervalMs = current.timestamp - previous.timestamp
         - (hasLongCast ? PLAYER_ACTION_CAST_ANIMATION_LOCK_MS : 0);
-      const normalizedIntervalMs = rawIntervalMs / (intervalBaseMs / PLAYER_ACTION_BASE_GCD_MS);
+      const speedModifier = getPlayerSpeedModifierAtTimestamp(
+        speedModifierWindows,
+        playerJob,
+        previous.timestamp,
+      );
+      const normalizedIntervalMs = rawIntervalMs
+        / (intervalBaseMs / PLAYER_ACTION_BASE_GCD_MS)
+        / speedModifier;
       if (normalizedIntervalMs >= 1_000 && normalizedIntervalMs <= 4_000) {
         intervals.push(normalizedIntervalMs);
       }
@@ -3316,6 +3683,7 @@ function createPlayerActionsPullRow(
   startMs,
   endMs,
   displayAnchorMs = 0,
+  abilityFilter = { selectedAbilityIds: new Set(), hideUnhighlighted: false },
 ) {
   const row = document.createElement('section');
   row.className = 'player-actions-row';
@@ -3334,6 +3702,8 @@ function createPlayerActionsPullRow(
   const { visibleActions, castSpans } = pairPlayerActionEvents(playerActions);
   appendPlayerActionMechanicTicks(track, fight, state, startMs, endMs, displayAnchorMs);
   for (const castSpan of castSpans) {
+    const isSelected = abilityFilter.selectedAbilityIds.has(Number(castSpan.begin.abilityId));
+    if (abilityFilter.hideUnhighlighted && !isSelected) continue;
     const beginMs = castSpan.begin.timestamp - Number(fight.startTime);
     const endCastMs = castSpan.end.timestamp - Number(fight.startTime);
     const clippedStart = Math.max(startMs, beginMs);
@@ -3342,6 +3712,7 @@ function createPlayerActionsPullRow(
     const span = document.createElement('span');
     span.className = `player-actions-cast-span ${castSpan.outcome}`;
     span.classList.add(getPlayerActionMarkerCategory(castSpan.begin));
+    if (isSelected && !abilityFilter.hideUnhighlighted) span.classList.add('highlighted');
     span.style.left = `${((clippedStart - startMs) / (endMs - startMs)) * 100}%`;
     span.style.width = `${((clippedEnd - clippedStart) / (endMs - startMs)) * 100}%`;
     span.title = `${castSpan.begin.ability} · ${castSpan.outcome} · ${formatPreciseFightDuration(beginMs - displayAnchorMs)}–${formatPreciseFightDuration(endCastMs - displayAnchorMs)}`;
@@ -3353,6 +3724,8 @@ function createPlayerActionsPullRow(
   });
   const stackCounts = new Map();
   for (const action of actions) {
+    const isSelected = abilityFilter.selectedAbilityIds.has(Number(action.abilityId));
+    if (abilityFilter.hideUnhighlighted && !isSelected) continue;
     const elapsedMs = action.timestamp - Number(fight.startTime);
     const position = ((elapsedMs - startMs) / (endMs - startMs)) * 100;
     const bucket = Math.round(elapsedMs / 250);
@@ -3361,6 +3734,7 @@ function createPlayerActionsPullRow(
     const marker = document.createElement('span');
     marker.className = 'player-actions-marker';
     marker.classList.add(getPlayerActionMarkerCategory(action));
+    if (isSelected && !abilityFilter.hideUnhighlighted) marker.classList.add('highlighted');
     if (action.eventType === 'begincast') marker.classList.add('begin-cast');
     marker.style.left = `${position}%`;
     marker.style.setProperty('--action-offset', `${stackIndex * -5}px`);
@@ -4427,10 +4801,10 @@ function createFightDetailsTable(fight, state) {
       eventCell,
       mechanicCell,
       playerCell,
+      reasonCell,
       casterDebuffsCell,
       playerDebuffsCell,
       playerBuffsCell,
-      reasonCell,
     );
     body.append(row);
   }
@@ -4457,22 +4831,59 @@ function createFightTimeline(fight, state) {
     : Number.NaN;
   const splitLongPhaseThree = durationMs >= 600_000 && Number.isFinite(eqTimestampMs);
   const phaseSegments = [];
+  const phaseDefinitions = encounterPhaseDefinitions.get(DANCING_MAD_ENCOUNTER_NAME)?.phases ?? [];
 
   for (let phase = 1; phase <= endingPhase; phase += 1) {
     const phaseStart = Math.min(durationMs, phaseStarts.get(phase) ?? durationMs);
     const nextKnownStart = phaseStarts.get(phase + 1);
-    const phaseEnd = Math.max(phaseStart, Math.min(durationMs, nextKnownStart ?? durationMs));
+    const actualPhaseEnd = Math.max(phaseStart, Math.min(durationMs, nextKnownStart ?? durationMs));
+    const defaultDurationMs = Number(phaseDefinitions
+      .find((definition) => Number(definition.phase) === phase)?.defaultDurationSeconds) * 1_000;
+    const expectedPhaseEnd = Number.isFinite(nextKnownStart)
+      ? nextKnownStart
+      : phaseStart + defaultDurationMs;
+    const phaseEnd = phase === endingPhase && Number.isFinite(expectedPhaseEnd)
+      ? Math.max(actualPhaseEnd, expectedPhaseEnd)
+      : actualPhaseEnd;
     if (phase === 3 && splitLongPhaseThree && eqTimestampMs > phaseStart && eqTimestampMs < phaseEnd) {
       phaseSegments.push(
-        { phase, phaseStart, phaseEnd: eqTimestampMs, isFirstSegment: true, isLastSegment: false },
-        { phase, phaseStart: eqTimestampMs, phaseEnd, isFirstSegment: false, isLastSegment: true },
+        {
+          phase,
+          phaseStart,
+          phaseEnd: eqTimestampMs,
+          actualPhaseEnd: Math.min(actualPhaseEnd, eqTimestampMs),
+          isFirstSegment: true,
+          isLastSegment: false,
+        },
+        {
+          phase,
+          phaseStart: eqTimestampMs,
+          phaseEnd,
+          actualPhaseEnd,
+          isFirstSegment: false,
+          isLastSegment: true,
+        },
       );
     } else {
-      phaseSegments.push({ phase, phaseStart, phaseEnd, isFirstSegment: true, isLastSegment: true });
+      phaseSegments.push({
+        phase,
+        phaseStart,
+        phaseEnd,
+        actualPhaseEnd,
+        isFirstSegment: true,
+        isLastSegment: true,
+      });
     }
   }
 
-  for (const { phase, phaseStart, phaseEnd, isFirstSegment, isLastSegment } of phaseSegments) {
+  for (const {
+    phase,
+    phaseStart,
+    phaseEnd,
+    actualPhaseEnd,
+    isFirstSegment,
+    isLastSegment,
+  } of phaseSegments) {
     const phaseDuration = Math.max(1, phaseEnd - phaseStart);
     const row = document.createElement('div');
     row.className = 'fight-timeline-row';
@@ -4489,6 +4900,12 @@ function createFightTimeline(fight, state) {
     canvas.timelineEventItems = [];
     const track = document.createElement('div');
     track.className = `fight-timeline-track phase-${((phase - 1) % 6) + 1}`;
+    if (actualPhaseEnd < phaseEnd) {
+      const unreached = document.createElement('span');
+      unreached.className = 'fight-timeline-unreached';
+      unreached.style.left = `${((actualPhaseEnd - phaseStart) / phaseDuration) * 100}%`;
+      track.append(unreached);
+    }
 
     const timelineTicks = new Map();
     const addTimelineTick = (timestampMs, title, mechanicLabel = '', boundary = '') => {
@@ -4547,7 +4964,7 @@ function createFightTimeline(fight, state) {
     }
 
     addTimelineTick(
-      phaseEnd,
+      actualPhaseEnd,
       `Phase ${phase} timeline ${isLastSegment ? 'ends' : 'continues'}`,
       isLastSegment ? 'END' : '',
       'end',
@@ -4557,8 +4974,8 @@ function createFightTimeline(fight, state) {
       const elapsedMs = Math.max(0, Number(event.timestamp) - Number(fight.startTime));
       const eventPhase = getDancingMadPhase(elapsedMs, phaseStarts);
       const mechanic = getDancingMadMechanic(elapsedMs, phaseStarts, eventPhase);
-      if (eventPhase !== phase || elapsedMs < phaseStart || elapsedMs > phaseEnd
-        || (!isLastSegment && elapsedMs === phaseEnd)) {
+      if (eventPhase !== phase || elapsedMs < phaseStart || elapsedMs > actualPhaseEnd
+        || (!isLastSegment && elapsedMs === actualPhaseEnd)) {
         continue;
       }
       const position = Math.max(0, Math.min(100, ((elapsedMs - phaseStart) / phaseDuration) * 100));
@@ -4667,13 +5084,14 @@ function createTimelineEventGroupMarker(groups, layout, canvas) {
   return marker;
 }
 
-// Single and grouped timeline popups deliberately use the same compact table so
-// their columns, event icons, and missing-reason behavior remain identical.
+// Single and grouped timeline popups deliberately use the same compact table.
+// Status snapshots remain available in the full events table without making the
+// timeline popup too wide to scan.
 function createTimelineEventTable(items) {
   const table = document.createElement('table');
   table.className = 'fight-timeline-event-table';
   const head = document.createElement('thead');
-  head.append(createFightEventTableHeadingRow());
+  head.append(createFightEventTableHeadingRow({ includeStatuses: false }));
   const body = document.createElement('tbody');
   for (const item of items) {
     const row = document.createElement('tr');
@@ -4685,15 +5103,9 @@ function createTimelineEventTable(items) {
     mechanic.textContent = item.mechanic?.mechanic || 'Before first mechanic';
     const player = document.createElement('td');
     player.textContent = item.event.player;
-    const casterDebuffs = document.createElement('td');
-    setFightEventDebuffsCell(casterDebuffs, item.event.casterDebuffs, 'caster');
-    const playerDebuffs = document.createElement('td');
-    setFightEventDebuffsCell(playerDebuffs, item.event.playerDebuffs, 'player');
-    const playerBuffs = document.createElement('td');
-    setFightEventStatusesCell(playerBuffs, item.event.playerBuffs, 'player', 'buffs');
     const reason = document.createElement('td');
     setFightEventReasonCell(reason, item.event);
-    row.append(time, event, mechanic, player, casterDebuffs, playerDebuffs, playerBuffs, reason);
+    row.append(time, event, mechanic, player, reason);
     body.append(row);
   }
   table.append(head, body);
@@ -4702,7 +5114,7 @@ function createTimelineEventTable(items) {
 
 // Use one grouped heading while keeping caster and player statuses in distinct
 // body columns. The short center rule visually carries the split into the rows.
-function createFightEventTableHeadingRow() {
+function createFightEventTableHeadingRow({ includeStatuses = true } = {}) {
   const row = document.createElement('tr');
   for (const label of FIGHT_EVENT_TABLE_HEADINGS) {
     const heading = document.createElement('th');
@@ -4710,6 +5122,12 @@ function createFightEventTableHeadingRow() {
     heading.textContent = label;
     row.append(heading);
   }
+  const reasonHeading = document.createElement('th');
+  reasonHeading.scope = 'col';
+  reasonHeading.textContent = 'Reason';
+  row.append(reasonHeading);
+  if (!includeStatuses) return row;
+
   const debuffsHeading = document.createElement('th');
   debuffsHeading.className = 'fight-event-debuffs-heading';
   debuffsHeading.colSpan = 2;
@@ -4723,10 +5141,7 @@ function createFightEventTableHeadingRow() {
   buffsHeading.textContent = 'Buffs';
   buffsHeading.title = FIGHT_EVENT_BUFFS_TOOLTIP;
   buffsHeading.setAttribute('aria-label', FIGHT_EVENT_BUFFS_TOOLTIP);
-  const reasonHeading = document.createElement('th');
-  reasonHeading.scope = 'col';
-  reasonHeading.textContent = 'Reason';
-  row.append(debuffsHeading, buffsHeading, reasonHeading);
+  row.append(debuffsHeading, buffsHeading);
   return row;
 }
 

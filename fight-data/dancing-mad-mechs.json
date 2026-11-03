@@ -306,6 +306,102 @@
     "mechanic": "Begin"
   },
   {
+    "time": "00:14.565",
+    "elapsedSeconds": 14.565,
+    "phase": 4,
+    "mechanic": "MM1"
+  },
+  {
+    "time": "00:18.988",
+    "elapsedSeconds": 18.988,
+    "phase": 4,
+    "mechanic": "GC1"
+  },
+  {
+    "time": "00:24.082",
+    "elapsedSeconds": 24.082,
+    "phase": 4,
+    "mechanic": "IT1"
+  },
+  {
+    "time": "00:29.487",
+    "elapsedSeconds": 29.487,
+    "phase": 4,
+    "mechanic": "MM2"
+  },
+  {
+    "time": "00:33.917",
+    "elapsedSeconds": 33.917,
+    "phase": 4,
+    "mechanic": "GC2"
+  },
+  {
+    "time": "00:39.014",
+    "elapsedSeconds": 39.014,
+    "phase": 4,
+    "mechanic": "IT2"
+  },
+  {
+    "time": "00:44.648",
+    "elapsedSeconds": 44.648,
+    "phase": 4,
+    "mechanic": "MM3"
+  },
+  {
+    "time": "00:48.842",
+    "elapsedSeconds": 48.842,
+    "phase": 4,
+    "mechanic": "GC3"
+  },
+  {
+    "time": "01:00.955",
+    "elapsedSeconds": 60.955,
+    "phase": 4,
+    "mechanic": "ANT"
+  },
+  {
+    "time": "01:10.028",
+    "elapsedSeconds": 70.028,
+    "phase": 4,
+    "mechanic": "Resolve1"
+  },
+  {
+    "time": "01:19.100",
+    "elapsedSeconds": 79.1,
+    "phase": 4,
+    "mechanic": "DS1"
+  },
+  {
+    "time": "01:28.126",
+    "elapsedSeconds": 88.126,
+    "phase": 4,
+    "mechanic": "UU1 (plus Twister1)"
+  },
+  {
+    "time": "01:35.101",
+    "elapsedSeconds": 95.101,
+    "phase": 4,
+    "mechanic": "Resolve2"
+  },
+  {
+    "time": "01:43.009",
+    "elapsedSeconds": 103.009,
+    "phase": 4,
+    "mechanic": "DS2"
+  },
+  {
+    "time": "01:54.263",
+    "elapsedSeconds": 114.263,
+    "phase": 4,
+    "mechanic": "MR (plus Twister2)"
+  },
+  {
+    "time": "02:06.961",
+    "elapsedSeconds": 126.961,
+    "phase": 4,
+    "mechanic": "Enr"
+  },
+  {
     "time": "00:00.000",
     "elapsedSeconds": 0,
     "phase": 5,
