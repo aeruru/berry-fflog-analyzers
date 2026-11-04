@@ -403,6 +403,12 @@ h2 {
   width: min(1120px, calc(100vw - 48px));
 }
 
+.player-actions-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .mitigation-overview-dialog::backdrop {
   background: rgba(3, 8, 18, 0.72);
 }
@@ -446,6 +452,8 @@ h2 {
 .player-actions-content {
   display: grid;
   gap: 12px;
+  min-height: 0;
+  overflow: auto;
 }
 
 .player-actions-controls {
@@ -518,6 +526,26 @@ h2 {
   margin-left: auto;
 }
 
+.player-actions-controls .player-actions-show-to-end {
+  align-items: center;
+  align-self: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.68rem;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.player-actions-show-to-end input {
+  accent-color: var(--accent);
+  min-height: auto;
+  padding: 0;
+}
+
+.player-actions-time-control.disabled {
+  opacity: 0.48;
+}
+
 .player-actions-status,
 .player-actions-empty {
   color: var(--muted);
@@ -526,6 +554,174 @@ h2 {
 
 .player-actions-status.error {
   color: #fb7185;
+}
+
+.player-actions-ability-filter {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 9px;
+  padding-top: 12px;
+}
+
+.player-actions-ability-filter h4 {
+  font-size: 0.78rem;
+  margin: 0;
+}
+
+.player-actions-ability-search {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.player-actions-ability-search-wrap {
+  max-width: 100%;
+  position: relative;
+  width: 320px;
+}
+
+.player-actions-ability-search input[type='search'] {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 36px;
+  padding: 0 9px;
+  width: 100%;
+}
+
+.player-actions-ability-results {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+  max-height: 260px;
+  overflow-y: auto;
+  position: fixed;
+  z-index: 1000;
+}
+
+.player-actions-ability-results[hidden] {
+  display: none;
+}
+
+.player-actions-ability-result {
+  align-items: center;
+  background: transparent;
+  color: var(--ink);
+  display: flex;
+  min-height: 38px;
+  width: 100%;
+}
+
+.player-actions-ability-result:hover,
+.player-actions-ability-result:focus-visible {
+  background: rgba(96, 165, 250, 0.14);
+}
+
+.player-actions-ability-result-choice {
+  align-items: center;
+  align-self: stretch;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: var(--ink);
+  display: flex;
+  flex: 1 1 auto;
+  font-size: 0.72rem;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 38px;
+  padding: 5px 9px;
+  text-align: left;
+}
+
+.player-actions-ability-result-choice:hover {
+  background: transparent;
+}
+
+.player-actions-ability-result-add {
+  align-items: center;
+  align-self: center;
+  border-radius: 5px;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 1.05rem;
+  height: 28px;
+  justify-content: center;
+  margin-right: 5px;
+  min-height: 0;
+  padding: 0;
+  width: 30px;
+}
+
+.player-actions-ability-image {
+  border-radius: 3px;
+  flex: 0 0 auto;
+  height: 24px;
+  object-fit: contain;
+  width: 24px;
+}
+
+.player-actions-hide-unhighlighted {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 0.7rem;
+  font-weight: 700;
+  gap: 6px;
+}
+
+.player-actions-hide-unhighlighted input {
+  accent-color: var(--accent);
+}
+
+.player-actions-selected-abilities {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 28px;
+}
+
+.player-actions-selected-ability {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 58%, var(--line));
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 0.7rem;
+  font-weight: 800;
+  gap: 6px;
+  padding: 3px 4px 3px 6px;
+}
+
+.player-actions-selected-ability .player-actions-ability-image {
+  height: 20px;
+  width: 20px;
+}
+
+.player-actions-selected-ability button {
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 1rem;
+  min-height: 24px;
+  padding: 0;
+  width: 24px;
+}
+
+.player-actions-selected-ability button:hover {
+  background: rgba(96, 165, 250, 0.14);
+  color: var(--ink);
+}
+
+.player-actions-selected-empty {
+  color: var(--muted);
+  font-size: 0.7rem;
 }
 
 .player-actions-rows {
@@ -577,6 +773,13 @@ h2 {
   opacity: 0.82;
 }
 
+.player-actions-marker.highlighted .player-action-icon {
+  box-shadow: 0 0 0 3px #facc15, 0 0 14px 5px rgba(250, 204, 21, 0.72);
+  filter: saturate(1.22) brightness(1.08);
+  position: relative;
+  z-index: 4;
+}
+
 .player-actions-cast-span {
   border-radius: 999px;
   bottom: 14px;
@@ -599,6 +802,10 @@ h2 {
 .player-actions-cast-span.cancelled {
   background: #ef4444;
   box-shadow: 0 0 6px color-mix(in srgb, #ef4444 72%, transparent);
+}
+
+.player-actions-cast-span.highlighted {
+  box-shadow: 0 0 0 2px #facc15, 0 0 10px rgba(250, 204, 21, 0.78);
 }
 
 .player-actions-mechanic-tick {
@@ -1808,6 +2015,15 @@ h2 {
   left: 0;
   position: absolute;
   right: 0;
+}
+
+.fight-timeline-unreached {
+  background: color-mix(in srgb, var(--muted) 72%, var(--track));
+  border-radius: 0 999px 999px 0;
+  bottom: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
 }
 
 .fight-timeline-tick {
