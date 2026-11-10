@@ -52,6 +52,34 @@ const server = http.createServer((request, response) => {
   });
 });
 
+function isBerryServerAlreadyRunning() {
+  return new Promise((resolve) => {
+    const request = http.get(`http://127.0.0.1:${port}/`, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        body += chunk;
+        if (body.length > 64_000) request.destroy();
+      });
+      response.on('end', () => resolve(body.includes('Berry FFLogs Companion')));
+    });
+    request.setTimeout(1_500, () => request.destroy());
+    request.on('error', () => resolve(false));
+  });
+}
+
+server.on('error', async (error) => {
+  if (error.code !== 'EADDRINUSE') throw error;
+  if (await isBerryServerAlreadyRunning()) {
+    console.log(`Berry FFLogs Analyzers is already running at http://127.0.0.1:${port}/`);
+    process.exitCode = 0;
+    return;
+  }
+  console.error(`Port ${port} is already being used by another application.`);
+  console.error(`Close that application or start Berry with a different port, for example: $env:PORT=8000; npm start`);
+  process.exitCode = 1;
+});
+
 server.listen(port, '127.0.0.1', () => {
   console.log(`Berry FFLogs Analyzers running at http://127.0.0.1:${port}/`);
 });

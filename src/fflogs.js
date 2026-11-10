@@ -69,7 +69,7 @@ const REPORT_FIGHTS_QUERY = `
   }
 `;
 
-const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR type = "applydebuff" OR type = "refreshdebuff" OR type = "removedebuff" OR type = "applybuff" OR type = "refreshbuff" OR type = "removebuff" OR (type = "damage" AND target.disposition = "friendly")';
+const BASE_FIGHT_EVENT_FILTER = 'type = "death" OR type = "resurrect" OR type = "applydebuff" OR type = "refreshdebuff" OR type = "removedebuff" OR type = "applybuff" OR type = "refreshbuff" OR type = "removebuff" OR (type = "absorbed" AND target.disposition = "friendly") OR (type = "damage" AND target.disposition = "friendly") OR (type = "heal" AND target.disposition = "friendly")';
 const DEATH_CAUSE_BUFF_NAMES = [
   'Rampart',
   'Guardian',
