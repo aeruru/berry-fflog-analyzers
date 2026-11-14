@@ -734,6 +734,55 @@ h2 {
   padding-bottom: 6px;
 }
 
+.player-actions-duration-filter {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 282px var(--player-actions-track-width, 520px);
+  min-width: calc(296px + var(--player-actions-track-width, 520px));
+}
+
+.player-actions-duration-filter > span:first-child {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.player-actions-duration-filter-control {
+  display: block;
+  position: relative;
+}
+
+.player-actions-duration-filter input {
+  accent-color: var(--accent);
+  display: block;
+  margin: 0;
+  width: 100%;
+}
+
+.player-actions-duration-filter output {
+  color: var(--muted);
+  font-size: 0.62rem;
+  position: absolute;
+  top: calc(100% + 2px);
+}
+
+.player-actions-zoom {
+  min-width: 180px;
+}
+
+.player-actions-zoom input {
+  accent-color: var(--accent);
+  width: 150px;
+}
+
+.player-actions-zoom output {
+  color: var(--muted);
+  font-size: 0.66rem;
+  margin-left: 6px;
+}
+
 .player-actions-row {
   align-items: center;
   display: grid;
@@ -980,6 +1029,14 @@ h2 {
   grid-template-columns: minmax(150px, 220px) auto;
 }
 
+.special-views-zoom[hidden] {
+  display: none;
+}
+
+.special-views-afflatus-display[hidden] {
+  display: none;
+}
+
 .special-views-zoom > span {
   grid-column: 1 / -1;
 }
@@ -1133,6 +1190,60 @@ h2 {
   transform: translateX(-1px);
   width: 2px;
   z-index: 2;
+}
+
+.special-views-lucid-tick.afflatus {
+  border: 0;
+  border-radius: 0;
+  bottom: -3px;
+  color: transparent;
+  display: block;
+  height: auto;
+  top: -3px;
+  transform: translateX(-1.5px);
+  width: 3px;
+}
+
+.special-views-lucid-tick.afflatus.solace {
+  background: #345f9f;
+}
+
+.special-views-lucid-tick.afflatus.rapture {
+  background: var(--accent);
+}
+
+.special-views-lucid-tick.afflatus.misery {
+  background: #c45aa5;
+}
+
+.special-views-afflatus-state {
+  bottom: 0;
+  position: absolute;
+  top: 0;
+}
+
+.special-views-afflatus-state.lilies.amount-1 {
+  background: rgb(29 78 216 / 20%);
+}
+
+.special-views-afflatus-state.lilies.amount-2 {
+  background: rgb(29 78 216 / 50%);
+}
+
+.special-views-afflatus-state.lilies.amount-3 {
+  background: rgb(29 78 216);
+}
+
+.special-views-afflatus-state.misery.amount-1 {
+  background: rgb(196 90 165 / 20%);
+}
+
+.special-views-afflatus-state.misery.amount-2 {
+  background: rgb(196 90 165 / 50%);
+}
+
+.special-views-afflatus-state.misery.amount-3 {
+  background: rgb(196 90 165);
 }
 
 .special-views-lucid-end {

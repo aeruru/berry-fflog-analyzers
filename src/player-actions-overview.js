@@ -38,6 +38,42 @@ const PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB = new Map([
   ]],
   ['BLM', [['thunder', 'thunder iii', 'high thunder']]],
 ]);
+const WHM_AFFLATUS_ACTIONS = new Map([
+  ['afflatus solace', 'Solace'],
+  ['afflatus rapture', 'Rapture'],
+  ['afflatus misery', 'Misery'],
+]);
+const PLAYER_ACTION_EXPLICIT_GCDS = new Set([
+  'eukrasia',
+  'eukrasian diagnosis',
+  'eukrasian prognosis',
+  'eukrasian prognosis ii',
+  'eukrasian dosis',
+  'eukrasian dosis ii',
+  'eukrasian dosis iii',
+  'eukrasian dyskrasia',
+  'phlegma',
+  'phlegma ii',
+  'phlegma iii',
+  'pneuma',
+]);
+// Eukrasia and its transformed spells use short fixed recasts that Spell Speed
+// does not modify.
+const PLAYER_ACTION_FIXED_GCD_RECASTS = new Map([
+  ['eukrasia', 1_000],
+  ['eukrasian diagnosis', 1_500],
+  ['eukrasian prognosis', 1_500],
+  ['eukrasian prognosis ii', 1_500],
+  ['eukrasian dosis', 1_500],
+  ['eukrasian dosis ii', 1_500],
+  ['eukrasian dosis iii', 1_500],
+]);
+const PLAYER_ACTION_BASE_GCD_OVERRIDES = new Set([
+  'phlegma',
+  'phlegma ii',
+  'phlegma iii',
+  'pneuma',
+]);
 
 const playerActionGameDataById = new Map();
 // Deliberately session-only: each report remembers its own viewer controls until
@@ -116,9 +152,15 @@ export function createPlayerActionsOverview({
     dialog.showModal();
   
     try {
-      await ensureReportFightDetails(report, fights);
-      await loadPlayerActionCategories(fights.flatMap((fight) =>
-        getFightDetails().get(`${report.code}:${fight.id}`)?.actionCasts ?? []));
+      // Load one pull first so the roster and phase anchors become available
+      // quickly. The expensive all-pull action load starts after the controls
+      // are mounted and remains fully asynchronous.
+      const seedFight = fights.find((fight) => (
+        getFightDetails().get(`${report.code}:${fight.id}`)?.partyMembers?.length > 0
+      )) ?? fights.at(-1);
+      if (seedFight) {
+        await ensureReportFightDetails(report, [seedFight], { playerActionsOnly: true });
+      }
       const playerNames = [...new Set(fights.flatMap((fight) => {
         const state = getFightDetails().get(`${report.code}:${fight.id}`);
         return (state?.partyMembers ?? [])
@@ -179,6 +221,18 @@ export function createPlayerActionsOverview({
       showToEndCheckbox.checked = savedView?.showToEnd === true;
       showToEndCheckbox.setAttribute('aria-label', 'Show every pull to its end and sort by duration');
       showToEndLabel.append(showToEndCheckbox, 'Show every pull to its end · shortest first');
+      const zoomLabel = createPlayerActionsControlLabel('Zoom');
+      const zoomInput = document.createElement('input');
+      zoomInput.type = 'range';
+      zoomInput.min = '10';
+      zoomInput.max = '80';
+      zoomInput.step = '5';
+      zoomInput.value = String(Number(savedView?.zoom) || PLAYER_ACTION_PIXELS_PER_SECOND);
+      zoomInput.setAttribute('aria-label', 'Player action timeline zoom');
+      const zoomOutput = document.createElement('output');
+      zoomOutput.textContent = `${zoomInput.value} px/s`;
+      zoomLabel.classList.add('player-actions-zoom');
+      zoomLabel.append(zoomInput, zoomOutput);
       const updateButton = document.createElement('button');
       updateButton.type = 'submit';
       updateButton.textContent = 'Update';
@@ -190,6 +244,7 @@ export function createPlayerActionsOverview({
         phaseAnchorLabel,
         startLabel,
         endLabel,
+        zoomLabel,
         updateButton,
         showToEndLabel,
         filterNotice,
@@ -199,12 +254,28 @@ export function createPlayerActionsOverview({
       status.className = 'player-actions-status';
       const rows = document.createElement('div');
       rows.className = 'player-actions-rows';
+      const durationFilter = document.createElement('label');
+      durationFilter.className = 'player-actions-duration-filter';
+      const durationFilterText = document.createElement('span');
+      durationFilterText.textContent = 'Hide pulls ending before';
+      const durationFilterControl = document.createElement('span');
+      durationFilterControl.className = 'player-actions-duration-filter-control';
+      const durationFilterInput = document.createElement('input');
+      durationFilterInput.type = 'range';
+      durationFilterInput.step = '1000';
+      durationFilterInput.setAttribute('aria-label', 'Hide player action pulls ending before this time');
+      let minimumDurationMs = Math.max(0, Number(savedView?.minimumDurationMs) || 0);
+      const durationFilterOutput = document.createElement('output');
+      durationFilterControl.append(durationFilterInput, durationFilterOutput);
+      durationFilter.append(durationFilterText, durationFilterControl);
       const selectedAbilityIds = new Set((savedView?.selectedAbilityIds ?? [])
         .map(Number)
         .filter((abilityId) => abilityCatalog.some((ability) => ability.id === abilityId)));
       const abilityFilterState = {
         hideUnhighlighted: savedView?.hideUnhighlighted === true,
       };
+      let detailsReady = false;
+      let detailsError = null;
       const abilityFilter = createPlayerActionsAbilityFilter({
         abilityCatalog,
         selectedAbilityIds,
@@ -221,6 +292,8 @@ export function createPlayerActionsOverview({
           start: startInput.value,
           end: endInput.value,
           showToEnd: showToEndCheckbox.checked,
+          zoom: Number(zoomInput.value),
+          minimumDurationMs,
           selectedAbilityIds: [...selectedAbilityIds],
           hideUnhighlighted: abilityFilterState.hideUnhighlighted,
         });
@@ -230,8 +303,22 @@ export function createPlayerActionsOverview({
         const endMs = parseFightTimeInput(endInput.value);
         const showToEnd = showToEndCheckbox.checked;
         const maximumAnchoredDurationMs = getMaximumAnchoredDuration();
+        const pixelsPerSecond = Number(zoomInput.value);
+        minimumDurationMs = Math.max(startMs || 0, Math.min(minimumDurationMs, maximumAnchoredDurationMs));
+        durationFilterInput.min = String(Math.max(0, startMs || 0));
+        durationFilterInput.max = String(maximumAnchoredDurationMs);
+        durationFilterInput.value = String(minimumDurationMs);
+        durationFilterOutput.textContent = formatFightDuration(minimumDurationMs);
         startRange.max = String(maximumAnchoredDurationMs);
         endRange.max = String(maximumAnchoredDurationMs);
+        if (!detailsReady) {
+          status.className = `player-actions-status${detailsError ? ' error' : ''}`;
+          status.textContent = detailsError
+            ? `Could not load player actions: ${detailsError.message}`
+            : 'Loading pull actions in the background… You can configure the view now.';
+          updateWithSmoothHeight(rows, () => rows.replaceChildren());
+          return;
+        }
         if (!playerSelect.value
           || !Number.isFinite(startMs)
           || startMs < 0
@@ -263,9 +350,10 @@ export function createPlayerActionsOverview({
         const defaultTrackWidth = Math.max(
           1,
           (((showToEnd ? maximumAnchoredDurationMs : endMs) - startMs) / 1000)
-            * PLAYER_ACTION_PIXELS_PER_SECOND,
+            * pixelsPerSecond,
         );
         rows.style.setProperty('--player-actions-track-width', `${defaultTrackWidth}px`);
+        durationFilterControl.style.width = `${defaultTrackWidth}px`;
         const eligibleFights = fights
           .map((fight) => ({
             fight,
@@ -280,6 +368,7 @@ export function createPlayerActionsOverview({
             anchoredDurationMs: getFightDuration(entry.fight) - entry.anchorMs,
           }))
           .filter(({ anchorMs, anchoredDurationMs }) => Number.isFinite(anchorMs)
+            && anchoredDurationMs >= minimumDurationMs
             && (showToEnd ? anchoredDurationMs > startMs : anchoredDurationMs >= endMs))
           .sort((first, second) => showToEnd
             ? first.anchoredDurationMs - second.anchoredDurationMs
@@ -293,7 +382,7 @@ export function createPlayerActionsOverview({
           ? `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} shown from ${anchorName} + ${formatFightDuration(startMs)} to each pull's end, shortest first. ${formatPlayerGcdSummary(gcd)}.`
           : `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
         updateWithSmoothHeight(rows, () => {
-          rows.replaceChildren(...eligibleFights.map(({ fight, anchorMs, anchoredDurationMs }) => {
+          rows.replaceChildren(durationFilter, ...eligibleFights.map(({ fight, anchorMs, anchoredDurationMs }) => {
             const rowEndMs = showToEnd ? getFightDuration(fight) : anchorMs + endMs;
             const row = createPlayerActionsPullRow(
               report,
@@ -311,7 +400,7 @@ export function createPlayerActionsOverview({
             if (showToEnd) {
               const width = Math.max(
                 1,
-                ((anchoredDurationMs - startMs) / 1000) * PLAYER_ACTION_PIXELS_PER_SECOND,
+                ((anchoredDurationMs - startMs) / 1000) * pixelsPerSecond,
               );
               row.style.setProperty('--player-actions-track-width', `${width}px`);
             }
@@ -349,12 +438,23 @@ export function createPlayerActionsOverview({
         saveView();
         render({ showErrors: false });
       });
+      zoomInput.addEventListener('input', () => {
+        zoomOutput.textContent = `${zoomInput.value} px/s`;
+        saveView();
+        render({ showErrors: false });
+      });
+      durationFilterInput.addEventListener('input', () => {
+        minimumDurationMs = Number(durationFilterInput.value);
+        saveView();
+        render({ showErrors: false });
+      });
       for (const control of [startControl, endControl]) {
         control.textInput.addEventListener('input', () => {
           const milliseconds = parseFightTimeInput(control.textInput.value);
+          const currentMaximumMs = getMaximumAnchoredDuration();
           if (Number.isFinite(milliseconds)
             && milliseconds >= 0
-            && milliseconds <= maximumFightDurationMs) {
+            && milliseconds <= currentMaximumMs) {
             syncPlayerActionsTimeControl(control, milliseconds, { preserveText: true });
           } else {
             control.rangeInput.classList.add('unset');
@@ -371,6 +471,19 @@ export function createPlayerActionsOverview({
       });
       syncShowToEndControl();
       render({ showErrors: false });
+      void (async () => {
+        try {
+          await ensureReportFightDetails(report, fights, { playerActionsOnly: true });
+          await loadPlayerActionCategories(fights.flatMap((fight) =>
+            getFightDetails().get(`${report.code}:${fight.id}`)?.actionCasts ?? []));
+          const loadedCatalog = createLoadedPlayerActionAbilityCatalog(fights, report);
+          abilityCatalog.splice(0, abilityCatalog.length, ...loadedCatalog);
+          detailsReady = true;
+        } catch (error) {
+          detailsError = error;
+        }
+        if (dialog.isConnected) render({ showErrors: false });
+      })();
     } catch (error) {
       loading.textContent = `Could not load player actions: ${error.message}`;
     }
@@ -455,19 +568,33 @@ export function createPlayerActionsOverview({
       const viewLabel = createPlayerActionsControlLabel('Job-tailored view');
       const viewSelect = document.createElement('select');
       viewSelect.setAttribute('aria-label', 'Job-tailored special view');
-      viewSelect.append(new Option('Choose view…', ''));
-      viewSelect.append(new Option('GCD uptime in each phase', 'gcd-uptime-by-phase'));
-      viewSelect.append(new Option('DoT uptime in each phase', 'dot-uptime-by-phase'));
-      viewSelect.append(new Option('Lucid Dreaming timeline', 'lucid-dreaming-timeline'));
-      viewSelect.disabled = !playerSelect.value;
       const supportedViews = new Set([
         'gcd-uptime-by-phase',
         'dot-uptime-by-phase',
         'lucid-dreaming-timeline',
+        'afflatus-timeline',
       ]);
-      viewSelect.value = playerSelect.value && supportedViews.has(savedView.view)
+      const populateSpecialViews = (preferredView = '') => {
+        const job = playersByName.get(playerSelect.value)?.job;
+        viewSelect.replaceChildren(new Option('Choose view…', ''));
+        viewSelect.append(new Option('GCD uptime in each phase', 'gcd-uptime-by-phase'));
+        if (PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.has(job)) {
+          viewSelect.append(new Option('DoT uptime in each phase', 'dot-uptime-by-phase'));
+        }
+        if (PLAYER_ACTION_SPELL_SPEED_JOBS.has(job)) {
+          viewSelect.append(new Option('Lucid Dreaming timeline', 'lucid-dreaming-timeline'));
+        }
+        if (job === 'WHM') {
+          viewSelect.append(new Option('Afflatus tracker', 'afflatus-timeline'));
+        }
+        viewSelect.disabled = !playerSelect.value;
+        viewSelect.value = [...viewSelect.options].some((option) => option.value === preferredView)
+          ? preferredView
+          : '';
+      };
+      populateSpecialViews(playerSelect.value && supportedViews.has(savedView.view)
         ? savedView.view
-        : '';
+        : '');
       viewLabel.append(viewSelect);
       const zoomLabel = createPlayerActionsControlLabel('Zoom');
       zoomLabel.classList.add('special-views-zoom');
@@ -477,14 +604,30 @@ export function createPlayerActionsOverview({
       zoomInput.min = '1';
       zoomInput.max = '8';
       zoomInput.step = '0.5';
-      const savedZoom = Number(savedView.lucidZoom);
+      const savedZoom = Number(savedView.timelineZoom ?? savedView.lucidZoom);
       zoomInput.value = String(Number.isFinite(savedZoom) ? savedZoom : 2);
-      let lucidMinimumDurationMs = Math.max(0, Number(savedView.lucidMinimumDurationMs) || 0);
-      zoomInput.setAttribute('aria-label', 'Lucid Dreaming timeline zoom');
+      let timelineMinimumDurationMs = Math.max(
+        0,
+        Number(savedView.timelineMinimumDurationMs ?? savedView.lucidMinimumDurationMs) || 0,
+      );
+      zoomInput.setAttribute('aria-label', 'Special timeline zoom');
       const zoomValue = document.createElement('output');
       zoomValue.textContent = `${Number(zoomInput.value).toFixed(1)} px/s`;
       zoomLabel.append(zoomInput, zoomValue);
-      controls.append(playerLabel, viewLabel, zoomLabel);
+      const afflatusDisplayLabel = createPlayerActionsControlLabel('Timeline coloring');
+      afflatusDisplayLabel.classList.add('special-views-afflatus-display');
+      afflatusDisplayLabel.hidden = true;
+      const afflatusDisplaySelect = document.createElement('select');
+      afflatusDisplaySelect.setAttribute('aria-label', 'Afflatus timeline coloring');
+      afflatusDisplaySelect.append(
+        new Option('Lilies', 'lilies'),
+        new Option('Misery charges', 'misery'),
+      );
+      afflatusDisplaySelect.value = savedView.afflatusDisplayMode === 'misery'
+        ? 'misery'
+        : 'lilies';
+      afflatusDisplayLabel.append(afflatusDisplaySelect);
+      controls.append(playerLabel, viewLabel, zoomLabel, afflatusDisplayLabel);
 
       const status = document.createElement('p');
       status.className = 'special-views-status';
@@ -509,15 +652,19 @@ export function createPlayerActionsOverview({
         reportSpecialHardcodedViewStates.set(report.code, {
           player: playerSelect.value,
           view: viewSelect.value,
-          lucidZoom: Number(zoomInput.value),
-          lucidMinimumDurationMs,
+          timelineZoom: Number(zoomInput.value),
+          timelineMinimumDurationMs,
+          afflatusDisplayMode: afflatusDisplaySelect.value,
         });
       };
       let renderVersion = 0;
       const render = async () => {
         const version = ++renderVersion;
         const isLucidView = viewSelect.value === 'lucid-dreaming-timeline';
+        const isAfflatusView = viewSelect.value === 'afflatus-timeline';
+        const isTimelineView = isLucidView || isAfflatusView;
         zoomLabel.hidden = !isLucidView;
+        afflatusDisplayLabel.hidden = !isAfflatusView;
         results.replaceChildren();
         if (!playerSelect.value) {
           status.textContent = 'Choose a player to see their job-tailored views.';
@@ -531,29 +678,31 @@ export function createPlayerActionsOverview({
         const selectedPlayer = playerSelect.value;
         const metric = viewSelect.value === 'dot-uptime-by-phase' ? 'dot' : 'gcd';
         const metricLabel = metric === 'dot' ? 'DoT' : 'GCD';
-        status.textContent = isLucidView
-          ? `Loading ${selectedPlayer}'s Lucid Dreaming timeline…`
+        status.textContent = isTimelineView
+          ? `Loading ${selectedPlayer}'s ${isAfflatusView ? 'Afflatus' : 'Lucid Dreaming'} timeline…`
           : `Loading ${selectedPlayer}'s ${metricLabel} uptime by phase…`;
         try {
           await loadAllDetails();
           if (version !== renderVersion || !dialog.isConnected) return;
           const gcd = estimatePlayerGcd(fights, report, selectedPlayer);
-          status.textContent = isLucidView
-            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · Lucid Dreaming coverage.`
+          status.textContent = isTimelineView
+            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${isAfflatusView ? 'Afflatus tracker.' : 'Lucid Dreaming coverage.'}`
             : metric === 'gcd'
             ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${formatPlayerGcdSummary(gcd)}.`
             : `${selectedPlayer} (${player?.job ?? 'unknown job'}) · DoT uptime by phase.`;
-          results.append(isLucidView
-            ? createLucidDreamingTimeline(
+          results.append(isTimelineView
+            ? createSpecialActionTimeline(
               report,
               fights,
               selectedPlayer,
-              Number(zoomInput.value),
-              lucidMinimumDurationMs,
+              isAfflatusView ? 2 : Number(zoomInput.value),
+              timelineMinimumDurationMs,
               (minimumDurationMs) => {
-                lucidMinimumDurationMs = minimumDurationMs;
+                timelineMinimumDurationMs = minimumDurationMs;
                 saveView();
               },
+              isAfflatusView ? 'afflatus' : 'lucid',
+              afflatusDisplaySelect.value,
             )
             : createUptimeByPhaseTable(report, fights, selectedPlayer, gcd, metric));
         } catch (error) {
@@ -562,8 +711,8 @@ export function createPlayerActionsOverview({
         }
       };
       playerSelect.addEventListener('change', () => {
-        viewSelect.disabled = !playerSelect.value;
-        viewSelect.value = '';
+        const currentView = viewSelect.value;
+        populateSpecialViews(currentView);
         saveView();
         void render();
       });
@@ -574,7 +723,13 @@ export function createPlayerActionsOverview({
       zoomInput.addEventListener('input', () => {
         zoomValue.textContent = `${Number(zoomInput.value).toFixed(1)} px/s`;
         saveView();
-        if (viewSelect.value === 'lucid-dreaming-timeline') void render();
+        if (viewSelect.value === 'lucid-dreaming-timeline') {
+          void render();
+        }
+      });
+      afflatusDisplaySelect.addEventListener('change', () => {
+        saveView();
+        if (viewSelect.value === 'afflatus-timeline') void render();
       });
       content.replaceChildren(controls, status, results);
       void render();
@@ -661,13 +816,15 @@ export function createPlayerActionsOverview({
     return scroller;
   }
 
-  function createLucidDreamingTimeline(
+  function createSpecialActionTimeline(
     report,
     fights,
     playerName,
     pixelsPerSecond,
     minimumDurationMs,
     onMinimumDurationChange,
+    mode,
+    afflatusDisplayMode = 'lilies',
   ) {
     const scroller = document.createElement('div');
     scroller.className = 'special-views-lucid-scroll';
@@ -702,12 +859,19 @@ export function createPlayerActionsOverview({
       const durationMs = getFightDuration(fight);
       if (!(durationMs > 0)) continue;
       const casts = (state?.actionCasts ?? [])
-        .filter((action) => action.source === playerName
-          && action.eventType !== 'begincast'
-          && String(action.ability).toLocaleLowerCase() === 'lucid dreaming')
-        .map((action) => Number(action.timestamp) - Number(fight.startTime))
-        .filter((timestamp) => timestamp >= 0 && timestamp <= durationMs)
-        .sort((first, second) => first - second);
+        .filter((action) => {
+          if (action.source !== playerName || action.eventType === 'begincast') return false;
+          const ability = String(action.ability).toLocaleLowerCase();
+          return mode === 'afflatus'
+            ? WHM_AFFLATUS_ACTIONS.has(ability)
+            : ability === 'lucid dreaming';
+        })
+        .map((action) => ({
+          ability: String(action.ability).toLocaleLowerCase(),
+          timestamp: Number(action.timestamp) - Number(fight.startTime),
+        }))
+        .filter((cast) => cast.timestamp >= 0 && cast.timestamp <= durationMs)
+        .sort((first, second) => first.timestamp - second.timestamp);
       const row = document.createElement('section');
       row.className = 'special-views-lucid-row';
       row.dataset.durationMs = String(durationMs);
@@ -720,18 +884,29 @@ export function createPlayerActionsOverview({
       const track = document.createElement('div');
       track.className = 'special-views-lucid-track';
       track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+      if (mode === 'afflatus') {
+        appendAfflatusStateRanges(track, casts, durationMs, afflatusDisplayMode);
+      }
       let coveredUntil = null;
-      for (const castMs of casts) {
-        if (Number.isFinite(coveredUntil) && castMs > coveredUntil) {
-          appendLucidDreamingRange(track, coveredUntil, castMs, durationMs, 'gap');
+      for (const cast of casts) {
+        const castMs = cast.timestamp;
+        if (mode === 'lucid') {
+          if (Number.isFinite(coveredUntil) && castMs > coveredUntil) {
+            appendLucidDreamingRange(track, coveredUntil, castMs, durationMs, 'gap');
+          }
+          const coverageEnd = Math.min(durationMs, castMs + 60_000);
+          appendLucidDreamingRange(track, castMs, coverageEnd, durationMs, 'coverage');
+          coveredUntil = Math.max(coveredUntil ?? 0, coverageEnd);
         }
-        const coverageEnd = Math.min(durationMs, castMs + 60_000);
-        appendLucidDreamingRange(track, castMs, coverageEnd, durationMs, 'coverage');
-        coveredUntil = Math.max(coveredUntil ?? 0, coverageEnd);
         const tick = document.createElement('span');
-        tick.className = 'special-views-lucid-tick';
+        const afflatusName = WHM_AFFLATUS_ACTIONS.get(cast.ability);
+        tick.className = mode === 'afflatus'
+          ? `special-views-lucid-tick afflatus ${afflatusName?.toLocaleLowerCase() ?? ''}`
+          : 'special-views-lucid-tick';
         tick.style.left = `${(castMs / durationMs) * 100}%`;
-        tick.title = `Lucid Dreaming · ${formatPreciseFightDuration(castMs)}`;
+        tick.title = `${mode === 'afflatus' ? `Afflatus ${afflatusName}` : 'Lucid Dreaming'} · ${formatPreciseFightDuration(castMs)}`;
+        tick.setAttribute('aria-label', tick.title);
+        if (mode === 'afflatus') tick.textContent = afflatusName?.[0] ?? '';
         track.append(tick);
       }
       const endLabel = document.createElement('span');
@@ -755,6 +930,57 @@ export function createPlayerActionsOverview({
     });
     scroller.append(rows);
     return scroller;
+  }
+
+  function appendAfflatusStateRanges(track, casts, durationMs, displayMode) {
+    const events = casts.map((cast) => ({ ...cast, type: 'cast' }));
+    for (let timestamp = 20_000; timestamp < durationMs; timestamp += 20_000) {
+      events.push({ timestamp, type: 'lily-generation' });
+    }
+    events.sort((first, second) => first.timestamp - second.timestamp
+      || (first.type === 'lily-generation' ? -1 : 1));
+    let lilies = 3;
+    let miseryCharges = 0;
+    let rangeStart = 0;
+    for (const event of events) {
+      appendAfflatusStateRange(
+        track,
+        rangeStart,
+        event.timestamp,
+        durationMs,
+        displayMode,
+        displayMode === 'misery' ? miseryCharges : lilies,
+      );
+      if (event.type === 'lily-generation') {
+        lilies = Math.min(3, lilies + 1);
+      } else {
+        const action = WHM_AFFLATUS_ACTIONS.get(event.ability);
+        if (['Solace', 'Rapture'].includes(action)) {
+          lilies = Math.max(0, lilies - 1);
+          miseryCharges = Math.min(3, miseryCharges + 1);
+        } else if (action === 'Misery') {
+          miseryCharges = 0;
+        }
+      }
+      rangeStart = event.timestamp;
+    }
+    appendAfflatusStateRange(
+      track,
+      rangeStart,
+      durationMs,
+      durationMs,
+      displayMode,
+      displayMode === 'misery' ? miseryCharges : lilies,
+    );
+  }
+
+  function appendAfflatusStateRange(track, startMs, endMs, durationMs, displayMode, amount) {
+    if (!(endMs > startMs)) return;
+    const range = document.createElement('span');
+    range.className = `special-views-afflatus-state ${displayMode} amount-${amount}`;
+    range.style.left = `${(startMs / durationMs) * 100}%`;
+    range.style.width = `${((endMs - startMs) / durationMs) * 100}%`;
+    track.append(range);
   }
 
   function appendLucidDreamingHoverTime(track, durationMs) {
@@ -1126,8 +1352,20 @@ export function createPlayerActionsOverview({
   
   function isPlayerActionGcd(action) {
     const data = getPlayerActionGameData(action);
+    // The primary cooldown group determines whether the action is on the GCD.
+    // Eukrasia is the known exception: it uses its own short primary recast and
+    // may reference the normal GCD group differently across XIVAPI data versions.
+    // ActionCategory cannot guard this generally because FFXIV categorizes
+    // magical oGCD abilities as Spells, so keep the exception name-specific.
+    const ability = String(action.ability ?? '').trim().toLowerCase();
     return data.cooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP
-      || data.additionalCooldownGroup === PLAYER_ACTION_GCD_COOLDOWN_GROUP;
+      || PLAYER_ACTION_EXPLICIT_GCDS.has(ability);
+  }
+
+  function getPlayerActionFixedGcdRecast(action) {
+    return PLAYER_ACTION_FIXED_GCD_RECASTS.get(
+      String(action.ability ?? '').trim().toLowerCase(),
+    );
   }
   
   function getPlayerActionSpeedType(action) {
@@ -1208,7 +1446,7 @@ export function createPlayerActionsOverview({
     const completedSpansByEnd = new Map(castSpans
       .filter((span) => span.outcome === 'completed')
       .map((span) => [span.end, span]));
-    return visibleActions
+    const gcds = visibleActions
       .filter((action) => action.eventType === 'cast'
         && isPlayerActionGcd(action)
         && (!speedType || getPlayerActionSpeedType(action) === speedType))
@@ -1217,11 +1455,23 @@ export function createPlayerActionsOverview({
         return {
           action,
           timestamp: Number(span?.begin.timestamp ?? action.timestamp),
+          completionTimestamp: Number(action.timestamp),
           castDurationMs: Number(span?.begin.duration),
         };
       })
       .filter((entry) => Number.isFinite(entry.timestamp))
       .sort((first, second) => first.timestamp - second.timestamp);
+    return gcds.filter((entry, index) => {
+      const previous = gcds[index - 1];
+      if (!previous) return true;
+      const sameAbility = String(previous.action.ability ?? '').trim().toLowerCase()
+        === String(entry.action.ability ?? '').trim().toLowerCase();
+      const completionGap = Math.abs(previous.completionTimestamp - entry.completionTimestamp);
+      const sameBatch = completionGap <= PLAYER_ACTION_LOG_BATCH_MS;
+      const castAndEffectPair = completionGap <= 2_000
+        && Number.isFinite(previous.castDurationMs) !== Number.isFinite(entry.castDurationMs);
+      return !sameAbility || (!sameBatch && !castAndEffectPair);
+    });
   }
   
   function estimateGcdFromIntervals(intervals) {
@@ -1269,19 +1519,25 @@ export function createPlayerActionsOverview({
         const previous = gcds[index - 1];
         const current = gcds[index];
         const gameData = getPlayerActionGameData(previous.action);
-        const baseRecastMs = Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
-          ? gameData.recastMs
-          : PLAYER_ACTION_BASE_GCD_MS;
+        const fixedRecastMs = getPlayerActionFixedGcdRecast(previous.action);
+        const ability = String(previous.action.ability ?? '').trim().toLowerCase();
+        const baseRecastMs = fixedRecastMs
+          ?? (PLAYER_ACTION_BASE_GCD_OVERRIDES.has(ability) ? PLAYER_ACTION_BASE_GCD_MS : null)
+          ?? (Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
+            ? gameData.recastMs
+            : PLAYER_ACTION_BASE_GCD_MS);
         const hasLongCast = Number.isFinite(previous.castDurationMs)
           && previous.castDurationMs >= PLAYER_ACTION_BASE_GCD_MS;
         const intervalBaseMs = hasLongCast ? previous.castDurationMs : baseRecastMs;
         const rawIntervalMs = current.timestamp - previous.timestamp
           - (hasLongCast ? PLAYER_ACTION_CAST_ANIMATION_LOCK_MS : 0);
-        const speedModifier = getPlayerSpeedModifierAtTimestamp(
-          speedModifierWindows,
-          playerJob,
-          previous.timestamp,
-        );
+        const speedModifier = Number.isFinite(fixedRecastMs)
+          ? 1
+          : getPlayerSpeedModifierAtTimestamp(
+            speedModifierWindows,
+            playerJob,
+            previous.timestamp,
+          );
         // Normalize job/status haste out of the logged interval so intervals from
         // different jobs and temporary speed-buff windows estimate the same GCD.
         const normalizedIntervalMs = rawIntervalMs
@@ -1411,37 +1667,60 @@ export function createPlayerActionsOverview({
     if (rangeDurationMs <= 0) return { gcdPercent: null, dotPercent: null };
     const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
     const actions = (state?.actionCasts ?? []).filter((action) => action.source === playerName);
+    const untargetableWindows = buildGlobalUntargetableWindows(
+      state?.targetabilityEvents,
+      fightStart,
+      fightStart + fightDuration,
+    ).map(([start, end]) => [start - fightStart, end - fightStart]);
+    const actionableDurationMs = rangeDurationMs - measureMergedIntervalDuration(
+      untargetableWindows,
+      rangeStartMs,
+      rangeEndMs,
+    );
     const speedModifierWindows = buildPlayerSpeedModifierWindows(
       state?.playerSpeedStatusEvents,
       playerName,
     );
-    const gcdIntervals = collectCompletedPlayerGcds(actions, null).map((entry) => {
+    const gcdIntervals = collectCompletedPlayerGcds(actions, null).flatMap((entry) => {
+      const castStartMs = entry.timestamp - fightStart;
+      if (isTimestampInIntervals(castStartMs, untargetableWindows)) return [];
       const gameData = getPlayerActionGameData(entry.action);
-      const baseRecastMs = Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
-        ? gameData.recastMs
-        : PLAYER_ACTION_BASE_GCD_MS;
+      const fixedRecastMs = getPlayerActionFixedGcdRecast(entry.action);
+      const ability = String(entry.action.ability ?? '').trim().toLowerCase();
+      const baseRecastMs = fixedRecastMs
+        ?? (PLAYER_ACTION_BASE_GCD_OVERRIDES.has(ability) ? PLAYER_ACTION_BASE_GCD_MS : null)
+        ?? (Number.isFinite(gameData.recastMs) && gameData.recastMs > 0
+          ? gameData.recastMs
+          : PLAYER_ACTION_BASE_GCD_MS);
       const speedType = getPlayerActionSpeedType(entry.action);
-      const statScale = speedType && Number.isFinite(gcd?.durationMs)
+      const statScale = !Number.isFinite(fixedRecastMs)
+        && speedType && Number.isFinite(gcd?.durationMs)
         ? gcd.durationMs / PLAYER_ACTION_BASE_GCD_MS
         : 1;
-      const hasteScale = getPlayerSpeedModifierAtTimestamp(
-        speedModifierWindows,
-        player?.job,
-        entry.timestamp,
-      );
+      const hasteScale = Number.isFinite(fixedRecastMs)
+        ? 1
+        : getPlayerSpeedModifierAtTimestamp(
+          speedModifierWindows,
+          player?.job,
+          entry.timestamp,
+        );
       const recastMs = baseRecastMs * statScale * hasteScale;
       const occupiedMs = Number.isFinite(entry.castDurationMs)
         ? Math.max(recastMs, entry.castDurationMs + PLAYER_ACTION_CAST_ANIMATION_LOCK_MS)
         : recastMs;
-      return [entry.timestamp - fightStart, entry.timestamp - fightStart + occupiedMs];
+      const intervalStartMs = entry.timestamp - fightStart;
+      return [[intervalStartMs, intervalStartMs + occupiedMs]];
     });
-    const gcdOccupiedMs = measureMergedIntervalDuration(
-      gcdIntervals,
-      rangeStartMs,
-      rangeEndMs,
-    );
-    const gcdPercent = gcdIntervals.length > 0
-      ? Math.min(100, (gcdOccupiedMs / rangeDurationMs) * 100)
+    const gcdOccupiedMs = gcdIntervals.reduce((total, interval) => (
+      total + measureIntervalOutsideWindows(
+        interval,
+        untargetableWindows,
+        rangeStartMs,
+        rangeEndMs,
+      )
+    ), 0);
+    const gcdPercent = gcdIntervals.length > 0 && actionableDurationMs > 0
+      ? Math.min(100, (gcdOccupiedMs / actionableDurationMs) * 100)
       : null;
     const dotPercent = calculatePlayerDotUptimePercent(
       state?.playerDebuffEvents,
@@ -1451,6 +1730,7 @@ export function createPlayerActionsOverview({
       fightDuration,
       rangeStartMs,
       rangeEndMs,
+      state?.targetabilityEvents,
     );
     return { gcdPercent, dotPercent };
   }
@@ -1463,6 +1743,7 @@ export function createPlayerActionsOverview({
     fightDuration,
     rangeStartMs,
     rangeEndMs,
+    targetabilityEvents,
   ) {
     const families = PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.get(job);
     if (!families) return null;
@@ -1470,7 +1751,11 @@ export function createPlayerActionsOverview({
     const familyPercents = families.map((family) => {
       const statusNames = new Set(family.map((name) => name.toLocaleLowerCase()));
       const openByTarget = new Map();
-      const intervals = [];
+      const intervalsByTarget = new Map();
+      const getTargetIntervals = (targetId) => {
+        if (!intervalsByTarget.has(targetId)) intervalsByTarget.set(targetId, []);
+        return intervalsByTarget.get(targetId);
+      };
       for (const event of playerEvents) {
         if (!statusNames.has(String(event.ability ?? '').toLocaleLowerCase())) continue;
         const targetId = Number(event.targetId);
@@ -1478,19 +1763,123 @@ export function createPlayerActionsOverview({
         if (!Number.isFinite(elapsedMs)) continue;
         if (event.eventType === 'removedebuff') {
           const startMs = openByTarget.get(targetId);
-          if (Number.isFinite(startMs)) intervals.push([startMs, elapsedMs]);
+          if (Number.isFinite(startMs)) getTargetIntervals(targetId).push([startMs, elapsedMs]);
           openByTarget.delete(targetId);
         } else if (!openByTarget.has(targetId)) {
           openByTarget.set(targetId, elapsedMs);
         }
       }
-      for (const startMs of openByTarget.values()) intervals.push([startMs, fightDuration]);
-      return (
-        measureMergedIntervalDuration(intervals, rangeStartMs, rangeEndMs)
-        / (rangeEndMs - rangeStartMs)
-      ) * 100;
+      for (const [targetId, startMs] of openByTarget) {
+        getTargetIntervals(targetId).push([startMs, fightDuration]);
+      }
+      const targetIds = new Set([
+        ...intervalsByTarget.keys(),
+        ...(targetabilityEvents ?? []).map((event) => Number(event.actorId)),
+      ]);
+      const targetPercents = [];
+      for (const targetId of targetIds) {
+        const intervals = intervalsByTarget.get(targetId) ?? [];
+        let targetableWindows = buildActorTargetableWindows(
+          targetabilityEvents,
+          targetId,
+          fightStart,
+          fightStart + fightDuration,
+        ).map(([start, end]) => [start - fightStart, end - fightStart]);
+        // Some payloads omit targetability events for ordinary enemies. A DoT
+        // interval proves that target existed during this viewed phase, but does
+        // not make it part of phases before or after its appearance.
+        if (targetableWindows.length === 0
+          && intervals.some(([start, end]) => end > rangeStartMs && start < rangeEndMs)) {
+          targetableWindows = [[rangeStartMs, rangeEndMs]];
+        }
+        const targetableDurationMs = measureMergedIntervalDuration(
+          targetableWindows,
+          rangeStartMs,
+          rangeEndMs,
+        );
+        if (targetableDurationMs <= 0) continue;
+        const dottedTargetableIntervals = intervals.flatMap(([dotStart, dotEnd]) => (
+          targetableWindows.map(([targetStart, targetEnd]) => (
+            [Math.max(dotStart, targetStart), Math.min(dotEnd, targetEnd)]
+          ))
+        ));
+        const statusUptimeMs = measureMergedIntervalDuration(
+          dottedTargetableIntervals,
+          rangeStartMs,
+          rangeEndMs,
+        );
+        targetPercents.push((statusUptimeMs / targetableDurationMs) * 100);
+      }
+      return targetPercents.length > 0
+        ? targetPercents.reduce((sum, percent) => sum + percent, 0) / targetPercents.length
+        : 0;
     });
     return familyPercents.reduce((sum, percent) => sum + percent, 0) / familyPercents.length;
+  }
+
+  function buildGlobalUntargetableWindows(events, fightStart, fightEnd) {
+    const actorStates = new Map();
+    const windows = [];
+    let windowStart = null;
+    for (const event of events ?? []) {
+      const timestamp = Math.max(fightStart, Math.min(fightEnd, Number(event.timestamp)));
+      if (!Number.isFinite(timestamp) || !Number.isFinite(Number(event.actorId))) continue;
+      const wasGloballyUntargetable = actorStates.size > 0
+        && [...actorStates.values()].every((isTargetable) => !isTargetable);
+      actorStates.set(Number(event.actorId), event.isTargetable === true);
+      const isGloballyUntargetable = actorStates.size > 0
+        && [...actorStates.values()].every((isTargetable) => !isTargetable);
+      if (!wasGloballyUntargetable && isGloballyUntargetable) windowStart = timestamp;
+      if (wasGloballyUntargetable && !isGloballyUntargetable && Number.isFinite(windowStart)) {
+        windows.push([windowStart, timestamp]);
+        windowStart = null;
+      }
+    }
+    if (Number.isFinite(windowStart)) windows.push([windowStart, fightEnd]);
+    return windows.filter(([start, end]) => end > start);
+  }
+
+  function buildActorTargetableWindows(events, actorId, fightStart, fightEnd) {
+    const actorEvents = (events ?? [])
+      .filter((event) => Number(event.actorId) === Number(actorId))
+      .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+    if (actorEvents.length === 0) return [];
+    const windows = [];
+    let isTargetable = actorEvents[0].isTargetable === false;
+    let windowStart = isTargetable ? fightStart : null;
+    for (const event of actorEvents) {
+      const timestamp = Math.max(fightStart, Math.min(fightEnd, Number(event.timestamp)));
+      if (!Number.isFinite(timestamp)) continue;
+      if (event.isTargetable && !isTargetable) {
+        windowStart = timestamp;
+        isTargetable = true;
+      } else if (!event.isTargetable && isTargetable) {
+        if (Number.isFinite(windowStart) && timestamp > windowStart) {
+          windows.push([windowStart, timestamp]);
+        }
+        windowStart = null;
+        isTargetable = false;
+      }
+    }
+    if (isTargetable && Number.isFinite(windowStart) && fightEnd > windowStart) {
+      windows.push([windowStart, fightEnd]);
+    }
+    return windows;
+  }
+
+  function isTimestampInIntervals(timestamp, intervals) {
+    return intervals.some(([start, end]) => timestamp >= start && timestamp < end);
+  }
+
+  function measureIntervalOutsideWindows(interval, windows, minimum, maximum) {
+    const clippedStart = Math.max(minimum, interval[0]);
+    const clippedEnd = Math.min(maximum, interval[1]);
+    if (!(clippedEnd > clippedStart)) return 0;
+    return (clippedEnd - clippedStart) - measureMergedIntervalDuration(
+      windows,
+      clippedStart,
+      clippedEnd,
+    );
   }
 
   function measureMergedIntervalDuration(intervals, minimum, maximum) {
@@ -1530,7 +1919,7 @@ export function createPlayerActionsOverview({
       wrapper.append(metric);
     };
     addMetric('GCD', gcdPercent, 'GCD uptime');
-    addMetric('DoT', dotPercent, 'DoT uptime');
+    if (dotPercent !== null) addMetric('DoT', dotPercent, 'DoT uptime');
     return wrapper;
   }
   
