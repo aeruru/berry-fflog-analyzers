@@ -5,6 +5,7 @@ export function createFightDataLoader(dependencies) {
     getMitigationAbilitiesByName,
     setDancingMadMechanics,
     setDancingMadMitigations,
+    setDancingMadLilyUsages,
     setEncounterPhaseDefinitions,
     setMitigationAbilities,
     setMitigationCooldowns,
@@ -23,6 +24,27 @@ export function createFightDataLoader(dependencies) {
     const mechanics = await response.json();
     setDancingMadMechanics(mechanics
       .filter((entry) => Number.isFinite(Number(entry.elapsedSeconds)))
+      .sort(comparePhaseRelativeEntries));
+  }
+
+  async function loadDancingMadLilyUsages() {
+    const response = await fetch('./fight-data/dancing-mad-lily-usages.json');
+    if (!response.ok) throw new Error(`Dancing Mad lily usage data returned ${response.status}.`);
+    const document = await response.json();
+    const usages = document?.usages;
+    if (!Array.isArray(usages)) {
+      throw new Error('Dancing Mad lily usage data must contain a usages array.');
+    }
+    setDancingMadLilyUsages(usages
+      .map((entry) => ({
+        phase: Number(entry.phase),
+        elapsedSeconds: Number(entry.elapsedSeconds),
+      }))
+      .filter((entry) => Number.isInteger(entry.phase)
+        && entry.phase >= 1
+        && entry.phase <= 5
+        && Number.isFinite(entry.elapsedSeconds)
+        && entry.elapsedSeconds >= 0)
       .sort(comparePhaseRelativeEntries));
   }
 
@@ -119,6 +141,7 @@ export function createFightDataLoader(dependencies) {
 
   return {
     loadDancingMadMechanics,
+    loadDancingMadLilyUsages,
     loadDancingMadMitigations,
     loadEncounterPhaseDefinitions,
     loadMitigationAbilities,

@@ -120,6 +120,7 @@ let currentUser = null;
 let encounterPhaseDefinitions = new Map();
 let dancingMadMechanics = [];
 let dancingMadMitigations = [];
+let dancingMadLilyUsages = [];
 let mitigationAbilitiesById = new Map();
 let mitigationAbilitiesByName = new Map();
 // Pull-specific display override only. This intentionally never touches localStorage
@@ -144,6 +145,7 @@ const MITIGATION_GRACE_SECONDS = 20;
 
 const {
   loadDancingMadMechanics,
+  loadDancingMadLilyUsages,
   loadDancingMadMitigations,
   loadEncounterPhaseDefinitions,
   loadMitigationAbilities,
@@ -152,6 +154,7 @@ const {
   PARTY_SLOT_ORDER,
   getMitigationAbilitiesByName: () => mitigationAbilitiesByName,
   setDancingMadMechanics: (value) => { dancingMadMechanics = value; },
+  setDancingMadLilyUsages: (value) => { dancingMadLilyUsages = value; },
   setDancingMadMitigations: (value) => { dancingMadMitigations = value; },
   setEncounterPhaseDefinitions: (value) => { encounterPhaseDefinitions = value; },
   setMitigationAbilities: (byId, byName) => {
@@ -168,6 +171,7 @@ const {
   getEncounterRelativeTimestamp,
   normalizeEventType,
   resolveEncounterPhaseStarts,
+  resolveEncounterTransitionDowntime,
 } = createEncounterTiming({
   getDefinitions: () => encounterPhaseDefinitions,
   getMechanics: () => dancingMadMechanics,
@@ -242,6 +246,7 @@ const {
   isDmuPull,
   isLoggedInToFflogs,
   loadDancingMadMechanics,
+  loadDancingMadLilyUsages,
   loadDancingMadMitigations,
   loadEncounterPhaseDefinitions,
   loadMitigationAbilities,
@@ -318,6 +323,7 @@ const {
   formatFightDuration,
   getDancingMadMechanic,
   getDancingMadMechanics: () => dancingMadMechanics,
+  getDancingMadLilyUsages: () => dancingMadLilyUsages,
   getDancingMadPhase,
   getEncounterPhaseDefinitions: () => encounterPhaseDefinitions,
   getEncounterRelativeTimestamp,
@@ -361,6 +367,7 @@ const {
 
 const {
   clearSpecialHardcodedViewState,
+  createPlayerActionTimelinePreview,
   showReportPlayerActionsOverview,
   showSpecialHardcodedViews,
 } = createPlayerActionsOverview({
@@ -374,6 +381,7 @@ const {
   filterReportFightsByOutcome,
   formatFightDuration,
   getDancingMadMechanics: () => dancingMadMechanics,
+  getDancingMadLilyUsages: () => dancingMadLilyUsages,
   getDancingMadMitigations: () => dancingMadMitigations,
   getEncounterRelativeTimestamp,
   getFightDetails: () => fightDetails,
@@ -387,6 +395,7 @@ const {
   mitigationCastDistance,
   PARTY_SLOT_ORDER,
   resolveEncounterPhaseStarts,
+  resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
   updateWithSmoothHeight: (...args) => updateWithSmoothHeight(...args),
 });
@@ -491,6 +500,7 @@ const {
 } = createMitigationHistory({
   PARTY_SLOT_ORDER,
   createBestPullBadge,
+  createPlayerActionTimelinePreview,
   createMitigationAbilityIcon,
   filterReportFightsByOutcome,
   formatFightDuration,

@@ -28,6 +28,7 @@ export function createReportController(dependencies) {
     isDmuPull,
     isLoggedInToFflogs,
     loadDancingMadMechanics,
+    loadDancingMadLilyUsages,
     loadDancingMadMitigations,
     loadEncounterPhaseDefinitions,
     loadMitigationAbilities,
@@ -57,6 +58,7 @@ export function createReportController(dependencies) {
     try {
       await loadEncounterPhaseDefinitions();
       await loadDancingMadMechanics();
+      await loadDancingMadLilyUsages();
       await loadMitigationAbilities();
       await loadDancingMadMitigations();
       await loadMitigationCooldowns();

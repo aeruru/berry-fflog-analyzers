@@ -30,6 +30,7 @@ export function createDetailedReportViewModule(dependencies) {
     toggleFightMitigations,
     updateSelectedReportReloadButton,
   } = dependencies;
+  const selectedViewByReport = new Map();
 
   function createDetailedReportView(report) {
     const article = document.createElement('article');
@@ -79,28 +80,19 @@ export function createDetailedReportViewModule(dependencies) {
       renderLookupResult();
     });
   
-    const mitigationOverviewButton = document.createElement('button');
-    mitigationOverviewButton.className = 'report-mitigation-overview-button';
-    mitigationOverviewButton.type = 'button';
-    mitigationOverviewButton.textContent = 'View all mit graphs';
-    mitigationOverviewButton.addEventListener('click', () => {
-      showReportMitigationHistoryOverview(report, mitigationOverviewButton);
-    });
-  
-    const playerActionsButton = document.createElement('button');
-    playerActionsButton.className = 'report-player-actions-button';
-    playerActionsButton.type = 'button';
-    playerActionsButton.textContent = 'View player actions';
-    playerActionsButton.addEventListener('click', () => {
-      showReportPlayerActionsOverview(report, playerActionsButton);
-    });
-  
-    const specialViewsButton = document.createElement('button');
-    specialViewsButton.className = 'report-special-views-button';
-    specialViewsButton.type = 'button';
-    specialViewsButton.textContent = 'Special hardcoded views';
-    specialViewsButton.addEventListener('click', () => {
-      showSpecialHardcodedViews(report, specialViewsButton);
+    const viewSelect = document.createElement('select');
+    viewSelect.className = 'report-view-select';
+    viewSelect.setAttribute('aria-label', 'Report view');
+    viewSelect.append(
+      new Option('Pull Summaries', 'pull-summaries'),
+      new Option('All Mit Graphs', 'mitigation-graphs'),
+      new Option('Player Actions per Pull', 'player-actions'),
+      new Option('Special Hardcoded Views', 'special-views'),
+    );
+    viewSelect.value = selectedViewByReport.get(report.code) ?? 'pull-summaries';
+    viewSelect.addEventListener('change', () => {
+      selectedViewByReport.set(report.code, viewSelect.value);
+      renderLookupResult();
     });
   
     const fightCount = document.createElement('span');
@@ -117,29 +109,48 @@ export function createDetailedReportViewModule(dependencies) {
     actions.append(
       reloadButton,
       phaseFilter,
-      mitigationOverviewButton,
-      playerActionsButton,
-      specialViewsButton,
+      viewSelect,
       pullSummary,
     );
     summary.append(info, actions);
   
-    const fightList = document.createElement('div');
-    fightList.className = 'detailed-fight-list';
-    if (visibleFights.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'detailed-empty-state';
-      empty.textContent = getSelectedReportPhase() === 'all'
-        ? 'This report does not include DMU fight data.'
-        : getSelectedReportPhase() === 'clears'
-          ? 'No clears found in this report.'
-          : `No wipes ended during Phase ${getSelectedReportPhase()} in this report.`;
-      fightList.append(empty);
+    const viewHost = document.createElement('div');
+    viewHost.className = 'report-view-content';
+    const selectedView = viewSelect.value;
+    if (selectedView === 'pull-summaries') {
+      const fightList = document.createElement('div');
+      fightList.className = 'detailed-fight-list';
+      if (visibleFights.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'detailed-empty-state';
+        empty.textContent = getSelectedReportPhase() === 'all'
+          ? 'This report does not include DMU fight data.'
+          : getSelectedReportPhase() === 'clears'
+            ? 'No clears found in this report.'
+            : `No wipes ended during Phase ${getSelectedReportPhase()} in this report.`;
+        fightList.append(empty);
+      } else {
+        fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
+      }
+      viewHost.append(fightList);
     } else {
-      fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
+      const loading = document.createElement('p');
+      loading.className = 'detailed-empty-state';
+      loading.textContent = 'Loading selected report view…';
+      viewHost.append(loading);
+      queueMicrotask(() => {
+        if (!viewHost.isConnected) return;
+        if (selectedView === 'mitigation-graphs') {
+          void showReportMitigationHistoryOverview(report, viewSelect, viewHost);
+        } else if (selectedView === 'player-actions') {
+          void showReportPlayerActionsOverview(report, viewSelect, viewHost);
+        } else if (selectedView === 'special-views') {
+          void showSpecialHardcodedViews(report, viewSelect, viewHost);
+        }
+      });
     }
   
-    article.append(summary, fightList);
+    article.append(summary, viewHost);
     return article;
   }
   

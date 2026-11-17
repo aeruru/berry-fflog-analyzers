@@ -26,12 +26,24 @@ export function createFightEventExtractors({
   function extractTargetabilityEvents(events, friendlyIds = new Set()) {
     return events
       .filter((event) => normalizeEventType(event.type ?? event.eventType) === 'targetabilityupdate')
-      .map((event) => ({
-        actorId: Number(event.sourceID ?? event.sourceId ?? event.actorID ?? event.actorId
-          ?? event.targetID ?? event.targetId),
-        isTargetable: event.isTargetable ?? event.targetable,
-        timestamp: Number(event.timestamp),
-      }))
+      .map((event) => {
+        const rawTargetable = event.isTargetable ?? event.targetable;
+        const isTargetable = rawTargetable === true
+          || rawTargetable === 1
+          || rawTargetable === '1'
+          ? true
+          : rawTargetable === false
+            || rawTargetable === 0
+            || rawTargetable === '0'
+            ? false
+            : null;
+        return {
+          actorId: Number(event.sourceID ?? event.sourceId ?? event.actorID ?? event.actorId
+            ?? event.targetID ?? event.targetId),
+          isTargetable,
+          timestamp: Number(event.timestamp),
+        };
+      })
       .filter((event) => Number.isFinite(event.actorId)
         && !friendlyIds.has(event.actorId)
         && typeof event.isTargetable === 'boolean'

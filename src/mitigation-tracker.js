@@ -381,7 +381,7 @@ export function createMitigationTracker(dependencies) {
         const rows = await loadMitigationResultHistory(report, result.mitigation);
         tooltip.replaceChildren(
           createMitigationHistorySummary(rows),
-          createMitigationHistoryTable(rows),
+          createMitigationHistoryTable(rows, report),
         );
         positionMitigationHistoryPopup(anchor, tooltip);
       } catch (error) {

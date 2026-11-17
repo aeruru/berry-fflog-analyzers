@@ -22,10 +22,10 @@ export function createMitigationCore(dependencies) {
 
   async function loadMitigationResultHistory(report, mitigation) {
     const reportFingerprint = (report.fights ?? []).map(getFightFingerprint).join('|');
-    const cacheKey = `${report.code}:${reportFingerprint}:${getMitigationIdentity(mitigation)}`;
-    if (!getMitigationHistoryPromises().has(cacheKey)) {
-      getMitigationHistoryPromises().set(cacheKey, (async () => {
-        const rows = [];
+    const slotCacheKey = `${report.code}:${reportFingerprint}:slot:${mitigation.assignedTo}`;
+    if (!getMitigationHistoryPromises().has(slotCacheKey)) {
+      getMitigationHistoryPromises().set(slotCacheKey, (async () => {
+        const rowsByMitigation = new Map();
         const fights = (report.fights ?? [])
           .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID);
         await ensureReportFightDetails(report, fights);
@@ -33,14 +33,20 @@ export function createMitigationCore(dependencies) {
         for (const fight of fights) {
           const state = getFightDetails().get(`${report.code}:${fight.id}`);
           if (!state || state.status !== 'ready') continue;
-          const result = evaluatePartySlotMitigations(fight, state, mitigation.assignedTo)
-            .find((entry) => getMitigationIdentity(entry.mitigation) === getMitigationIdentity(mitigation));
-          if (result) rows.push({ fight, result });
+          for (const result of evaluatePartySlotMitigations(fight, state, mitigation.assignedTo)) {
+            const identity = getMitigationIdentity(result.mitigation);
+            if (!rowsByMitigation.has(identity)) rowsByMitigation.set(identity, []);
+            rowsByMitigation.get(identity).push({ fight, result });
+          }
         }
-        return rows.sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+        for (const rows of rowsByMitigation.values()) {
+          rows.sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+        }
+        return rowsByMitigation;
       })());
     }
-    return getMitigationHistoryPromises().get(cacheKey);
+    const rowsByMitigation = await getMitigationHistoryPromises().get(slotCacheKey);
+    return rowsByMitigation.get(getMitigationIdentity(mitigation)) ?? [];
   }
   
   // Populate the shared per-pull cache for report-wide comparison views. Restored
