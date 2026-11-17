@@ -321,7 +321,8 @@ h2 {
 
 .report-reload-button,
 .report-mitigation-overview-button,
-.report-player-actions-button {
+.report-player-actions-button,
+.report-special-views-button {
   background: transparent;
   border: 1px solid var(--line);
   color: var(--ink);
@@ -333,7 +334,8 @@ h2 {
 
 .report-reload-button:hover,
 .report-mitigation-overview-button:hover,
-.report-player-actions-button:hover {
+.report-player-actions-button:hover,
+.report-special-views-button:hover {
   background: rgba(96, 165, 250, 0.1);
 }
 
@@ -732,25 +734,108 @@ h2 {
   padding-bottom: 6px;
 }
 
+.player-actions-duration-filter {
+  align-items: center;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 282px var(--player-actions-track-width, 520px);
+  min-width: calc(296px + var(--player-actions-track-width, 520px));
+}
+
+.player-actions-duration-filter > span:first-child {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.player-actions-duration-filter-control {
+  display: block;
+  position: relative;
+}
+
+.player-actions-duration-filter input {
+  accent-color: var(--accent);
+  display: block;
+  margin: 0;
+  width: 100%;
+}
+
+.player-actions-duration-filter output {
+  color: var(--muted);
+  font-size: 0.62rem;
+  position: absolute;
+  top: calc(100% + 2px);
+}
+
+.player-actions-zoom {
+  min-width: 180px;
+}
+
+.player-actions-zoom input {
+  accent-color: var(--accent);
+  width: 150px;
+}
+
+.player-actions-zoom output {
+  color: var(--muted);
+  font-size: 0.66rem;
+  margin-left: 6px;
+}
+
 .player-actions-row {
   align-items: center;
   display: grid;
   gap: 14px;
-  grid-template-columns: 150px var(--player-actions-track-width, 520px);
-  min-width: calc(164px + var(--player-actions-track-width, 520px));
+  grid-template-columns: 282px var(--player-actions-track-width, 520px);
+  min-width: calc(296px + var(--player-actions-track-width, 520px));
 }
 
 .player-actions-pull {
   align-items: center;
   display: flex;
   gap: 7px;
-  justify-content: flex-end;
+  justify-content: flex-start;
   white-space: nowrap;
+}
+
+.player-actions-uptime-metrics {
+  align-items: flex-start;
+  background: color-mix(in srgb, var(--surface-strong) 76%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 2px 7px;
+}
+
+.player-actions-uptime-metric {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 1.05;
+  padding: 0;
+  text-align: left;
+}
+
+.player-actions-uptime-metric.gcd {
+  color: color-mix(in srgb, var(--accent) 82%, var(--ink));
+}
+
+.player-actions-uptime-metric.dot {
+  color: color-mix(in srgb, #f472b6 82%, var(--ink));
 }
 
 .player-actions-track-wrap {
   padding: 49px 0 35px;
   position: relative;
+}
+
+.player-actions-row.no-gcd-actions .player-actions-track-wrap,
+.player-actions-row.no-ogcd-actions .player-actions-track-wrap {
+  padding-top: 23px;
 }
 
 .player-actions-track {
@@ -838,6 +923,14 @@ h2 {
   bottom: 29px;
 }
 
+.player-actions-row.no-gcd-actions .player-actions-marker.ability {
+  bottom: 3px;
+}
+
+.player-actions-row.no-gcd-actions .player-actions-cast-span.ability {
+  bottom: 14px;
+}
+
 .player-actions-marker.ability .player-action-icon {
   height: 19px;
   width: 19px;
@@ -891,6 +984,303 @@ h2 {
 
 .player-actions-track.show-hover-time .player-actions-hover-line,
 .player-actions-track.show-hover-time .player-actions-hover-time {
+  display: block;
+}
+
+.special-views-dialog {
+  width: fit-content;
+}
+
+.special-views-content {
+  display: grid;
+  gap: 14px;
+}
+
+.special-views-controls {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.special-views-controls .player-actions-control-label {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.special-views-controls label > span {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+}
+
+.special-views-controls select {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  font: inherit;
+  min-height: 36px;
+  padding: 0 9px;
+}
+
+.special-views-zoom {
+  grid-template-columns: minmax(150px, 220px) auto;
+}
+
+.special-views-zoom[hidden] {
+  display: none;
+}
+
+.special-views-afflatus-display[hidden] {
+  display: none;
+}
+
+.special-views-zoom > span {
+  grid-column: 1 / -1;
+}
+
+.special-views-zoom input {
+  accent-color: var(--accent);
+  width: 220px;
+}
+
+.special-views-zoom output {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.special-views-status {
+  color: var(--muted);
+  font-size: 0.75rem;
+  margin: 0;
+}
+
+.special-views-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+}
+
+.special-views-table {
+  border-collapse: collapse;
+  width: max-content;
+}
+
+.special-views-table th,
+.special-views-table td {
+  border-bottom: 1px solid var(--line);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  padding: 8px 10px;
+  text-align: right;
+}
+
+.special-views-table th:first-child,
+.special-views-table td:first-child {
+  text-align: left;
+}
+
+.special-views-table thead th {
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.special-views-table .special-views-total {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.special-views-lucid-scroll {
+  max-width: min(82vw, 1100px);
+  overflow-x: auto;
+  padding: 10px 0 22px;
+}
+
+.special-views-lucid-rows {
+  display: grid;
+  gap: 16px;
+  width: max-content;
+}
+
+.special-views-lucid-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 118px auto;
+}
+
+.special-views-lucid-row[hidden] {
+  display: none;
+}
+
+.special-views-lucid-threshold {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 118px auto;
+}
+
+.special-views-lucid-threshold > span:first-child {
+  color: var(--muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-align: right;
+}
+
+.special-views-lucid-threshold-control {
+  display: block;
+  position: relative;
+}
+
+.special-views-lucid-threshold input {
+  accent-color: var(--accent);
+  display: block;
+  margin: 0;
+  width: 100%;
+}
+
+.special-views-lucid-threshold output {
+  color: var(--muted);
+  font-size: 0.62rem;
+  left: 0;
+  position: absolute;
+  top: calc(100% + 2px);
+  transform: translateX(-50%);
+}
+
+.special-views-lucid-pull {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.special-views-lucid-track {
+  background: color-mix(in srgb, var(--track) 88%, transparent);
+  border-left: 1px solid var(--muted);
+  border-right: 1px solid var(--muted);
+  height: 16px;
+  position: relative;
+}
+
+.special-views-lucid-range {
+  bottom: 0;
+  position: absolute;
+  top: 0;
+}
+
+.special-views-lucid-range.coverage {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.special-views-lucid-range.gap {
+  background: rgba(239, 68, 68, 0.48);
+}
+
+.special-views-lucid-tick {
+  background: #fff;
+  bottom: -3px;
+  position: absolute;
+  top: -3px;
+  transform: translateX(-1px);
+  width: 2px;
+  z-index: 2;
+}
+
+.special-views-lucid-tick.afflatus {
+  border: 0;
+  border-radius: 0;
+  bottom: -3px;
+  color: transparent;
+  display: block;
+  height: auto;
+  top: -3px;
+  transform: translateX(-1.5px);
+  width: 3px;
+}
+
+.special-views-lucid-tick.afflatus.solace {
+  background: #345f9f;
+}
+
+.special-views-lucid-tick.afflatus.rapture {
+  background: var(--accent);
+}
+
+.special-views-lucid-tick.afflatus.misery {
+  background: #c45aa5;
+}
+
+.special-views-afflatus-state {
+  bottom: 0;
+  position: absolute;
+  top: 0;
+}
+
+.special-views-afflatus-state.lilies.amount-1 {
+  background: rgb(29 78 216 / 20%);
+}
+
+.special-views-afflatus-state.lilies.amount-2 {
+  background: rgb(29 78 216 / 50%);
+}
+
+.special-views-afflatus-state.lilies.amount-3 {
+  background: rgb(29 78 216);
+}
+
+.special-views-afflatus-state.misery.amount-1 {
+  background: rgb(196 90 165 / 20%);
+}
+
+.special-views-afflatus-state.misery.amount-2 {
+  background: rgb(196 90 165 / 50%);
+}
+
+.special-views-afflatus-state.misery.amount-3 {
+  background: rgb(196 90 165);
+}
+
+.special-views-lucid-end {
+  color: var(--muted);
+  font-size: 0.62rem;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+}
+
+.special-views-lucid-hover-line {
+  background: rgba(255, 255, 255, 0.72);
+  bottom: -4px;
+  display: none;
+  position: absolute;
+  top: -4px;
+  width: 1px;
+  z-index: 3;
+}
+
+.special-views-lucid-hover-time {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--ink);
+  display: none;
+  font-size: 0.62rem;
+  padding: 2px 4px;
+  position: absolute;
+  top: calc(100% + 18px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 4;
+}
+
+.special-views-lucid-track.show-hover-time .special-views-lucid-hover-line,
+.special-views-lucid-track.show-hover-time .special-views-lucid-hover-time {
   display: block;
 }
 
@@ -1287,16 +1677,16 @@ h2 {
 }
 
 .fight-event-debuffs-heading::after {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid color-mix(in srgb, var(--line) 52%, transparent);
   bottom: 0;
   content: '';
-  height: 7px;
-  left: 50%;
+  height: 5px;
+  left: var(--debuff-divider-offset, 50%);
   position: absolute;
 }
 
 .fight-event-debuffs-cell.player {
-  border-left: 1px solid var(--line);
+  border-left: 1px solid color-mix(in srgb, var(--line) 52%, transparent);
 }
 
 .fight-event-status-list {
@@ -1337,8 +1727,8 @@ h2 {
   pointer-events: none;
   position: fixed;
   text-align: center;
-  white-space: normal;
-  z-index: 10000;
+  white-space: pre-line;
+  z-index: 13000;
 }
 
 .fight-details-table th,
@@ -1353,6 +1743,218 @@ h2 {
   color: var(--muted);
   font-size: 0.68rem;
   text-transform: uppercase;
+}
+
+.fight-event-annotated-row {
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.fight-event-annotated-row:hover,
+.fight-event-annotated-row:focus-visible,
+.fight-event-annotated-row.fight-event-recap-pinned {
+  background: rgb(96 165 250 / 8%);
+  box-shadow: inset 3px 0 0 var(--accent);
+  outline: none;
+}
+
+.fight-event-recap {
+  background:
+    linear-gradient(135deg, rgb(29 42 62 / 98%), rgb(14 23 38 / 98%));
+  border: 1px solid rgb(96 165 250 / 60%);
+  border-radius: 9px;
+  box-shadow: 0 18px 45px rgb(0 0 0 / 55%), 0 0 24px rgb(59 130 246 / 12%);
+  color: var(--ink);
+  max-width: calc(100vw - 16px);
+  min-width: min(760px, calc(100vw - 16px));
+  overflow: hidden;
+  pointer-events: none;
+  position: fixed;
+  z-index: 12000;
+}
+
+.fight-event-recap.is-pinned {
+  pointer-events: auto;
+}
+
+.fight-event-recap-heading {
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.fight-event-recap-heading strong {
+  color: #f8fbff;
+  font-size: 0.8rem;
+}
+
+.fight-event-recap-heading span {
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.fight-event-recap-close {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 16px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  height: 16px;
+  justify-content: center;
+  line-height: 1;
+  margin-left: auto;
+  min-height: 16px;
+  padding: 0 0 1px;
+  width: 16px;
+}
+
+.fight-event-recap-close:hover,
+.fight-event-recap-close:focus-visible {
+  background: rgb(96 165 250 / 12%);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.fight-event-recap-scroll {
+  max-height: min(410px, calc(100vh - 80px));
+  overflow: auto;
+}
+
+.fight-event-recap table {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+}
+
+.fight-event-recap th,
+.fight-event-recap td {
+  border-bottom: 1px solid rgb(148 163 184 / 16%);
+  padding: 5px 7px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.fight-event-recap th {
+  background: rgb(8 15 27 / 58%);
+  color: var(--muted);
+  font-size: 0.58rem;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.fight-event-recap td {
+  font-size: 0.68rem;
+}
+
+.fight-event-recap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.fight-event-recap-empty {
+  color: var(--muted);
+  padding: 14px 10px !important;
+  text-align: center !important;
+}
+
+.fight-event-recap-amount {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-align: right !important;
+}
+
+.fight-event-recap-amount.damage {
+  color: #fb7185;
+}
+
+.fight-event-recap-amount.heal {
+  color: #a7f3d0;
+}
+
+.fight-event-recap-overheal {
+  color: rgb(148 163 184 / 62%);
+  font-weight: 700;
+}
+
+.fight-event-recap-ability {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+}
+
+.fight-event-recap-ability img {
+  border-radius: 2px;
+  height: 18px;
+  object-fit: contain;
+  width: 18px;
+}
+
+.fight-event-recap-hp {
+  min-width: 150px;
+  padding: 3px 6px !important;
+}
+
+.fight-event-recap-hp-bar {
+  background: rgb(148 163 184 / 16%);
+  border: 1px solid rgb(148 163 184 / 24%);
+  border-radius: 4px;
+  display: block;
+  font-size: 0.65rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  min-height: 20px;
+  overflow: hidden;
+  padding: 2px 6px;
+  position: relative;
+  text-align: right;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 90%);
+}
+
+.fight-event-recap-hp-base,
+.fight-event-recap-hp-change,
+.fight-event-recap-shield {
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  top: 0;
+}
+
+.fight-event-recap-hp-base {
+  background: #3fbd68;
+  width: var(--hp-base);
+}
+
+.fight-event-recap-hp-change {
+  background: #226b3c;
+  left: var(--hp-change-start);
+  width: var(--hp-change);
+}
+
+.fight-event-recap-shield {
+  background: #facc15;
+  height: 4px;
+  top: auto;
+  width: var(--shield-ratio);
+}
+
+.fight-event-recap-hp-label {
+  position: relative;
+  z-index: 1;
+}
+
+.fight-event-recap-shield-label {
+  color: #fde047;
+}
+
+.fight-event-recap .fight-event-status-icon {
+  height: 18px;
+  width: 18px;
 }
 
 .mitigation-header {
