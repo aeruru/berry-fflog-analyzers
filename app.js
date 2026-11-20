@@ -170,6 +170,7 @@ const {
   getEncounterEventReferences,
   getEncounterRelativeTimestamp,
   normalizeEventType,
+  resolveEncounterBossUntargetableWindows,
   resolveEncounterPhaseStarts,
   resolveEncounterTransitionDowntime,
 } = createEncounterTiming({
@@ -340,10 +341,13 @@ const {
   createFightDetailsPanel,
   createFightMitigationPanel: (...args) => createFightMitigationPanel(...args),
   createLinkGroup,
+  DANCING_MAD_ENCOUNTER_NAME,
   formatFightDuration,
   formatFightStartTime,
   formatReportDateRange,
   getBestDmuPull,
+  getDancingMadMechanic,
+  getDancingMadPhase,
   getFightDetails: () => fightDetails,
   getFightDuration,
   getIsShiftHeld: () => isShiftHeld,
@@ -356,6 +360,7 @@ const {
   reloadFightDetails,
   reloadSelectedReport,
   renderLookupResult,
+  resolveEncounterPhaseStarts,
   setSelectedReportPhase: (value) => { selectedReportPhase = value; },
   showReportMitigationHistoryOverview: (...args) => showReportMitigationHistoryOverview(...args),
   showReportPlayerActionsOverview: (...args) => showReportPlayerActionsOverview(...args),
@@ -394,6 +399,7 @@ const {
   MITIGATION_GRACE_SECONDS,
   mitigationCastDistance,
   PARTY_SLOT_ORDER,
+  resolveEncounterBossUntargetableWindows,
   resolveEncounterPhaseStarts,
   resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
@@ -418,6 +424,7 @@ const JOB_ABBREVIATIONS = new Map([
 ]);
 
 const {
+  extractEnemyInvulnerabilityEvents,
   extractPhaseReferenceEvents,
   extractPlayerActionCasts,
   extractPlayerDebuffEvents,
@@ -451,6 +458,7 @@ const {
   FIGHT_EVENT_RECAP_LOOKBACK_MS,
   FIGHT_EVENT_RECAP_MAX_ROWS,
   TANK_FORTY_PERCENT_BUFFS,
+  extractEnemyInvulnerabilityEvents,
   extractPhaseReferenceEvents,
   extractPlayerActionCasts,
   extractPlayerDebuffEvents,

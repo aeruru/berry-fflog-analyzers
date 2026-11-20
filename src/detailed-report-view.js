@@ -6,10 +6,13 @@ export function createDetailedReportViewModule(dependencies) {
     createFightDetailsPanel,
     createFightMitigationPanel,
     createLinkGroup,
+    DANCING_MAD_ENCOUNTER_NAME,
     formatFightDuration,
     formatFightStartTime,
     formatReportDateRange,
     getBestDmuPull,
+    getDancingMadMechanic,
+    getDancingMadPhase,
     getFightDetails,
     getFightDuration,
     getIsShiftHeld,
@@ -22,6 +25,7 @@ export function createDetailedReportViewModule(dependencies) {
     reloadFightDetails,
     reloadSelectedReport,
     renderLookupResult,
+    resolveEncounterPhaseStarts,
     setSelectedReportPhase,
     showReportMitigationHistoryOverview,
     showReportPlayerActionsOverview,
@@ -320,7 +324,25 @@ export function createDetailedReportViewModule(dependencies) {
     const start = document.createElement('span');
     start.textContent = formatFightStartTime(report.startTime, fight.startTime);
     const duration = document.createElement('span');
-    duration.textContent = formatFightDuration(getFightDuration(fight));
+    const fightDurationMs = getFightDuration(fight);
+    duration.textContent = formatFightDuration(fightDurationMs);
+    if (!fight.kill && !fight.lastPhaseIsIntermission) {
+      const state = getFightDetails().get(detailKey);
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const endingPhase = getDancingMadPhase(fightDurationMs, phaseStarts);
+      const reportedPhase = Math.max(1, Number(fight.lastPhase) || 1);
+      if (endingPhase === reportedPhase && Number.isFinite(phaseStarts.get(reportedPhase))) {
+        const mechanic = getDancingMadMechanic(fightDurationMs, phaseStarts, reportedPhase);
+        if (mechanic?.mechanic) {
+          duration.textContent += ` · ${mechanic.mechanic}`;
+          duration.title = `Wiped during ${mechanic.mechanic}`;
+        }
+      }
+    }
     const health = document.createElement('strong');
     health.className = isHighlighted ? 'highlighted' : '';
     health.textContent = `${bossRemaining.toFixed(1)}% remaining`;

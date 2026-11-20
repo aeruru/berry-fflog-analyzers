@@ -78,6 +78,31 @@ export function createEncounterTiming({ getDefinitions, getMechanics }) {
     return windows;
   }
 
+  function resolveEncounterBossUntargetableWindows(
+    encounterName,
+    bossName,
+    phaseStarts,
+    fightEndMs,
+  ) {
+    const normalizedBossName = String(bossName ?? '').trim().toLocaleLowerCase();
+    const definitions = getDefinitions().get(encounterName)?.phases ?? [];
+    const windows = [];
+    for (const definition of definitions) {
+      const isUntargetable = (definition.untargetableBosses ?? []).some((candidate) => (
+        String(candidate).trim().toLocaleLowerCase() === normalizedBossName
+      ));
+      if (!isUntargetable) continue;
+      const phase = Number(definition.phase);
+      const startMs = phaseStarts.get(phase);
+      const nextPhaseStartMs = phaseStarts.get(phase + 1);
+      const endMs = Number.isFinite(nextPhaseStartMs) ? nextPhaseStartMs : fightEndMs;
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+        windows.push([startMs, endMs]);
+      }
+    }
+    return windows;
+  }
+
   function getEncounterRelativeTimestamp(entry, phaseStarts) {
     const phaseStartMs = phaseStarts.get(Number(entry.phase));
     const relativeMs = Number(entry.elapsedSeconds) * 1000;
@@ -106,6 +131,7 @@ export function createEncounterTiming({ getDefinitions, getMechanics }) {
     getEncounterEventReferences,
     getEncounterRelativeTimestamp,
     normalizeEventType,
+    resolveEncounterBossUntargetableWindows,
     resolveEncounterPhaseStarts,
     resolveEncounterTransitionDowntime,
   };

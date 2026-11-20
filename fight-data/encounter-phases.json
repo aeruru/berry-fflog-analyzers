@@ -20,6 +20,9 @@
       {
         "phase": 3,
         "defaultDurationSeconds": 320,
+        "untargetableBosses": [
+          "Kefka"
+        ],
         "start": {
           "type": "fixed",
           "relativeToPhase": 2,

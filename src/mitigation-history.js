@@ -267,6 +267,10 @@ export function createMitigationHistory(dependencies) {
       playerName,
       centerMs - 15_000,
       centerMs + 15_000,
+      {
+        windowStartMs: row.result.startMs,
+        windowEndMs: row.result.endMs,
+      },
     );
     preview.append(closeButton, timeline);
     (tableRow.closest('dialog') ?? document.body).append(preview);
