@@ -11,27 +11,72 @@ export function createFightEventExtractors({
   normalizeEventType,
   encounterName,
 }) {
-  function extractPlayerLifeEvents(events) {
+  function extractPlayerLifeEvents(events, actorNames = new Map(), abilityNames = new Map()) {
     return events
-      .filter((event) => ['death', 'resurrect'].includes(String(event.type ?? event.eventType ?? '').toLowerCase()))
-      .map((event) => ({
-        type: String(event.type ?? event.eventType).toLowerCase(),
-        playerId: Number(event.targetID ?? event.targetId),
-        timestamp: Number(event.timestamp),
-      }))
+      .map((event) => {
+        const eventType = String(event.type ?? event.eventType ?? '').toLowerCase();
+        const ability = getEventAbilityName(event, abilityNames);
+        const isTranscendent = eventType === 'applybuff'
+          && String(ability).toLocaleLowerCase() === 'transcendent';
+        if (!['death', 'resurrect'].includes(eventType) && !isTranscendent) return null;
+        return {
+          type: isTranscendent ? 'resurrect' : eventType,
+          playerId: Number(event.targetID ?? event.targetId),
+          sourceId: Number(event.sourceID ?? event.sourceId),
+          source: event.source ?? event.sourceName ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
+          ability,
+          timestamp: Number(event.timestamp),
+        };
+      })
+      .filter(Boolean)
       .filter((event) => Number.isFinite(event.playerId) && Number.isFinite(event.timestamp))
+      .sort((first, second) => first.timestamp - second.timestamp);
+  }
+
+  function extractEnemyInvulnerabilityEvents(events, actorNames, friendlyIds, abilityNames) {
+    const supportedTypes = new Set([
+      'applybuff', 'refreshbuff', 'removebuff',
+      'applydebuff', 'refreshdebuff', 'removedebuff',
+    ]);
+    const supportedAbilities = new Set(['epic hero', 'fated hero']);
+    return events.map((event) => {
+      const eventType = normalizeEventType(event.eventType ?? event.type);
+      const targetId = Number(event.targetID ?? event.targetId);
+      const ability = getEventAbilityName(event, abilityNames);
+      return {
+        eventType,
+        ability,
+        targetId,
+        target: event.target ?? event.targetName ?? actorNames.get(targetId),
+        timestamp: Number(event.timestamp),
+      };
+    }).filter((event) => supportedTypes.has(event.eventType)
+      && supportedAbilities.has(String(event.ability).toLocaleLowerCase())
+      && Number.isFinite(event.timestamp))
       .sort((first, second) => first.timestamp - second.timestamp);
   }
 
   function extractTargetabilityEvents(events, friendlyIds = new Set()) {
     return events
       .filter((event) => normalizeEventType(event.type ?? event.eventType) === 'targetabilityupdate')
-      .map((event) => ({
-        actorId: Number(event.sourceID ?? event.sourceId ?? event.actorID ?? event.actorId
-          ?? event.targetID ?? event.targetId),
-        isTargetable: event.isTargetable ?? event.targetable,
-        timestamp: Number(event.timestamp),
-      }))
+      .map((event) => {
+        const rawTargetable = event.isTargetable ?? event.targetable;
+        const isTargetable = rawTargetable === true
+          || rawTargetable === 1
+          || rawTargetable === '1'
+          ? true
+          : rawTargetable === false
+            || rawTargetable === 0
+            || rawTargetable === '0'
+            ? false
+            : null;
+        return {
+          actorId: Number(event.sourceID ?? event.sourceId ?? event.actorID ?? event.actorId
+            ?? event.targetID ?? event.targetId),
+          isTargetable,
+          timestamp: Number(event.timestamp),
+        };
+      })
       .filter((event) => Number.isFinite(event.actorId)
         && !friendlyIds.has(event.actorId)
         && typeof event.isTargetable === 'boolean'
@@ -113,6 +158,7 @@ export function createFightEventExtractors({
         sourceId,
         source: event.source ?? event.sourceName ?? actorNames.get(sourceId),
         targetId,
+        target: event.target ?? event.targetName ?? actorNames.get(targetId),
         timestamp: Number(event.timestamp),
       };
     }).filter((event) => supportedEventTypes.has(event.eventType)
@@ -144,6 +190,8 @@ export function createFightEventExtractors({
           category: event.actionCategory,
           sourceId: Number(event.sourceID ?? event.sourceId),
           source: event.source ?? event.sourceName ?? actorNames.get(Number(event.sourceID ?? event.sourceId)),
+          targetId: Number(event.targetID ?? event.targetId),
+          target: event.target ?? event.targetName ?? actorNames.get(Number(event.targetID ?? event.targetId)),
           timestamp: Number(event.timestamp),
           duration: Number(event.duration),
         };
@@ -174,6 +222,7 @@ export function createFightEventExtractors({
   }
 
   return {
+    extractEnemyInvulnerabilityEvents,
     extractPhaseReferenceEvents,
     extractPlayerActionCasts,
     extractPlayerDebuffEvents,

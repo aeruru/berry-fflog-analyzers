@@ -10,6 +10,7 @@
       },
       {
         "phase": 2,
+        "targetableEndSeconds": 180.451,
         "start": {
           "type": "fixed",
           "relativeToPhase": 1,
@@ -19,6 +20,9 @@
       {
         "phase": 3,
         "defaultDurationSeconds": 320,
+        "untargetableBosses": [
+          "Kefka"
+        ],
         "start": {
           "type": "fixed",
           "relativeToPhase": 2,

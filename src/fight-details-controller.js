@@ -177,7 +177,7 @@ export function createFightDetailsController(dependencies) {
       .map((entry) => Number(entry.abilityId))
       .sort((a, b) => a - b);
     const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-    return JSON.stringify({ version: 34, abilityIds, phaseReferences });
+    return JSON.stringify({ version: 35, abilityIds, phaseReferences });
   }
 
   function getPersistentFightDetailsKey(reportCode, fight) {

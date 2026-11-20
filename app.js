@@ -120,6 +120,7 @@ let currentUser = null;
 let encounterPhaseDefinitions = new Map();
 let dancingMadMechanics = [];
 let dancingMadMitigations = [];
+let dancingMadLilyUsages = [];
 let mitigationAbilitiesById = new Map();
 let mitigationAbilitiesByName = new Map();
 // Pull-specific display override only. This intentionally never touches localStorage
@@ -144,6 +145,7 @@ const MITIGATION_GRACE_SECONDS = 20;
 
 const {
   loadDancingMadMechanics,
+  loadDancingMadLilyUsages,
   loadDancingMadMitigations,
   loadEncounterPhaseDefinitions,
   loadMitigationAbilities,
@@ -152,6 +154,7 @@ const {
   PARTY_SLOT_ORDER,
   getMitigationAbilitiesByName: () => mitigationAbilitiesByName,
   setDancingMadMechanics: (value) => { dancingMadMechanics = value; },
+  setDancingMadLilyUsages: (value) => { dancingMadLilyUsages = value; },
   setDancingMadMitigations: (value) => { dancingMadMitigations = value; },
   setEncounterPhaseDefinitions: (value) => { encounterPhaseDefinitions = value; },
   setMitigationAbilities: (byId, byName) => {
@@ -167,7 +170,9 @@ const {
   getEncounterEventReferences,
   getEncounterRelativeTimestamp,
   normalizeEventType,
+  resolveEncounterBossUntargetableWindows,
   resolveEncounterPhaseStarts,
+  resolveEncounterTransitionDowntime,
 } = createEncounterTiming({
   getDefinitions: () => encounterPhaseDefinitions,
   getMechanics: () => dancingMadMechanics,
@@ -242,6 +247,7 @@ const {
   isDmuPull,
   isLoggedInToFflogs,
   loadDancingMadMechanics,
+  loadDancingMadLilyUsages,
   loadDancingMadMitigations,
   loadEncounterPhaseDefinitions,
   loadMitigationAbilities,
@@ -318,6 +324,7 @@ const {
   formatFightDuration,
   getDancingMadMechanic,
   getDancingMadMechanics: () => dancingMadMechanics,
+  getDancingMadLilyUsages: () => dancingMadLilyUsages,
   getDancingMadPhase,
   getEncounterPhaseDefinitions: () => encounterPhaseDefinitions,
   getEncounterRelativeTimestamp,
@@ -334,10 +341,13 @@ const {
   createFightDetailsPanel,
   createFightMitigationPanel: (...args) => createFightMitigationPanel(...args),
   createLinkGroup,
+  DANCING_MAD_ENCOUNTER_NAME,
   formatFightDuration,
   formatFightStartTime,
   formatReportDateRange,
   getBestDmuPull,
+  getDancingMadMechanic,
+  getDancingMadPhase,
   getFightDetails: () => fightDetails,
   getFightDuration,
   getIsShiftHeld: () => isShiftHeld,
@@ -350,6 +360,7 @@ const {
   reloadFightDetails,
   reloadSelectedReport,
   renderLookupResult,
+  resolveEncounterPhaseStarts,
   setSelectedReportPhase: (value) => { selectedReportPhase = value; },
   showReportMitigationHistoryOverview: (...args) => showReportMitigationHistoryOverview(...args),
   showReportPlayerActionsOverview: (...args) => showReportPlayerActionsOverview(...args),
@@ -361,6 +372,7 @@ const {
 
 const {
   clearSpecialHardcodedViewState,
+  createPlayerActionTimelinePreview,
   showReportPlayerActionsOverview,
   showSpecialHardcodedViews,
 } = createPlayerActionsOverview({
@@ -374,6 +386,7 @@ const {
   filterReportFightsByOutcome,
   formatFightDuration,
   getDancingMadMechanics: () => dancingMadMechanics,
+  getDancingMadLilyUsages: () => dancingMadLilyUsages,
   getDancingMadMitigations: () => dancingMadMitigations,
   getEncounterRelativeTimestamp,
   getFightDetails: () => fightDetails,
@@ -386,7 +399,9 @@ const {
   MITIGATION_GRACE_SECONDS,
   mitigationCastDistance,
   PARTY_SLOT_ORDER,
+  resolveEncounterBossUntargetableWindows,
   resolveEncounterPhaseStarts,
+  resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
   updateWithSmoothHeight: (...args) => updateWithSmoothHeight(...args),
 });
@@ -409,6 +424,7 @@ const JOB_ABBREVIATIONS = new Map([
 ]);
 
 const {
+  extractEnemyInvulnerabilityEvents,
   extractPhaseReferenceEvents,
   extractPlayerActionCasts,
   extractPlayerDebuffEvents,
@@ -442,6 +458,7 @@ const {
   FIGHT_EVENT_RECAP_LOOKBACK_MS,
   FIGHT_EVENT_RECAP_MAX_ROWS,
   TANK_FORTY_PERCENT_BUFFS,
+  extractEnemyInvulnerabilityEvents,
   extractPhaseReferenceEvents,
   extractPlayerActionCasts,
   extractPlayerDebuffEvents,
@@ -491,6 +508,7 @@ const {
 } = createMitigationHistory({
   PARTY_SLOT_ORDER,
   createBestPullBadge,
+  createPlayerActionTimelinePreview,
   createMitigationAbilityIcon,
   filterReportFightsByOutcome,
   formatFightDuration,
