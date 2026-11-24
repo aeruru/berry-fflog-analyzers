@@ -16,6 +16,7 @@ export function createDetailedReportViewModule(dependencies) {
     getFightDetails,
     getFightDuration,
     getIsShiftHeld,
+    getLinkedReportView,
     getOpenFightDetailKeys,
     getOpenFightMitigationKeys,
     getPullColorClass,
@@ -33,12 +34,34 @@ export function createDetailedReportViewModule(dependencies) {
     toggleFightDetails,
     toggleFightMitigations,
     updateSelectedReportReloadButton,
+    updateNavigationQuery,
   } = dependencies;
+  // Session-only report navigation. These maps intentionally die on reload:
+  // each report remembers its last shell view and phase filter, while the
+  // individual view modules retain their own detailed controls in memory.
   const selectedViewByReport = new Map();
+  const selectedPhaseByReport = new Map();
+  const reportViewAliases = new Map([
+    ['pull summaries', 'pull-summaries'],
+    ['pull-summaries', 'pull-summaries'],
+    ['all mit graphs', 'mitigation-graphs'],
+    ['mitigation-graphs', 'mitigation-graphs'],
+    ['player actions per pull', 'player-actions'],
+    ['player-actions', 'player-actions'],
+    ['special hardcoded views', 'special-views'],
+    ['special-views', 'special-views'],
+  ]);
+
+  function getInitialReportView(reportCode) {
+    const linkedView = String(getLinkedReportView?.(reportCode) ?? '').trim().toLowerCase();
+    return reportViewAliases.get(linkedView) ?? 'pull-summaries';
+  }
 
   function createDetailedReportView(report) {
     const article = document.createElement('article');
     article.className = 'detailed-report-card';
+    const selectedPhase = selectedPhaseByReport.get(report.code) ?? 'all';
+    setSelectedReportPhase(selectedPhase);
   
     const fights = report.fights.filter(isDmuPull)
       .sort((first, second) => Number(second.startTime) - Number(first.startTime));
@@ -78,8 +101,9 @@ export function createDetailedReportViewModule(dependencies) {
     for (let phase = 1; phase <= 5; phase += 1) {
       phaseFilter.append(new Option(`Phase ${phase} wipes`, String(phase)));
     }
-    phaseFilter.value = getSelectedReportPhase();
+    phaseFilter.value = selectedPhase;
     phaseFilter.addEventListener('change', () => {
+      selectedPhaseByReport.set(report.code, phaseFilter.value);
       setSelectedReportPhase(phaseFilter.value);
       renderLookupResult();
     });
@@ -93,9 +117,18 @@ export function createDetailedReportViewModule(dependencies) {
       new Option('Player Actions per Pull', 'player-actions'),
       new Option('Special Hardcoded Views', 'special-views'),
     );
-    viewSelect.value = selectedViewByReport.get(report.code) ?? 'pull-summaries';
+    viewSelect.value = selectedViewByReport.get(report.code) ?? getInitialReportView(report.code);
+    selectedViewByReport.set(report.code, viewSelect.value);
+    updateNavigationQuery({
+      report: report.code,
+      view: viewSelect.options[viewSelect.selectedIndex].text,
+    });
     viewSelect.addEventListener('change', () => {
       selectedViewByReport.set(report.code, viewSelect.value);
+      updateNavigationQuery({
+        report: report.code,
+        view: viewSelect.options[viewSelect.selectedIndex].text,
+      });
       renderLookupResult();
     });
   

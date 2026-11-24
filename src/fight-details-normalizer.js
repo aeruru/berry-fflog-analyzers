@@ -56,7 +56,7 @@ export function createFightDetailsNormalizer(dependencies) {
       const timestamp = Number(event.timestamp);
       return timestamp >= fightStart && timestamp <= fightEnd;
     });
-    const phaseReferenceEvents = extractPhaseReferenceEvents(rawEvents, actorNames);
+    const phaseReferenceEvents = extractPhaseReferenceEvents(rawEvents, actorNames, abilityNames);
     const partyMembers = normalizePartyMembers(actors, friendlyIds);
     const enemyActors = actors
       .filter((actor) => !friendlyIds.has(Number(actor.id)) && actor.name)

@@ -65,6 +65,15 @@ export function createTestReportData(dependencies) {
         const startMs = relativeAnchorMs + Number(mitigation.startElapsedSeconds) * 1000;
         const endMs = relativeAnchorMs + Number(mitigation.endElapsedSeconds) * 1000;
         if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs > durationMs) return [];
+
+        // Pull 2 deliberately replaces the first missed Indulgence with a prior
+        // use whose cooldown overlaps the 0:53 window, exercising On cooldown UI.
+        const isP1OnlyPullTwoIndulgence = report.code === 'TESTP1ONLY02'
+          && Number(fight.id) === 2
+          && mitigation.ability === 'Plenary Indulgence'
+          && Number(mitigation.phase) === 1
+          && Number(mitigation.startElapsedSeconds) < 60;
+        if (isP1OnlyPullTwoIndulgence) return [];
   
         const isP1OnlyTemperanceSample = report.code === 'TESTP1ONLY02'
           && mitigation.ability === 'Temperance'
@@ -93,6 +102,23 @@ export function createTestReportData(dependencies) {
           timestamp: Number(fight.startTime) + castElapsedMs,
         }];
       });
+      const pullTwoIndulgence = getDancingMadMitigations().find((mitigation) => (
+        mitigation.ability === 'Plenary Indulgence'
+        && Number(mitigation.phase) === 1
+        && Number(mitigation.startElapsedSeconds) < 60
+      ));
+      const pullTwoIndulgenceSource = playerByJob.get('WHM');
+      const cooldownFixtureEvents = report.code === 'TESTP1ONLY02'
+        && Number(fight.id) === 2
+        && pullTwoIndulgence
+        && pullTwoIndulgenceSource
+        ? [{
+          type: 'cast',
+          abilityGameID: Number(pullTwoIndulgence.abilityId),
+          sourceID: Number(pullTwoIndulgenceSource.id),
+          timestamp: Number(fight.startTime) + 29_000,
+        }]
+        : [];
   
       return {
         ...fight,
@@ -100,7 +126,7 @@ export function createTestReportData(dependencies) {
         events: addTestPlayerActionCasts(
           fight,
           actors,
-          [...retainedEvents, ...mitigationEvents],
+          [...retainedEvents, ...mitigationEvents, ...cooldownFixtureEvents],
         ),
       };
     });

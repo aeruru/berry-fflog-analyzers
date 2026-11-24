@@ -24,6 +24,7 @@ export function isPlayerActionSpeedStatus(statusId) {
 const PLAYER_ACTION_SPELL_SPEED_JOBS = new Set([
   'WHM', 'SCH', 'AST', 'SGE', 'BLM', 'SMN', 'RDM', 'PCT', 'BLU',
 ]);
+const PLAYER_ACTION_TANK_JOBS = new Set(['PLD', 'WAR', 'DRK', 'GNB']);
 const PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB = new Map([
   ['WHM', [['aero', 'aero ii', 'dia']]],
   ['SCH', [['bio', 'bio ii', 'biolysis']]],
@@ -43,6 +44,11 @@ const WHM_AFFLATUS_ACTIONS = new Map([
   ['afflatus rapture', 'Rapture'],
   ['afflatus misery', 'Misery'],
 ]);
+const LJ1_RAPTURE_START_MS = 50_000;
+const LJ1_RAPTURE_END_MS = 75_000;
+const LJ1_RAPTURE_REFERENCE_MS = 70_000;
+const LJ1_RAPTURE_PLENARY_DURATION_MS = 10_000;
+const LJ1_RAPTURE_HEALS = new Set(['afflatus rapture', 'medica', 'medica iii']);
 const PLAYER_ACTION_EXPLICIT_GCDS = new Set([
   'eukrasia',
   'eukrasian diagnosis',
@@ -80,6 +86,9 @@ const playerActionGameDataById = new Map();
 // this page is reloaded, without making later visits load player-action data.
 const reportPlayerActionViewStates = new Map();
 const reportSpecialHardcodedViewStates = new Map();
+// Player and zoom describe the same timeline context in both report views.
+// Keep them shared while leaving each view's remaining controls independent.
+const reportSharedTimelineViewStates = new Map();
 
 export function createPlayerActionsOverview({
   attachFightEventStatusTooltip,
@@ -92,6 +101,10 @@ export function createPlayerActionsOverview({
   formatFightDuration,
   getEncounterRelativeTimestamp,
   getFightDuration,
+  getLinkedHardcodedView,
+  getLinkedPlayer,
+  getLinkedPlayerActionsStart,
+  getLinkedPlayerActionsPhaseAnchor,
   getMitigationJobs,
   isUnknownFflogsStatus,
   mapPartyMembersToPlanSlots,
@@ -102,6 +115,7 @@ export function createPlayerActionsOverview({
   resolveEncounterPhaseStarts,
   resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
+  updateNavigationQuery,
   DMU_ENCOUNTER_ID,
   getDancingMadMechanics,
   getDancingMadLilyUsages,
@@ -188,12 +202,17 @@ export function createPlayerActionsOverview({
       const controls = document.createElement('form');
       controls.className = 'player-actions-controls';
       const savedView = reportPlayerActionViewStates.get(report.code);
+      const sharedView = reportSharedTimelineViewStates.get(report.code) ?? {};
       const playerLabel = createPlayerActionsControlLabel('Player');
       const playerSelect = document.createElement('select');
       playerSelect.setAttribute('aria-label', 'Player');
       playerSelect.append(new Option('Choose player…', ''));
       for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
-      playerSelect.value = playerNames.includes(savedView?.player) ? savedView.player : '';
+      const linkedPlayer = getLinkedPlayer?.(report.code, 'player-actions');
+      const preferredPlayer = sharedView.player || linkedPlayer || savedView?.player;
+      playerSelect.value = playerNames.find((name) => (
+        name.toLowerCase() === String(preferredPlayer).toLowerCase()
+      )) ?? '';
       playerLabel.append(playerSelect);
       const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
       const phaseAnchorSelect = document.createElement('select');
@@ -202,8 +221,10 @@ export function createPlayerActionsOverview({
       for (let phase = 1; phase <= 5; phase += 1) {
         phaseAnchorSelect.append(new Option(`Phase ${phase}`, String(phase)));
       }
-      phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(savedView?.phaseAnchor)
-        ? savedView.phaseAnchor
+      const linkedPhaseAnchor = getLinkedPlayerActionsPhaseAnchor?.(report.code);
+      const preferredPhaseAnchor = savedView?.phaseAnchor || linkedPhaseAnchor;
+      phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(preferredPhaseAnchor)
+        ? preferredPhaseAnchor
         : 'fight';
       phaseAnchorLabel.append(phaseAnchorSelect);
       const getMaximumAnchoredDuration = () => Math.max(0, ...fights.map((fight) => {
@@ -214,7 +235,7 @@ export function createPlayerActionsOverview({
       const maximumFightDurationMs = getMaximumAnchoredDuration();
       const startControl = createPlayerActionsTimeControl(
         'Start',
-        savedView?.start ?? '',
+        savedView?.start || getLinkedPlayerActionsStart?.(report.code) || '',
         maximumFightDurationMs,
         0,
       );
@@ -243,7 +264,10 @@ export function createPlayerActionsOverview({
       zoomInput.min = '10';
       zoomInput.max = '80';
       zoomInput.step = '5';
-      zoomInput.value = String(Number(savedView?.zoom) || PLAYER_ACTION_PIXELS_PER_SECOND);
+      const sharedZoom = Number(sharedView.zoomLevel) * 10;
+      zoomInput.value = String(Number.isFinite(sharedZoom) && sharedZoom > 0
+        ? sharedZoom
+        : Number(savedView?.zoom) || PLAYER_ACTION_PIXELS_PER_SECOND);
       zoomInput.setAttribute('aria-label', 'Player action timeline zoom');
       const zoomOutput = document.createElement('output');
       zoomOutput.textContent = `${zoomInput.value} px/s`;
@@ -312,6 +336,15 @@ export function createPlayerActionsOverview({
           minimumDurationMs,
           selectedAbilityIds: [...selectedAbilityIds],
           hideUnhighlighted: abilityFilterState.hideUnhighlighted,
+        });
+        reportSharedTimelineViewStates.set(report.code, {
+          player: playerSelect.value,
+          zoomLevel: Number(zoomInput.value) / 10,
+        });
+        updateNavigationQuery({
+          player: playerSelect.value || null,
+          start: startInput.value.trim() || null,
+          phaseAnchor: phaseAnchorSelect.value || null,
         });
       };
       const render = ({ showErrors = true } = {}) => {
@@ -472,6 +505,7 @@ export function createPlayerActionsOverview({
       updateWithSmoothHeight(content, () => {
         content.replaceChildren(controls, status, rows, abilityFilter);
       });
+      saveView();
       render({ showErrors: false });
       void (async () => {
         try {
@@ -492,8 +526,13 @@ export function createPlayerActionsOverview({
   }
 
   function clearSpecialHardcodedViewState(reportCode = null) {
-    if (reportCode === null) reportSpecialHardcodedViewStates.clear();
-    else reportSpecialHardcodedViewStates.delete(reportCode);
+    if (reportCode === null) {
+      reportSpecialHardcodedViewStates.clear();
+      reportSharedTimelineViewStates.clear();
+    } else {
+      reportSpecialHardcodedViewStates.delete(reportCode);
+      reportSharedTimelineViewStates.delete(reportCode);
+    }
   }
 
   async function showSpecialHardcodedViews(report, button, host = null) {
@@ -567,6 +606,7 @@ export function createPlayerActionsOverview({
       }
 
       const savedView = reportSpecialHardcodedViewStates.get(report.code) ?? {};
+      const sharedView = reportSharedTimelineViewStates.get(report.code) ?? {};
       const controls = document.createElement('div');
       controls.className = 'special-views-controls';
       const playerLabel = createPlayerActionsControlLabel('Player');
@@ -574,7 +614,11 @@ export function createPlayerActionsOverview({
       playerSelect.setAttribute('aria-label', 'Special view player');
       playerSelect.append(new Option('Choose player…', ''));
       for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
-      playerSelect.value = playerNames.includes(savedView.player) ? savedView.player : '';
+      const linkedPlayer = getLinkedPlayer?.(report.code, 'special-views');
+      const preferredPlayer = sharedView.player || linkedPlayer || savedView.player;
+      playerSelect.value = playerNames.find((name) => (
+        name.toLowerCase() === String(preferredPlayer).toLowerCase()
+      )) ?? '';
       playerLabel.append(playerSelect);
       const viewLabel = createPlayerActionsControlLabel('Job-tailored view');
       const viewSelect = document.createElement('select');
@@ -586,7 +630,27 @@ export function createPlayerActionsOverview({
         'death-raise-tracker',
         'lucid-dreaming-timeline',
         'afflatus-timeline',
+        'forsaken-lilies',
+        'lj1-rapture',
+        'mitigation-timeline',
       ]);
+      const hardcodedViewAliases = new Map([
+        ['gcd uptime in each phase', 'gcd-uptime-by-phase'],
+        ['death → raise tracker', 'death-raise-tracker'],
+        ['death -> raise tracker', 'death-raise-tracker'],
+        ['dot uptime in each phase', 'dot-uptime-by-phase'],
+        ['dot timeline by boss', 'dot-boss-timeline'],
+        ['lucid dreaming timeline', 'lucid-dreaming-timeline'],
+        ['afflatus tracker', 'afflatus-timeline'],
+        ['forsaken lilies', 'forsaken-lilies'],
+        ['lj1 rapture', 'lj1-rapture'],
+        ['🏭 mitigation timeline', 'mitigation-timeline'],
+        ['mitigation timeline', 'mitigation-timeline'],
+      ]);
+      for (const view of supportedViews) hardcodedViewAliases.set(view, view);
+      const linkedHardcodedView = hardcodedViewAliases.get(
+        String(getLinkedHardcodedView?.(report.code) ?? '').trim().toLowerCase(),
+      ) ?? '';
       const populateSpecialViews = (preferredView = '') => {
         const job = playersByName.get(playerSelect.value)?.job;
         viewSelect.replaceChildren(new Option('Choose view…', ''));
@@ -601,16 +665,78 @@ export function createPlayerActionsOverview({
         }
         if (job === 'WHM') {
           viewSelect.append(new Option('Afflatus tracker', 'afflatus-timeline'));
+          viewSelect.append(new Option('Forsaken lilies', 'forsaken-lilies'));
+          viewSelect.append(new Option('LJ1 Rapture', 'lj1-rapture'));
+        }
+        if (getDancingMadMitigations().some((mitigation) => getMitigationJobs(mitigation).includes(job))) {
+          viewSelect.append(new Option('Mitigation timeline', 'mitigation-timeline'));
         }
         viewSelect.disabled = !playerSelect.value;
         viewSelect.value = [...viewSelect.options].some((option) => option.value === preferredView)
           ? preferredView
           : '';
       };
-      populateSpecialViews(playerSelect.value && supportedViews.has(savedView.view)
-        ? savedView.view
+      populateSpecialViews(playerSelect.value
+        ? supportedViews.has(savedView.view) ? savedView.view : linkedHardcodedView
         : '');
       viewLabel.append(viewSelect);
+      const mitigationAssignmentLabel = createPlayerActionsControlLabel('Tank assignment');
+      mitigationAssignmentLabel.classList.add('special-views-mitigation-assignment');
+      mitigationAssignmentLabel.hidden = true;
+      const mitigationAssignmentSelect = document.createElement('select');
+      mitigationAssignmentSelect.setAttribute('aria-label', 'Mitigation timeline tank assignment');
+      mitigationAssignmentSelect.append(
+        new Option('Choose MT/OT…', ''),
+        new Option('Main tank (MT)', 'MT'),
+        new Option('Off tank (OT)', 'OT'),
+      );
+      mitigationAssignmentSelect.value = ['MT', 'OT'].includes(savedView.mitigationAssignment)
+        ? savedView.mitigationAssignment
+        : '';
+      mitigationAssignmentLabel.append(mitigationAssignmentSelect);
+      const mitigationAbilityLabel = createPlayerActionsControlLabel('Mitigation');
+      mitigationAbilityLabel.classList.add('special-views-mitigation-ability');
+      mitigationAbilityLabel.hidden = true;
+      const mitigationAbilitySelect = document.createElement('select');
+      mitigationAbilitySelect.setAttribute('aria-label', 'Mitigation timeline ability');
+      mitigationAbilityLabel.append(mitigationAbilitySelect);
+      const getPlayerPlanSlots = (playerName) => {
+        const slots = new Set();
+        for (const fight of fights) {
+          const state = getFightDetails().get(`${report.code}:${fight.id}`);
+          if (!state) continue;
+          const partySlots = mapPartyMembersToPlanSlots(state.partyMembers ?? [], state.tankSlots);
+          for (const slot of PARTY_SLOT_ORDER) {
+            if (partySlots.get(slot)?.name === playerName) slots.add(slot);
+          }
+        }
+        return slots;
+      };
+      const populateMitigationAbilities = (preferredAbility = '') => {
+        const player = playersByName.get(playerSelect.value);
+        const isTank = PLAYER_ACTION_TANK_JOBS.has(player?.job);
+        const assignedSlots = isTank
+          ? new Set(mitigationAssignmentSelect.value ? [mitigationAssignmentSelect.value] : [])
+          : getPlayerPlanSlots(playerSelect.value);
+        const choices = [];
+        const seen = new Set();
+        for (const mitigation of getDancingMadMitigations()) {
+          if (!assignedSlots.has(mitigation.assignedTo)
+            || !getMitigationJobs(mitigation).includes(player?.job)
+            || seen.has(mitigation.ability)) continue;
+          seen.add(mitigation.ability);
+          choices.push({ value: mitigation.ability, label: mitigation.nickname || mitigation.ability });
+        }
+        mitigationAbilitySelect.replaceChildren(
+          new Option('Choose mitigation…', ''),
+          ...choices.map(({ value, label }) => new Option(label, value)),
+        );
+        mitigationAbilitySelect.value = choices.some(({ value }) => value === preferredAbility)
+          ? preferredAbility
+          : '';
+        mitigationAbilitySelect.disabled = choices.length === 0;
+      };
+      populateMitigationAbilities(savedView.mitigationAbility);
       const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
       phaseAnchorLabel.classList.add('special-views-phase-anchor');
       phaseAnchorLabel.hidden = true;
@@ -650,7 +776,10 @@ export function createPlayerActionsOverview({
       zoomInput.max = '8';
       zoomInput.step = '0.5';
       const savedZoom = Number(savedView.timelineZoom ?? savedView.lucidZoom);
-      zoomInput.value = String(Number.isFinite(savedZoom) ? savedZoom : 2);
+      const sharedZoom = Number(sharedView.zoomLevel);
+      zoomInput.value = String(Number.isFinite(sharedZoom) && sharedZoom > 0
+        ? sharedZoom
+        : Number.isFinite(savedZoom) ? savedZoom : 2);
       let timelineMinimumDurationMs = Math.max(
         0,
         Number(savedView.timelineMinimumDurationMs ?? savedView.lucidMinimumDurationMs) || 0,
@@ -678,26 +807,70 @@ export function createPlayerActionsOverview({
       const bossSelect = document.createElement('select');
       bossSelect.setAttribute('aria-label', 'DoT timeline boss');
       bossLabel.append(bossSelect);
-      controls.append(playerLabel, viewLabel, bossLabel, phaseAnchorLabel, zoomLabel, afflatusDisplayLabel);
+      controls.append(
+        playerLabel,
+        viewLabel,
+        mitigationAssignmentLabel,
+        mitigationAbilityLabel,
+        bossLabel,
+        phaseAnchorLabel,
+        zoomLabel,
+        afflatusDisplayLabel,
+      );
 
       const status = document.createElement('p');
       status.className = 'special-views-status';
+      const progressPanel = document.createElement('div');
+      progressPanel.className = 'special-views-loading-progress';
+      progressPanel.hidden = true;
+      const progressBar = document.createElement('progress');
+      progressBar.max = 100;
+      progressBar.value = 0;
+      const progressLabel = document.createElement('span');
+      progressPanel.append(progressBar, progressLabel);
       const results = document.createElement('div');
       results.className = 'special-views-results';
       let allDetailsPromise = null;
-      const loadAllDetails = () => {
-        if (!allDetailsPromise) {
-          allDetailsPromise = (async () => {
-            await ensureReportFightDetails(report, fights, { playerActionsOnly: true });
+      let allMitigationDetailsPromise = null;
+      let latestDetailsProgress = null;
+      let latestMitigationProgress = null;
+      const loadAllDetails = (includeMitigations = false, onProgress = null) => {
+        const currentPromise = includeMitigations ? allMitigationDetailsPromise : allDetailsPromise;
+        const latestProgress = includeMitigations ? latestMitigationProgress : latestDetailsProgress;
+        if (latestProgress) onProgress?.(latestProgress);
+        if (!currentPromise) {
+          const promise = (async () => {
+            await ensureReportFightDetails(report, fights, {
+              playerActionsOnly: !includeMitigations,
+              onProgress: (progress) => {
+                const update = { phase: 'details', ...progress };
+                if (includeMitigations) latestMitigationProgress = update;
+                else latestDetailsProgress = update;
+                onProgress?.(update);
+              },
+            });
+            onProgress?.({ phase: 'actions', completed: 0, total: 1, stage: 'Loading action data' });
             await loadPlayerActionCategories(fights.flatMap((fight) => (
               getFightDetails().get(`${report.code}:${fight.id}`)?.actionCasts ?? []
             )));
+            onProgress?.({ phase: 'actions', completed: 1, total: 1, stage: 'Action data ready' });
           })().catch((error) => {
-            allDetailsPromise = null;
+            if (includeMitigations) allMitigationDetailsPromise = null;
+            else allDetailsPromise = null;
             throw error;
           });
+          if (includeMitigations) allMitigationDetailsPromise = promise;
+          else allDetailsPromise = promise;
         }
-        return allDetailsPromise;
+        return includeMitigations ? allMitigationDetailsPromise : allDetailsPromise;
+      };
+      const updateLoadingProgress = (value, label) => {
+        progressPanel.hidden = false;
+        progressBar.value = Math.max(0, Math.min(100, value));
+        progressLabel.textContent = label;
+      };
+      const hideLoadingProgress = () => {
+        progressPanel.hidden = true;
       };
       const saveView = () => {
         reportSpecialHardcodedViewStates.set(report.code, {
@@ -708,6 +881,18 @@ export function createPlayerActionsOverview({
           timelineMinimumDurationMs,
           afflatusDisplayMode: afflatusDisplaySelect.value,
           boss: bossSelect.value,
+          mitigationAssignment: mitigationAssignmentSelect.value,
+          mitigationAbility: mitigationAbilitySelect.value,
+        });
+        reportSharedTimelineViewStates.set(report.code, {
+          player: playerSelect.value,
+          zoomLevel: Number(zoomInput.value),
+        });
+        updateNavigationQuery({
+          player: playerSelect.value || null,
+          hardcodedView: playerSelect.value && viewSelect.value
+            ? viewSelect.options[viewSelect.selectedIndex].text
+            : null,
         });
       };
       let renderVersion = 0;
@@ -715,34 +900,75 @@ export function createPlayerActionsOverview({
         const version = ++renderVersion;
         const isLucidView = viewSelect.value === 'lucid-dreaming-timeline';
         const isAfflatusView = viewSelect.value === 'afflatus-timeline';
+        const isForsakenLiliesView = viewSelect.value === 'forsaken-lilies';
         const isDeathView = viewSelect.value === 'death-raise-tracker';
         const isDotTimelineView = viewSelect.value === 'dot-boss-timeline';
-        const isTimelineView = isLucidView || isAfflatusView;
+        const isLj1RaptureView = viewSelect.value === 'lj1-rapture';
+        const isMitigationTimelineView = viewSelect.value === 'mitigation-timeline';
+        const isTimelineView = isLucidView || isAfflatusView || isMitigationTimelineView;
+        const isTank = PLAYER_ACTION_TANK_JOBS.has(playersByName.get(playerSelect.value)?.job);
         phaseAnchorLabel.hidden = !(isTimelineView || isDotTimelineView);
-        zoomLabel.hidden = !(isTimelineView || isDotTimelineView);
+        zoomLabel.hidden = !(isTimelineView || isDotTimelineView || isForsakenLiliesView);
         bossLabel.hidden = !isDotTimelineView;
         afflatusDisplayLabel.hidden = !isAfflatusView;
+        mitigationAssignmentLabel.hidden = !(isMitigationTimelineView && isTank);
+        mitigationAbilityLabel.hidden = !isMitigationTimelineView;
         results.replaceChildren();
         if (!playerSelect.value) {
+          hideLoadingProgress();
           status.textContent = 'Choose a player to see their job-tailored views.';
           return;
         }
         const player = playersByName.get(playerSelect.value);
         if (!viewSelect.value) {
+          hideLoadingProgress();
           status.textContent = `Choose a ${player?.job ?? 'job'} view.`;
           return;
         }
         const selectedPlayer = playerSelect.value;
+        if (isMitigationTimelineView && isTank && !mitigationAssignmentSelect.value) {
+          hideLoadingProgress();
+          status.textContent = `Choose whether ${selectedPlayer} is MT or OT.`;
+          return;
+        }
+        if (isMitigationTimelineView && !mitigationAbilitySelect.value) {
+          hideLoadingProgress();
+          status.textContent = `Choose one of ${selectedPlayer}'s mitigations.`;
+          return;
+        }
         const metric = viewSelect.value === 'dot-uptime-by-phase' ? 'dot' : 'gcd';
         const metricLabel = metric === 'dot' ? 'DoT' : 'GCD';
-        status.textContent = (isTimelineView || isDotTimelineView)
-          ? `Loading ${selectedPlayer}'s ${isDotTimelineView ? 'boss DoT' : isAfflatusView ? 'Afflatus' : 'Lucid Dreaming'} timeline…`
+        status.textContent = (isTimelineView || isDotTimelineView || isForsakenLiliesView)
+          ? `Loading ${selectedPlayer}'s ${isDotTimelineView
+            ? 'boss DoT'
+            : isForsakenLiliesView
+              ? 'Forsaken lilies'
+            : isAfflatusView
+              ? 'Afflatus'
+              : isMitigationTimelineView
+                ? mitigationAbilitySelect.options[mitigationAbilitySelect.selectedIndex]?.text ?? 'mitigation'
+                : 'Lucid Dreaming'} timeline…`
           : isDeathView
             ? `Loading ${selectedPlayer}'s raised deaths…`
+          : isLj1RaptureView
+            ? `Loading ${selectedPlayer}'s LJ1 Rapture timeline…`
           : `Loading ${selectedPlayer}'s ${metricLabel} uptime by phase…`;
+        updateLoadingProgress(2, 'Preparing view…');
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
         try {
-          await loadAllDetails();
+          await loadAllDetails(isMitigationTimelineView, (progress) => {
+            if (version !== renderVersion) return;
+            if (progress.phase === 'actions') {
+              updateLoadingProgress(progress.completed ? 88 : 78, progress.stage);
+              return;
+            }
+            const ratio = progress.total > 0 ? progress.completed / progress.total : 1;
+            const count = progress.total > 0 ? ` (${progress.completed}/${progress.total})` : '';
+            updateLoadingProgress(5 + ratio * 70, `${progress.stage}${count}`);
+          });
           if (version !== renderVersion || !dialog.isConnected) return;
+          updateLoadingProgress(92, 'Rendering view…');
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const gcd = estimatePlayerGcd(fights, report, selectedPlayer);
           if (isDotTimelineView) {
             const dotNames = new Set(PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.get(player?.job)?.flat() ?? []);
@@ -763,16 +989,41 @@ export function createPlayerActionsOverview({
             configurePhaseAnchors();
             saveView();
           }
-          status.textContent = isTimelineView
-            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${isAfflatusView ? 'Afflatus tracker.' : 'Lucid Dreaming coverage.'}`
+          status.textContent = isForsakenLiliesView
+            ? `${selectedPlayer} (WHM) · complete Forsaken lily timelines.`
+            : isTimelineView
+            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${isAfflatusView
+              ? 'Afflatus tracker.'
+              : isMitigationTimelineView
+                ? `${mitigationAbilitySelect.options[mitigationAbilitySelect.selectedIndex]?.text ?? mitigationAbilitySelect.value} windows.`
+                : 'Lucid Dreaming coverage.'}`
             : isDotTimelineView
               ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · DoTs on ${bossSelect.value || 'no matching boss'}.`
             : isDeathView
               ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · deaths they were raised from.`
+            : isLj1RaptureView
+              ? `${selectedPlayer} (WHM) · LJ1 Rapture, 0:50–1:15.`
             : metric === 'gcd'
             ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${formatPlayerGcdSummary(gcd)}.`
             : `${selectedPlayer} (${player?.job ?? 'unknown job'}) · DoT uptime by phase.`;
-          results.append(isTimelineView
+          results.replaceChildren(isForsakenLiliesView
+            ? createForsakenLiliesTimeline(
+              report,
+              fights,
+              selectedPlayer,
+              Number(zoomInput.value),
+            )
+            : isMitigationTimelineView
+            ? createMitigationSpecialTimeline(
+              report,
+              fights,
+              selectedPlayer,
+              mitigationAbilitySelect.value,
+              isTank ? mitigationAssignmentSelect.value : null,
+              Number(zoomInput.value),
+              phaseAnchorSelect.value,
+            )
+            : isTimelineView
             ? createSpecialActionTimeline(
               report,
               fights,
@@ -790,38 +1041,49 @@ export function createPlayerActionsOverview({
             )
             : isDeathView
               ? createDeathRaiseTracker(report, fights, selectedPlayer, player?.job)
+              : isLj1RaptureView
+                ? createLj1RaptureTimeline(report, fights, selectedPlayer)
               : isDotTimelineView
                 ? createBossDotTimeline(
                   report, fights, selectedPlayer, player?.job, bossSelect.value,
                   Number(zoomInput.value), phaseAnchorSelect.value,
                 )
                 : createUptimeByPhaseTable(report, fights, selectedPlayer, gcd, metric));
+          updateLoadingProgress(100, 'Ready');
+          setTimeout(() => {
+            if (version === renderVersion) hideLoadingProgress();
+          }, 350);
         } catch (error) {
           if (version !== renderVersion || !dialog.isConnected) return;
+          hideLoadingProgress();
           status.textContent = `Could not load this view: ${error.message}`;
         }
       };
       playerSelect.addEventListener('change', () => {
         const currentView = viewSelect.value;
         populateSpecialViews(currentView);
+        const player = playersByName.get(playerSelect.value);
+        if (!PLAYER_ACTION_TANK_JOBS.has(player?.job)) mitigationAssignmentSelect.value = '';
+        populateMitigationAbilities('');
         saveView();
         void render();
       });
       viewSelect.addEventListener('change', () => {
+        populateMitigationAbilities(mitigationAbilitySelect.value || savedView.mitigationAbility);
         saveView();
         void render();
       });
       zoomInput.addEventListener('input', () => {
         zoomValue.textContent = `${Number(zoomInput.value).toFixed(1)} px/s`;
         saveView();
-        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'dot-boss-timeline'].includes(viewSelect.value)) {
+        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'forsaken-lilies', 'dot-boss-timeline', 'mitigation-timeline'].includes(viewSelect.value)) {
           void render();
         }
       });
       phaseAnchorSelect.addEventListener('change', () => {
         timelineMinimumDurationMs = 0;
         saveView();
-        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'dot-boss-timeline'].includes(viewSelect.value)) {
+        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'dot-boss-timeline', 'mitigation-timeline'].includes(viewSelect.value)) {
           void render();
         }
       });
@@ -833,11 +1095,416 @@ export function createPlayerActionsOverview({
         saveView();
         if (viewSelect.value === 'dot-boss-timeline') void render();
       });
-      content.replaceChildren(controls, status, results);
+      mitigationAssignmentSelect.addEventListener('change', () => {
+        populateMitigationAbilities('');
+        saveView();
+        if (viewSelect.value === 'mitigation-timeline') void render();
+      });
+      mitigationAbilitySelect.addEventListener('change', () => {
+        saveView();
+        if (viewSelect.value === 'mitigation-timeline') void render();
+      });
+      content.replaceChildren(controls, status, progressPanel, results);
+      saveView();
       void render();
     } catch (error) {
       loading.textContent = `Could not load special views: ${error.message}`;
     }
+  }
+
+  function createForsakenLiliesTimeline(report, fights, playerName, pixelsPerSecond) {
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-lucid-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'special-views-lucid-rows forsaken-lilies-rows';
+    const mechanicNames = ['For', 'FT1', 'FT2', 'FT3', 'FT4', 'FT5', 'FT6', 'FT7', 'FT8'];
+    const mechanicDefinitions = mechanicNames.map((name) => getDancingMadMechanics().find((mechanic) => (
+      Number(mechanic.phase) === 2 && mechanic.mechanic === name
+    )));
+    let visiblePulls = 0;
+    let histogramDurationMs = 0;
+    let histogramBoundaries = [];
+    const histogramCounts = Array.from({ length: mechanicNames.length }, () => ({ used: 0, twice: 0 }));
+    const afflatusAttempts = [];
+
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const mechanicTimes = mechanicDefinitions.map((mechanic) => (
+        mechanic ? getEncounterRelativeTimestamp(mechanic, phaseStarts) : Number.NaN
+      ));
+      if (mechanicTimes.some((timestamp) => !Number.isFinite(timestamp))) continue;
+      const startMs = mechanicTimes[0];
+      const ft8Ms = mechanicTimes.at(-1);
+      if (getFightDuration(fight) < ft8Ms + 15_000) continue;
+      const endMs = ft8Ms + 10_000;
+      const durationMs = endMs - startMs;
+      const allCasts = (state?.actionCasts ?? [])
+        .filter((action) => (
+          action.source === playerName
+          && action.eventType !== 'begincast'
+          && WHM_AFFLATUS_ACTIONS.has(String(action.ability).toLocaleLowerCase())
+        ))
+        .map((action) => ({
+          ability: String(action.ability).toLocaleLowerCase(),
+          timestamp: Number(action.timestamp) - Number(fight.startTime),
+        }))
+        .filter((cast) => cast.timestamp >= 0 && cast.timestamp <= endMs)
+        .sort((first, second) => first.timestamp - second.timestamp);
+      const boundaries = [...mechanicTimes, endMs];
+      if (histogramBoundaries.length === 0) {
+        histogramDurationMs = durationMs;
+        histogramBoundaries = boundaries.map((timestamp) => timestamp - startMs);
+      }
+      for (let index = 0; index < histogramCounts.length; index += 1) {
+        const spends = allCasts.filter((cast) => {
+          const action = WHM_AFFLATUS_ACTIONS.get(cast.ability);
+          const isLilySpend = action === 'Solace' || action === 'Rapture';
+          const isLastBlock = index === histogramCounts.length - 1;
+          return isLilySpend
+            && cast.timestamp >= boundaries[index]
+            && (isLastBlock
+              ? cast.timestamp <= boundaries[index + 1]
+              : cast.timestamp < boundaries[index + 1]);
+        }).length;
+        if (spends >= 1) histogramCounts[index].used += 1;
+        if (spends >= 2) histogramCounts[index].twice += 1;
+      }
+      afflatusAttempts.push({
+        fight,
+        state,
+        anchorMs: startMs,
+        durationMs,
+        allCasts,
+        casts: allCasts
+          .filter((cast) => cast.timestamp >= startMs)
+          .map((cast) => ({ ...cast, timestamp: cast.timestamp - startMs })),
+      });
+
+      const row = document.createElement('section');
+      row.className = 'special-views-lucid-row forsaken-lilies-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      identity.append(pullNumber, createBestPullBadge(fight));
+
+      const track = document.createElement('div');
+      track.className = 'special-views-lucid-track forsaken-lilies-track';
+      track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+      appendAfflatusStateRanges(track, allCasts, endMs, 'lilies', startMs);
+      for (let index = 0; index < mechanicNames.length; index += 1) {
+        appendForsakenLiliesDivider(
+          track,
+          mechanicNames[index],
+          mechanicTimes[index] - startMs,
+          durationMs,
+          index,
+        );
+      }
+      appendForsakenLiliesDivider(track, '+10s', durationMs, durationMs, mechanicNames.length);
+
+      for (const cast of allCasts.filter((action) => action.timestamp >= startMs)) {
+        const castMs = cast.timestamp - startMs;
+        const afflatusName = WHM_AFFLATUS_ACTIONS.get(cast.ability);
+        const tick = document.createElement('span');
+        tick.className = `special-views-lucid-tick afflatus ${afflatusName?.toLocaleLowerCase() ?? ''}`;
+        tick.style.left = `${(castMs / durationMs) * 100}%`;
+        tick.title = `Afflatus ${afflatusName} · ${formatPreciseFightDuration(cast.timestamp)}`;
+        tick.setAttribute('aria-label', tick.title);
+        tick.textContent = afflatusName?.[0] ?? '';
+        track.append(tick);
+      }
+      appendCroppedTimelineHoverTime(track, startMs, durationMs);
+      row.append(identity, track);
+      rows.append(row);
+      visiblePulls += 1;
+    }
+
+    if (visiblePulls > 0) {
+      const histogram = createForsakenLiliesHistogram(
+        histogramCounts,
+        histogramBoundaries,
+        histogramDurationMs,
+        visiblePulls,
+        pixelsPerSecond,
+      );
+      const graphWidth = (histogramDurationMs / 1000) * pixelsPerSecond;
+      const gauge = createAfflatusSummaryRow(
+        'Lily gauge by pull',
+        'sketch',
+        graphWidth,
+      );
+      renderAfflatusGaugeSketch(
+        gauge.graph,
+        afflatusAttempts,
+        histogramDurationMs,
+        graphWidth,
+      );
+      rows.prepend(histogram, gauge.row);
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'special-views-empty';
+      empty.textContent = 'No pulls completed Forsaken and continued at least 15 seconds past FT8.';
+      rows.append(empty);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
+  function createForsakenLiliesHistogram(
+    counts,
+    boundaries,
+    durationMs,
+    ceiling,
+    pixelsPerSecond,
+  ) {
+    const row = document.createElement('section');
+    row.className = 'special-views-afflatus-summary-row forsaken-lilies-histogram-row';
+    const label = document.createElement('strong');
+    label.textContent = 'Lily spends';
+    const graph = document.createElement('div');
+    graph.className = 'forsaken-lilies-histogram';
+    graph.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+    graph.setAttribute('role', 'img');
+    graph.setAttribute(
+      'aria-label',
+      `Forsaken lily-spend histogram; graph ceiling ${ceiling} shown pulls`,
+    );
+    const ceilingLine = document.createElement('span');
+    ceilingLine.className = 'forsaken-lilies-histogram-ceiling-line';
+    const ceilingLabel = document.createElement('span');
+    ceilingLabel.className = 'forsaken-lilies-histogram-ceiling-label';
+    ceilingLabel.textContent = `Ceiling ${ceiling}`;
+    ceilingLine.append(ceilingLabel);
+    graph.append(ceilingLine);
+
+    for (let index = 0; index < counts.length; index += 1) {
+      const startMs = boundaries[index];
+      const endMs = boundaries[index + 1];
+      const bar = document.createElement('span');
+      bar.className = 'forsaken-lilies-histogram-bar';
+      bar.style.left = `${(startMs / durationMs) * 100}%`;
+      bar.style.width = `${((endMs - startMs) / durationMs) * 100}%`;
+      bar.style.height = `${(counts[index].used / ceiling) * 100}%`;
+      bar.title = `${counts[index].used}/${ceiling} used a lily · ${counts[index].twice}/${ceiling} used two or more`;
+      const usedLabel = document.createElement('span');
+      usedLabel.className = 'forsaken-lilies-histogram-value';
+      usedLabel.textContent = String(counts[index].used);
+      const twice = document.createElement('span');
+      twice.className = 'forsaken-lilies-histogram-twice';
+      twice.style.height = counts[index].used > 0
+        ? `${(counts[index].twice / counts[index].used) * 100}%`
+        : '0%';
+      if (counts[index].twice > 0) {
+        const twiceLabel = document.createElement('span');
+        twiceLabel.textContent = String(counts[index].twice);
+        twice.append(twiceLabel);
+      }
+      bar.append(twice);
+      if (counts[index].used > 0) bar.append(usedLabel);
+      graph.append(bar);
+    }
+    row.append(label, graph);
+    return row;
+  }
+
+  function appendForsakenLiliesDivider(track, labelText, elapsedMs, durationMs, index) {
+    const tick = document.createElement('span');
+    tick.className = `special-views-mechanic-tick label-tier-${index % 2}`;
+    if (elapsedMs === 0) tick.classList.add('timeline-start');
+    if (elapsedMs === durationMs) tick.classList.add('timeline-end');
+    tick.style.left = `${(elapsedMs / durationMs) * 100}%`;
+    tick.title = labelText;
+    tick.setAttribute('aria-label', labelText);
+    const label = document.createElement('span');
+    label.className = 'special-views-mechanic-label';
+    label.textContent = labelText;
+    tick.append(label);
+    track.append(tick);
+  }
+
+  function appendCroppedTimelineHoverTime(track, startMs, durationMs) {
+    const line = document.createElement('span');
+    line.className = 'special-views-lucid-hover-line';
+    const label = document.createElement('span');
+    label.className = 'special-views-lucid-hover-time';
+    track.addEventListener('mousemove', (event) => {
+      const rectangle = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rectangle.left) / rectangle.width));
+      line.style.left = `${ratio * 100}%`;
+      label.style.left = `${ratio * 100}%`;
+      label.textContent = formatPreciseFightDuration(startMs + ratio * durationMs);
+      track.classList.add('show-hover-time');
+    });
+    track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
+    track.append(line, label);
+  }
+
+  function createLj1RaptureTimeline(report, fights, playerName) {
+    const scroller = document.createElement('div');
+    scroller.className = 'lj1-rapture-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'lj1-rapture-rows';
+    const legend = document.createElement('div');
+    legend.className = 'lj1-rapture-legend';
+    legend.innerHTML = '<span class="plenary">Plenary Indulgence (10s)</span><span class="reference">1:10 reference</span>';
+    rows.append(legend);
+    let visiblePulls = 0;
+
+    for (const fight of fights) {
+      const fightDurationMs = getFightDuration(fight);
+      if (fightDurationMs < LJ1_RAPTURE_END_MS) continue;
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const playerIds = new Set((state?.partyMembers ?? [])
+        .filter((member) => member.name === playerName)
+        .map((member) => Number(member.id)));
+      const diedDuringWindow = (state?.lifeEvents ?? []).some((event) => {
+        if (event.type !== 'death' || !playerIds.has(Number(event.playerId))) return false;
+        const elapsedMs = Number(event.timestamp) - Number(fight.startTime);
+        return elapsedMs >= LJ1_RAPTURE_START_MS && elapsedMs <= LJ1_RAPTURE_END_MS;
+      });
+      if (diedDuringWindow) continue;
+      const casts = (state?.actionCasts ?? [])
+        .filter((action) => {
+          if (action.source !== playerName || action.eventType !== 'cast') return false;
+          const ability = String(action.ability).trim().toLocaleLowerCase();
+          return ability === 'plenary indulgence'
+            || LJ1_RAPTURE_HEALS.has(ability);
+        })
+        .map((action) => ({
+          ...action,
+          elapsedMs: Number(action.timestamp) - Number(fight.startTime),
+        }))
+        .filter((action) => action.elapsedMs >= LJ1_RAPTURE_START_MS
+          && action.elapsedMs <= LJ1_RAPTURE_END_MS)
+        .sort((first, second) => first.elapsedMs - second.elapsedMs);
+
+      const row = document.createElement('section');
+      row.className = 'lj1-rapture-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const lj1Mechanic = getDancingMadMechanics().find((mechanic) => (
+        Number(mechanic.phase) === 1 && mechanic.mechanic === 'LJ1'
+      ));
+      const lj1Ms = getEncounterRelativeTimestamp(lj1Mechanic ?? {}, phaseStarts);
+      const plenaryWindows = casts
+        .filter((cast) => String(cast.ability).trim().toLocaleLowerCase() === 'plenary indulgence')
+        .map((cast) => [cast.elapsedMs, cast.elapsedMs + LJ1_RAPTURE_PLENARY_DURATION_MS]);
+      const qualifyingHeal = casts.find((cast) => {
+        const ability = String(cast.ability).trim().toLocaleLowerCase();
+        return LJ1_RAPTURE_HEALS.has(ability)
+          && cast.elapsedMs >= lj1Ms
+          && cast.elapsedMs <= LJ1_RAPTURE_REFERENCE_MS
+          && plenaryWindows.some(([start, end]) => cast.elapsedMs >= start && cast.elapsedMs <= end);
+      });
+      const result = document.createElement('input');
+      result.type = 'checkbox';
+      result.className = 'lj1-rapture-result';
+      result.checked = Boolean(qualifyingHeal);
+      result.disabled = true;
+      result.setAttribute('aria-label', `Pull ${fight.id} LJ1 Rapture requirement ${qualifyingHeal ? 'met' : 'not met'}`);
+      result.title = qualifyingHeal
+        ? `${qualifyingHeal.ability} landed during Plenary between LJ1 and 1:10 · ${formatPreciseFightDuration(qualifyingHeal.elapsedMs)}`
+        : 'No Rapture, Medica, or Medica III landed during Plenary between LJ1 and 1:10';
+      identity.append(result, pullNumber, createBestPullBadge(fight));
+
+      const trackWrap = document.createElement('div');
+      trackWrap.className = 'lj1-rapture-track-wrap';
+      const track = document.createElement('div');
+      track.className = 'player-actions-track lj1-rapture-track';
+      const reference = document.createElement('span');
+      reference.className = 'lj1-rapture-reference';
+      reference.style.left = `${((LJ1_RAPTURE_REFERENCE_MS - LJ1_RAPTURE_START_MS)
+        / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100}%`;
+      reference.title = 'LJ1 reference · 1:10.0';
+      const referenceLabel = document.createElement('span');
+      referenceLabel.textContent = '1:10';
+      reference.append(referenceLabel);
+      track.append(reference);
+
+      const stackCounts = new Map();
+      for (const action of casts) {
+        const ability = String(action.ability).trim().toLocaleLowerCase();
+        const position = ((action.elapsedMs - LJ1_RAPTURE_START_MS)
+          / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100;
+        if (ability === 'plenary indulgence') {
+          const coverageEndMs = Math.min(
+            LJ1_RAPTURE_END_MS,
+            action.elapsedMs + LJ1_RAPTURE_PLENARY_DURATION_MS,
+          );
+          const coverage = document.createElement('span');
+          coverage.className = 'lj1-rapture-plenary-range';
+          coverage.style.left = `${position}%`;
+          coverage.style.width = `${((coverageEndMs - action.elapsedMs)
+            / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100}%`;
+          coverage.title = `Plenary Indulgence · ${formatPreciseFightDuration(action.elapsedMs)}–${formatPreciseFightDuration(coverageEndMs)}`;
+          track.append(coverage);
+        }
+        const bucket = Math.round(action.elapsedMs / 250);
+        const stackIndex = stackCounts.get(bucket) ?? 0;
+        stackCounts.set(bucket, stackIndex + 1);
+        const marker = document.createElement('span');
+        marker.className = 'player-actions-marker';
+        marker.classList.add(getPlayerActionMarkerCategory(action));
+        marker.style.left = `${position}%`;
+        marker.style.setProperty('--action-offset', `${stackIndex * -5}px`);
+        marker.style.zIndex = String(4 + stackIndex);
+        marker.append(createPlayerActionIcon(action, action.elapsedMs));
+        track.append(marker);
+      }
+
+      for (const [label, elapsedMs] of [['0:50', LJ1_RAPTURE_START_MS], ['1:15', LJ1_RAPTURE_END_MS]]) {
+        const endpoint = document.createElement('span');
+        endpoint.className = `lj1-rapture-endpoint ${elapsedMs === LJ1_RAPTURE_START_MS ? 'start' : 'end'}`;
+        endpoint.textContent = label;
+        track.append(endpoint);
+      }
+      appendLj1RaptureHoverTime(track);
+      trackWrap.append(track);
+      row.append(identity, trackWrap);
+      rows.append(row);
+      visiblePulls += 1;
+    }
+
+    if (visiblePulls === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'special-views-empty';
+      empty.textContent = 'No pulls reached 1:15 without the selected WHM dying from 0:50–1:15.';
+      rows.append(empty);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
+  function appendLj1RaptureHoverTime(track) {
+    const line = document.createElement('span');
+    line.className = 'player-actions-hover-line';
+    const label = document.createElement('span');
+    label.className = 'player-actions-hover-time';
+    track.addEventListener('mousemove', (event) => {
+      const rectangle = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rectangle.left) / rectangle.width));
+      const timestamp = LJ1_RAPTURE_START_MS
+        + ratio * (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS);
+      line.style.left = `${ratio * 100}%`;
+      label.style.left = `${ratio * 100}%`;
+      label.textContent = formatPreciseFightDuration(timestamp);
+      track.classList.add('show-hover-time');
+    });
+    track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
+    track.append(line, label);
   }
 
   function createUptimeByPhaseTable(report, fights, playerName, gcd, metric) {
@@ -1251,6 +1918,119 @@ export function createPlayerActionsOverview({
     track.append(range);
   }
 
+  function createMitigationSpecialTimeline(
+    report,
+    fights,
+    playerName,
+    abilityName,
+    tankAssignment,
+    pixelsPerSecond,
+    phaseAnchor = 'fight',
+  ) {
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-lucid-scroll special-views-mitigation-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'special-views-lucid-rows';
+    const selectedMitigations = getDancingMadMitigations().filter((mitigation) => (
+      mitigation.ability === abilityName
+    ));
+
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor);
+      const durationMs = getFightDuration(fight) - anchorMs;
+      if (!Number.isFinite(anchorMs) || durationMs <= 0) continue;
+      const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
+      const partySlots = mapPartyMembersToPlanSlots(state?.partyMembers ?? [], state?.tankSlots);
+      const assignedSlots = tankAssignment
+        ? new Set([tankAssignment])
+        : new Set(PARTY_SLOT_ORDER.filter((slot) => partySlots.get(slot)?.name === playerName));
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const windows = selectedMitigations
+        .filter((mitigation) => assignedSlots.has(mitigation.assignedTo))
+        .filter((mitigation) => {
+          const jobs = getMitigationJobs(mitigation);
+          return jobs.length === 0 || jobs.includes(player?.job);
+        })
+        .map((mitigation) => {
+          const phaseStartMs = phaseStarts.get(Number(mitigation.phase));
+          if (!Number.isFinite(phaseStartMs)) return null;
+          return {
+            mitigation,
+            startMs: phaseStartMs + Number(mitigation.startElapsedSeconds) * 1000 - anchorMs,
+            endMs: phaseStartMs + Number(mitigation.endElapsedSeconds) * 1000 - anchorMs,
+          };
+        })
+        .filter((window) => window && window.endMs >= 0 && window.startMs <= durationMs);
+
+      const row = document.createElement('section');
+      row.className = 'special-views-lucid-row special-views-mitigation-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      identity.append(pullNumber, createBestPullBadge(fight));
+      const track = document.createElement('div');
+      track.className = 'special-views-lucid-track special-views-mitigation-track';
+      track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+
+      for (const window of windows) {
+        const clippedStart = Math.max(0, window.startMs);
+        const clippedEnd = Math.min(durationMs, window.endMs);
+        const range = document.createElement('span');
+        range.className = 'special-views-mitigation-window';
+        range.style.left = `${(clippedStart / durationMs) * 100}%`;
+        range.style.width = `${((clippedEnd - clippedStart) / durationMs) * 100}%`;
+        range.title = `${window.mitigation.nickname || window.mitigation.ability} window · ${formatPreciseFightDuration(window.startMs + anchorMs)}–${formatPreciseFightDuration(window.endMs + anchorMs)}`;
+        track.append(range);
+        for (const [timestamp, kind, label] of [
+          [window.startMs, 'start', 'Window begins'],
+          [window.endMs, 'end', 'Window ends'],
+        ]) {
+          if (timestamp < 0 || timestamp > durationMs) continue;
+          const tick = document.createElement('span');
+          tick.className = `special-views-mitigation-window-tick ${kind}`;
+          tick.style.left = `${(timestamp / durationMs) * 100}%`;
+          tick.title = `${label} · ${formatPreciseFightDuration(timestamp + anchorMs)}`;
+          tick.setAttribute('aria-label', tick.title);
+          track.append(tick);
+        }
+      }
+
+      appendSpecialTimelineMechanicTicks(track, fight, state, durationMs, anchorMs);
+      const abilityIds = new Set(selectedMitigations.map((mitigation) => Number(mitigation.abilityId)));
+      const casts = (state?.mitigationCasts ?? [])
+        .filter((cast) => cast.source === playerName && abilityIds.has(Number(cast.abilityId)))
+        .map((cast) => ({
+          cast,
+          elapsedMs: Number(cast.timestamp) - Number(fight.startTime),
+        }))
+        .filter(({ elapsedMs }) => elapsedMs >= anchorMs && elapsedMs <= anchorMs + durationMs);
+      for (const { cast, elapsedMs } of casts) {
+        const tick = document.createElement('span');
+        tick.className = 'special-views-mitigation-cast';
+        tick.style.left = `${((elapsedMs - anchorMs) / durationMs) * 100}%`;
+        tick.title = `${abilityName} · ${formatPreciseFightDuration(elapsedMs)}`;
+        tick.setAttribute('aria-label', tick.title);
+        track.append(tick);
+      }
+
+      const endLabel = document.createElement('span');
+      endLabel.className = 'special-views-lucid-end';
+      endLabel.textContent = formatFightDuration(durationMs);
+      track.append(endLabel);
+      appendLucidDreamingHoverTime(track, durationMs);
+      row.append(identity, track);
+      rows.append(row);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
   function createSpecialActionTimeline(
     report,
     fights,
@@ -1430,7 +2210,12 @@ export function createPlayerActionsOverview({
         maximumDurationMs,
         gcdDurationMs,
       );
-      renderAfflatusGaugeSketch(sketch.graph, visibleAttempts, maximumDurationMs);
+      renderAfflatusGaugeSketch(
+        sketch.graph,
+        visibleAttempts,
+        maximumDurationMs,
+        maximumTrackWidth,
+      );
     };
     render(initialThresholdMs);
     return { element, render };
@@ -1593,7 +2378,12 @@ export function createPlayerActionsOverview({
     return overlay;
   }
 
-  function renderAfflatusGaugeSketch(graph, attempts, maximumDurationMs) {
+  function renderAfflatusGaugeSketch(
+    graph,
+    attempts,
+    maximumDurationMs,
+    renderedWidth,
+  ) {
     const svgNamespace = 'http://www.w3.org/2000/svg';
     const svg = createAfflatusSummarySvg('Smooth lily gauge traces for each shown pull');
     const renderVersion = Number(graph.dataset.renderVersion ?? 0) + 1;
@@ -1634,6 +2424,7 @@ export function createPlayerActionsOverview({
       attemptsWithPoints,
       maximumDurationMs,
       renderVersion,
+      renderedWidth,
     );
   }
 
@@ -1643,19 +2434,28 @@ export function createPlayerActionsOverview({
     attempts,
     maximumDurationMs,
     renderVersion,
+    renderedWidth,
   ) {
-    const width = 1000;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (Number(graph.dataset.renderVersion) !== renderVersion || !graph.isConnected) return;
+    // Match the backing raster to the rendered timeline width so one canvas
+    // pixel remains one CSS pixel at every zoom level. The original connector's
+    // center pixel plus two pixels on either side therefore always displays as 5px.
+    const width = Math.max(1, graph.clientWidth || Math.round(renderedWidth) || 1000);
     const height = 120;
     const density = new Float32Array(width * height);
+    const connectorDensity = new Float32Array(width * height);
     const sigma = 4;
     const radius = Math.ceil(sigma * 3);
     const gaussian = Array.from({ length: radius * 2 + 1 }, (_, index) => {
       const distance = index - radius;
       return Math.exp(-(distance * distance) / (2 * sigma * sigma));
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
     for (let startX = 0; startX < width; startX += 80) {
       if (Number(graph.dataset.renderVersion) !== renderVersion || !graph.isConnected) return;
+      if (startX > 0 && startX % 320 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
       const endX = Math.min(width, startX + 80);
       for (const { durationMs, gaugePoints } of attempts) {
         for (let x = startX; x < endX; x += 1) {
@@ -1685,12 +2485,14 @@ export function createPlayerActionsOverview({
         const lastY = Math.round(112 - (next[1] / 3) * 104);
         const minimumY = Math.min(firstY, lastY);
         const maximumY = Math.max(firstY, lastY);
-        // Count the connector once at each crossed pixel. Applying the curve's
-        // vertical Gaussian at every point here would repeatedly overlap that
-        // kernel and make a single spend look fully saturated.
-        if (centerX < 0 || centerX >= width) continue;
-        for (let y = Math.max(0, minimumY); y <= Math.min(height - 1, maximumY); y += 1) {
-          density[y * width + centerX] += 1;
+        for (let x = Math.max(0, centerX - 2); x <= Math.min(width - 1, centerX + 2); x += 1) {
+          for (let centerY = minimumY; centerY <= maximumY; centerY += 1) {
+            for (let offset = -radius; offset <= radius; offset += 1) {
+              const y = centerY + offset;
+              if (y < 0 || y >= height) continue;
+              connectorDensity[y * width + x] += gaussian[offset + radius];
+            }
+          }
         }
       }
     }
@@ -1706,12 +2508,17 @@ export function createPlayerActionsOverview({
     const image = context.createImageData(width, height);
     for (let index = 0; index < density.length; index += 1) {
       const amount = density[index];
-      if (amount <= 0.002) continue;
+      const connectorAmount = connectorDensity[index];
+      if (amount <= 0.002 && connectorAmount <= 0.002) continue;
       const pixelIndex = index * 4;
       image.data[pixelIndex] = 96;
       image.data[pixelIndex + 1] = 165;
       image.data[pixelIndex + 2] = 250;
-      image.data[pixelIndex + 3] = Math.round(255 * (1 - Math.exp(-amount * 0.35)));
+      const traceAlpha = 1 - Math.exp(-amount * 0.35);
+      const connectorAlpha = 0.3 * (1 - Math.exp(-connectorAmount * 0.35));
+      image.data[pixelIndex + 3] = Math.round(
+        255 * (1 - (1 - traceAlpha) * (1 - connectorAlpha)),
+      );
     }
     context.putImageData(image, 0, 0);
     fallbackSvg.replaceWith(canvas);

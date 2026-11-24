@@ -97,6 +97,83 @@ const RELOAD_REPORTS_TOOLTIP = 'Reloads the cache for all reports. Warning—thi
 const CHECK_PULLS_TOOLTIP = "Only checks for new pulls—doesn't update existing ones. Hold Shift to reload the cache for all pulls.";
 const RELOAD_PULLS_TOOLTIP = 'Reloads the cache for all pulls. Warning—this consumes more account usage than only checking for new pulls. (release Shift to only check for new pulls)';
 
+const startupNavigation = readStartupNavigation();
+
+function readStartupNavigation() {
+  const parameters = new URLSearchParams(window.location.search);
+  const report = String(parameters.get('report') ?? '').trim();
+  const rawView = report ? String(parameters.get('view') ?? '').trim() : '';
+  const view = rawView.replace(/^(['"])(.*)\1$/, '$2').trim();
+  const normalizedView = normalizeLinkedReportView(view);
+  const supportsPlayer = ['player-actions', 'special-views'].includes(normalizedView);
+  const player = supportsPlayer ? String(parameters.get('player') ?? '').trim() : '';
+  return {
+    useTestData: String(parameters.get('test-data') ?? 'false').toLowerCase() === 'true',
+    report,
+    view,
+    normalizedView,
+    player,
+    playerActionsStart: normalizedView === 'player-actions'
+      ? String(parameters.get('start') ?? '').trim()
+      : '',
+    playerActionsPhaseAnchor: normalizedView === 'player-actions'
+      ? String(parameters.get('phase-anchor') ?? '').trim()
+      : '',
+    hardcodedView: normalizedView === 'special-views' && player
+      ? String(parameters.get('hardcoded-view') ?? '').trim()
+      : '',
+  };
+}
+
+function normalizeLinkedReportView(view) {
+  return new Map([
+    ['pull summaries', 'pull-summaries'], ['pull-summaries', 'pull-summaries'],
+    ['all mit graphs', 'mitigation-graphs'], ['mitigation-graphs', 'mitigation-graphs'],
+    ['player actions per pull', 'player-actions'], ['player-actions', 'player-actions'],
+    ['special hardcoded views', 'special-views'], ['special-views', 'special-views'],
+  ]).get(String(view ?? '').trim().toLowerCase()) ?? '';
+}
+
+function updateNavigationQuery({
+  testData,
+  report,
+  view,
+  player,
+  hardcodedView,
+  start,
+  phaseAnchor,
+} = {}) {
+  const url = new URL(window.location.href);
+  if (typeof testData === 'boolean') url.searchParams.set('test-data', String(testData));
+  if (report === null) url.searchParams.delete('report');
+  else if (report !== undefined) url.searchParams.set('report', report);
+  if (view === null) url.searchParams.delete('view');
+  else if (view !== undefined && url.searchParams.has('report')) url.searchParams.set('view', view);
+  if (!url.searchParams.has('report')) url.searchParams.delete('view');
+  const normalizedView = normalizeLinkedReportView(url.searchParams.get('view'));
+  if (!['player-actions', 'special-views'].includes(normalizedView)) {
+    url.searchParams.delete('player');
+    url.searchParams.delete('hardcoded-view');
+  } else {
+    if (player === null) url.searchParams.delete('player');
+    else if (player !== undefined) url.searchParams.set('player', player);
+    if (normalizedView !== 'special-views' || !url.searchParams.get('player')) {
+      url.searchParams.delete('hardcoded-view');
+    } else if (hardcodedView === null) url.searchParams.delete('hardcoded-view');
+    else if (hardcodedView !== undefined) url.searchParams.set('hardcoded-view', hardcodedView);
+  }
+  if (normalizedView !== 'player-actions') {
+    url.searchParams.delete('start');
+    url.searchParams.delete('phase-anchor');
+  } else {
+    if (start === null) url.searchParams.delete('start');
+    else if (start !== undefined) url.searchParams.set('start', start);
+    if (phaseAnchor === null) url.searchParams.delete('phase-anchor');
+    else if (phaseAnchor !== undefined) url.searchParams.set('phase-anchor', phaseAnchor);
+  }
+  window.history.replaceState(null, '', url);
+}
+
 const {
   loadDetailsTableVisibility,
   loadMitigationFilterMode,
@@ -270,6 +347,8 @@ const {
   setSelectedReport: (value) => { selectedReport = value; },
   setStatus: (...args) => setStatus(...args),
   setUsingTestData: (value) => { usingTestData = value; },
+  startupNavigation,
+  updateNavigationQuery,
 });
 
 const {
@@ -290,6 +369,7 @@ const {
   MITIGATION_GRACE_SECONDS,
   UNKNOWN_MITIGATION_ABILITY_ICON_URL,
   ensureReportFightDetails,
+  getDancingMadMechanic,
   getEventAbilityName,
   getFightDetails: () => fightDetails,
   getFightDuration,
@@ -354,6 +434,10 @@ const {
   getOpenFightDetailKeys: () => openFightDetailKeys,
   getOpenFightMitigationKeys: () => openFightMitigationKeys,
   getPullColorClass,
+  getLinkedReportView: (reportCode) => (
+    startupNavigation.report === reportCode ? startupNavigation.view : ''
+  ),
+  updateNavigationQuery,
   getSelectedReportPhase: () => selectedReportPhase,
   isDmuPull,
   normalizeBossHealth,
@@ -388,6 +472,24 @@ const {
   getDancingMadMechanics: () => dancingMadMechanics,
   getDancingMadLilyUsages: () => dancingMadLilyUsages,
   getDancingMadMitigations: () => dancingMadMitigations,
+  getLinkedHardcodedView: (reportCode) => (
+    startupNavigation.report === reportCode ? startupNavigation.hardcodedView : ''
+  ),
+  getLinkedPlayer: (reportCode, view) => (
+    startupNavigation.report === reportCode && startupNavigation.normalizedView === view
+      ? startupNavigation.player
+      : ''
+  ),
+  getLinkedPlayerActionsStart: (reportCode) => (
+    startupNavigation.report === reportCode
+      ? startupNavigation.playerActionsStart
+      : ''
+  ),
+  getLinkedPlayerActionsPhaseAnchor: (reportCode) => (
+    startupNavigation.report === reportCode
+      ? startupNavigation.playerActionsPhaseAnchor
+      : ''
+  ),
   getEncounterRelativeTimestamp,
   getFightDetails: () => fightDetails,
   getFightDuration,
@@ -403,6 +505,7 @@ const {
   resolveEncounterPhaseStarts,
   resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
+  updateNavigationQuery,
   updateWithSmoothHeight: (...args) => updateWithSmoothHeight(...args),
 });
 
