@@ -6,6 +6,7 @@ export function createFightDetailsNormalizer(dependencies) {
     FIGHT_EVENT_RECAP_LOOKBACK_MS,
     FIGHT_EVENT_RECAP_MAX_ROWS,
     TANK_FORTY_PERCENT_BUFFS,
+    extractEnemyInvulnerabilityEvents,
     extractPhaseReferenceEvents,
     extractPlayerActionCasts,
     extractPlayerDebuffEvents,
@@ -55,8 +56,11 @@ export function createFightDetailsNormalizer(dependencies) {
       const timestamp = Number(event.timestamp);
       return timestamp >= fightStart && timestamp <= fightEnd;
     });
-    const phaseReferenceEvents = extractPhaseReferenceEvents(rawEvents, actorNames);
+    const phaseReferenceEvents = extractPhaseReferenceEvents(rawEvents, actorNames, abilityNames);
     const partyMembers = normalizePartyMembers(actors, friendlyIds);
+    const enemyActors = actors
+      .filter((actor) => !friendlyIds.has(Number(actor.id)) && actor.name)
+      .map((actor) => ({ id: Number(actor.id), name: actor.name, type: actor.type, subType: actor.subType }));
     const actionCasts = extractPlayerActionCasts(
       rawEvents, actorNames, friendlyIds, abilityNames, abilityIcons,
     );
@@ -67,7 +71,10 @@ export function createFightDetailsNormalizer(dependencies) {
       const playerDebuffEvents = extractPlayerDebuffEvents(
         rawEvents, actorNames, friendlyIds, abilityNames,
       );
-      const lifeEvents = extractPlayerLifeEvents(rawEvents);
+      const lifeEvents = extractPlayerLifeEvents(rawEvents, actorNames, abilityNames);
+      const enemyInvulnerabilityEvents = extractEnemyInvulnerabilityEvents(
+        rawEvents, actorNames, friendlyIds, abilityNames,
+      );
       return {
         status: 'ready',
         detailLevel: 'player-actions',
@@ -79,6 +86,8 @@ export function createFightDetailsNormalizer(dependencies) {
         playerDebuffEvents,
         lifeEvents,
         targetabilityEvents,
+        enemyActors,
+        enemyInvulnerabilityEvents,
       };
     }
     const tankSlots = inferTankPlanSlots(rawEvents, partyMembers);
@@ -86,7 +95,10 @@ export function createFightDetailsNormalizer(dependencies) {
     const playerDebuffEvents = extractPlayerDebuffEvents(
       rawEvents, actorNames, friendlyIds, abilityNames,
     );
-    const lifeEvents = extractPlayerLifeEvents(rawEvents);
+    const lifeEvents = extractPlayerLifeEvents(rawEvents, actorNames, abilityNames);
+    const enemyInvulnerabilityEvents = extractEnemyInvulnerabilityEvents(
+      rawEvents, actorNames, friendlyIds, abilityNames,
+    );
     const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, rawFight, phaseReferenceEvents);
     const events = extractDisplayedFightEvents(
       rawEvents,
@@ -101,7 +113,7 @@ export function createFightDetailsNormalizer(dependencies) {
     return {
       status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
       mitigationCasts, actionCasts, playerSpeedAttributes, playerSpeedStatusEvents,
-      playerDebuffEvents, lifeEvents, targetabilityEvents,
+      playerDebuffEvents, lifeEvents, targetabilityEvents, enemyActors, enemyInvulnerabilityEvents,
     };
   }
   
@@ -114,6 +126,9 @@ export function createFightDetailsNormalizer(dependencies) {
     const friendlyIds = new Set((fight.friendlyPlayers ?? []).map(Number));
     const phaseReferenceEvents = extractPhaseReferenceEvents(fight.events ?? [], actorNames);
     const partyMembers = normalizePartyMembers(report.testActors ?? [], friendlyIds);
+    const enemyActors = (report.testActors ?? [])
+      .filter((actor) => !friendlyIds.has(Number(actor.id)) && actor.name)
+      .map((actor) => ({ id: Number(actor.id), name: actor.name, type: actor.type, subType: actor.subType }));
     const tankSlots = inferTankPlanSlots(fight.events ?? [], partyMembers);
     const mitigationCasts = extractTrackedMitigationCasts(fight.events ?? [], actorNames);
     const actionCasts = extractPlayerActionCasts(
@@ -125,7 +140,10 @@ export function createFightDetailsNormalizer(dependencies) {
     const playerDebuffEvents = extractPlayerDebuffEvents(
       fight.events ?? [], actorNames, friendlyIds, new Map(),
     );
-    const lifeEvents = extractPlayerLifeEvents(fight.events ?? []);
+    const lifeEvents = extractPlayerLifeEvents(fight.events ?? [], actorNames, new Map());
+    const enemyInvulnerabilityEvents = extractEnemyInvulnerabilityEvents(
+      fight.events ?? [], actorNames, friendlyIds, new Map(),
+    );
     const phaseStarts = resolveEncounterPhaseStarts(DANCING_MAD_ENCOUNTER_NAME, fight, phaseReferenceEvents);
     const events = extractDisplayedFightEvents(
       fight.events ?? [],
@@ -140,7 +158,7 @@ export function createFightDetailsNormalizer(dependencies) {
     return {
       status: 'ready', events, phaseReferenceEvents, partyMembers, tankSlots,
       mitigationCasts, actionCasts, playerSpeedAttributes, playerSpeedStatusEvents,
-      playerDebuffEvents, lifeEvents, targetabilityEvents,
+      playerDebuffEvents, lifeEvents, targetabilityEvents, enemyActors, enemyInvulnerabilityEvents,
     };
   }
   

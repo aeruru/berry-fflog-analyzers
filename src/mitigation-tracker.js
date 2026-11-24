@@ -230,6 +230,19 @@ export function createMitigationTracker(dependencies) {
         row.hidden = !isVisible;
         if (isVisible) visibleCount += 1;
       }
+
+      for (const divider of panel.querySelectorAll('.mitigation-phase-divider')) {
+        let nextRow = divider.nextElementSibling;
+        let hasVisibleResult = false;
+        while (nextRow && !nextRow.classList.contains('mitigation-phase-divider')) {
+          if (nextRow.classList.contains('mitigation-result') && !nextRow.hidden) {
+            hasVisibleResult = true;
+            break;
+          }
+          nextRow = nextRow.nextElementSibling;
+        }
+        divider.hidden = !hasVisibleResult;
+      }
   
       const table = panel.querySelector('.mitigation-table');
       if (table) table.hidden = visibleCount === 0;
@@ -290,9 +303,24 @@ export function createMitigationTracker(dependencies) {
     head.append(headingRow);
   
     const body = document.createElement('tbody');
+    let previousPhase = null;
     for (const result of results) {
+      const phase = Number(result.mitigation.phase);
+      if (Number.isFinite(phase) && phase !== previousPhase) {
+        const divider = document.createElement('tr');
+        divider.className = 'mitigation-phase-divider';
+        const dividerCell = document.createElement('th');
+        dividerCell.scope = 'rowgroup';
+        dividerCell.colSpan = headings.length;
+        dividerCell.textContent = `Phase ${phase}`;
+        divider.append(dividerCell);
+        body.append(divider);
+        previousPhase = phase;
+      }
       const row = document.createElement('tr');
       row.className = `mitigation-result ${result.statusClass}`;
+      const cooldownDetail = getMitigationCooldownDetail(result);
+      if (cooldownDetail) row.title = cooldownDetail;
       row.dataset.timingDeltaSeconds = String(result.timingDeltaSeconds ?? 0);
       if (result.statusColor) row.style.setProperty('--timing-color', result.statusColor);
       const windowCell = document.createElement('td');
@@ -304,8 +332,15 @@ export function createMitigationTracker(dependencies) {
       const abilityLabel = document.createElement('span');
       abilityLabel.textContent = abilityName;
       abilityContent.append(createMitigationAbilityIcon(result.mitigation.abilityId, abilityName), abilityLabel);
+      if (cooldownDetail) {
+        const cooldownTooltip = document.createElement('span');
+        cooldownTooltip.className = 'mitigation-cooldown-detail';
+        cooldownTooltip.setAttribute('role', 'tooltip');
+        cooldownTooltip.textContent = cooldownDetail;
+        abilityContent.append(cooldownTooltip);
+      }
       abilityCell.append(abilityContent);
-      abilityCell.title = result.mitigation.ability;
+      abilityCell.title = cooldownDetail || result.mitigation.ability;
       const playerCell = document.createElement('td');
       playerCell.textContent = result.status === 'Missed'
         ? '—'
@@ -351,13 +386,22 @@ export function createMitigationTracker(dependencies) {
     const supportedJobs = new Set(slotAssignments.flatMap(getMitigationJobs));
     return !partyMembers.some((member) => supportedJobs.has(member.job));
   }
+
+  function getMitigationCooldownDetail(result) {
+    if (result.status !== 'On cooldown' || !result.cooldownPreviousCast) return '';
+    const mechanic = result.cooldownMechanic?.mechanic
+      ? ` during ${result.cooldownMechanic.mechanic}`
+      : '';
+    return `Last used at ${formatFightDuration(result.cooldownPreviousCast.elapsedMs)}${mechanic}.`;
+  }
   
   function createMitigationResultHistory(report, result) {
     const anchor = document.createElement('span');
     anchor.className = 'mitigation-result-history-anchor';
     anchor.tabIndex = 0;
     anchor.textContent = result.status;
-    anchor.dataset.closedTitle = `${result.status}. Click to show result history.`;
+    const cooldownDetail = getMitigationCooldownDetail(result);
+    anchor.dataset.closedTitle = `${result.status}.${cooldownDetail ? ` ${cooldownDetail}` : ''} Click to show result history.`;
     anchor.title = anchor.dataset.closedTitle;
     anchor.setAttribute('role', 'button');
     anchor.setAttribute('aria-haspopup', 'dialog');
@@ -381,7 +425,7 @@ export function createMitigationTracker(dependencies) {
         const rows = await loadMitigationResultHistory(report, result.mitigation);
         tooltip.replaceChildren(
           createMitigationHistorySummary(rows),
-          createMitigationHistoryTable(rows),
+          createMitigationHistoryTable(rows, report),
         );
         positionMitigationHistoryPopup(anchor, tooltip);
       } catch (error) {

@@ -6,6 +6,7 @@ export function createMitigationCore(dependencies) {
     MITIGATION_GRACE_SECONDS,
     UNKNOWN_MITIGATION_ABILITY_ICON_URL,
     ensureReportFightDetails,
+    getDancingMadMechanic,
     getEventAbilityName,
     getFightDetails,
     getFightDuration,
@@ -22,10 +23,10 @@ export function createMitigationCore(dependencies) {
 
   async function loadMitigationResultHistory(report, mitigation) {
     const reportFingerprint = (report.fights ?? []).map(getFightFingerprint).join('|');
-    const cacheKey = `${report.code}:${reportFingerprint}:${getMitigationIdentity(mitigation)}`;
-    if (!getMitigationHistoryPromises().has(cacheKey)) {
-      getMitigationHistoryPromises().set(cacheKey, (async () => {
-        const rows = [];
+    const slotCacheKey = `${report.code}:${reportFingerprint}:slot:${mitigation.assignedTo}`;
+    if (!getMitigationHistoryPromises().has(slotCacheKey)) {
+      getMitigationHistoryPromises().set(slotCacheKey, (async () => {
+        const rowsByMitigation = new Map();
         const fights = (report.fights ?? [])
           .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID);
         await ensureReportFightDetails(report, fights);
@@ -33,14 +34,20 @@ export function createMitigationCore(dependencies) {
         for (const fight of fights) {
           const state = getFightDetails().get(`${report.code}:${fight.id}`);
           if (!state || state.status !== 'ready') continue;
-          const result = evaluatePartySlotMitigations(fight, state, mitigation.assignedTo)
-            .find((entry) => getMitigationIdentity(entry.mitigation) === getMitigationIdentity(mitigation));
-          if (result) rows.push({ fight, result });
+          for (const result of evaluatePartySlotMitigations(fight, state, mitigation.assignedTo)) {
+            const identity = getMitigationIdentity(result.mitigation);
+            if (!rowsByMitigation.has(identity)) rowsByMitigation.set(identity, []);
+            rowsByMitigation.get(identity).push({ fight, result });
+          }
         }
-        return rows.sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+        for (const rows of rowsByMitigation.values()) {
+          rows.sort((first, second) => Number(first.fight.id) - Number(second.fight.id));
+        }
+        return rowsByMitigation;
       })());
     }
-    return getMitigationHistoryPromises().get(cacheKey);
+    const rowsByMitigation = await getMitigationHistoryPromises().get(slotCacheKey);
+    return rowsByMitigation.get(getMitigationIdentity(mitigation)) ?? [];
   }
   
   // Populate the shared per-pull cache for report-wide comparison views. Restored
@@ -118,6 +125,7 @@ export function createMitigationCore(dependencies) {
       let statusClass = 'missed';
       let statusColor = '#fb7185';
       let timingDeltaSeconds = null;
+      let cooldownPreviousCast = null;
       if (cast && cast.elapsedMs < startMs) {
         const deltaSeconds = (startMs - cast.elapsedMs) / 1000;
         timingDeltaSeconds = deltaSeconds;
@@ -143,10 +151,19 @@ export function createMitigationCore(dependencies) {
       )) {
         status = 'Dead';
         statusClass = 'missed dead';
-      } else if (isMitigationOnCooldown(state.mitigationCasts ?? [], mitigation, player, fight, endMs)) {
-        status = 'On cooldown';
-        statusClass = 'missed on-cooldown';
+      } else {
+        cooldownPreviousCast = getMitigationCooldownPreviousCast(
+          state.mitigationCasts ?? [], mitigation, player, fight, endMs,
+        );
+        if (cooldownPreviousCast) {
+          status = 'On cooldown';
+          statusClass = 'missed on-cooldown';
+        }
       }
+
+      const cooldownMechanic = cooldownPreviousCast
+        ? getDancingMadMechanic(cooldownPreviousCast.elapsedMs, phaseStarts)
+        : null;
   
       results.push({
         mitigation,
@@ -158,6 +175,8 @@ export function createMitigationCore(dependencies) {
         statusClass,
         statusColor,
         timingDeltaSeconds,
+        cooldownPreviousCast,
+        cooldownMechanic,
       });
     }
     return results;
@@ -176,17 +195,20 @@ export function createMitigationCore(dependencies) {
     return latest?.type === 'death';
   }
   
-  function isMitigationOnCooldown(casts, mitigation, player, fight, windowEndMs) {
+  function getMitigationCooldownPreviousCast(casts, mitigation, player, fight, windowEndMs) {
     const cooldownSeconds = getMitigationCooldowns().get(mitigation.ability);
-    if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return false;
+    if (!Number.isFinite(cooldownSeconds) || cooldownSeconds <= 0) return null;
     const fightStart = Number(fight.startTime);
     const previousCast = casts
       .filter((cast) => cast.abilityId === Number(mitigation.abilityId)
         && (cast.sourceId === player.id || cast.source === player.name)
         && cast.timestamp - fightStart < windowEndMs)
       .sort((first, second) => second.timestamp - first.timestamp)[0];
-    if (!previousCast) return false;
-    return previousCast.timestamp - fightStart + cooldownSeconds * 1000 > windowEndMs;
+    if (!previousCast) return null;
+    const elapsedMs = previousCast.timestamp - fightStart;
+    return elapsedMs + cooldownSeconds * 1000 > windowEndMs
+      ? { ...previousCast, elapsedMs }
+      : null;
   }
   
   // Map real party members onto the encounter plan's role slots. Tanks use the

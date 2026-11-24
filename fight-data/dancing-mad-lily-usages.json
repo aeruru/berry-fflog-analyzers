@@ -1,0 +1,29 @@
+{
+  "description": "Planned Afflatus Solace/Rapture usages. Timings are seconds after the named phase begins; fight-absolute timings must be converted to phase-relative values for phases 2–5.",
+  "usages": [
+    { "phase": 1, "elapsedSeconds": 47 },
+    { "phase": 1, "elapsedSeconds": 50 },
+    { "phase": 1, "elapsedSeconds": 65 },
+    { "phase": 1, "elapsedSeconds": 107 },
+    { "phase": 1, "elapsedSeconds": 110 },
+    { "phase": 1, "elapsedSeconds": 122 },
+    { "phase": 1, "elapsedSeconds": 140 },
+    { "phase": 1, "elapsedSeconds": 166 },
+    { "phase": 1, "elapsedSeconds": 168 },
+    { "phase": 2, "elapsedSeconds": 33 },
+    { "phase": 2, "elapsedSeconds": 53 },
+    { "phase": 2, "elapsedSeconds": 64 },
+    { "phase": 2, "elapsedSeconds": 85 },
+    { "phase": 2, "elapsedSeconds": 106 },
+    { "phase": 2, "elapsedSeconds": 116 },
+    { "phase": 2, "elapsedSeconds": 163 },
+    { "phase": 2, "elapsedSeconds": 173 },
+    { "phase": 2, "elapsedSeconds": 175 },
+    { "phase": 3, "elapsedSeconds": 8.946 },
+    { "phase": 3, "elapsedSeconds": 28.946 },
+    { "phase": 3, "elapsedSeconds": 48.946 },
+    { "phase": 3, "elapsedSeconds": 58.946 },
+    { "phase": 3, "elapsedSeconds": 85.946 },
+    { "phase": 3, "elapsedSeconds": 108.946 }
+  ]
+}

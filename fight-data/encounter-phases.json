@@ -10,6 +10,7 @@
       },
       {
         "phase": 2,
+        "targetableEndSeconds": 180.451,
         "start": {
           "type": "fixed",
           "relativeToPhase": 1,
@@ -19,6 +20,9 @@
       {
         "phase": 3,
         "defaultDurationSeconds": 320,
+        "untargetableBosses": [
+          "Kefka"
+        ],
         "start": {
           "type": "fixed",
           "relativeToPhase": 2,
@@ -27,23 +31,32 @@
       },
       {
         "phase": 4,
+        "targetableEndSeconds": 126.961,
         "start": {
           "type": "event",
           "event": {
             "eventType": "Begin Cast",
             "ability": "Kefka Says",
             "source": "Kefka",
-            "relativeToPhase": 0,
-            "minimumPullSeconds": 600
+            "relativeToPhase": 3,
+            "minimumPullSeconds": 200
           }
         }
       },
       {
         "phase": 5,
         "start": {
-          "type": "fixed",
+          "type": "targetedEventAfterMechanic",
           "relativeToPhase": 4,
-          "seconds": 150
+          "mechanic": "Enr",
+          "delaySeconds": 10,
+          "event": {
+            "eventTypes": [
+              "Begin Cast",
+              "Cast"
+            ],
+            "target": "Kefka"
+          }
         }
       }
     ]

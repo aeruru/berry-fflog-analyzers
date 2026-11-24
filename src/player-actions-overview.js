@@ -24,6 +24,7 @@ export function isPlayerActionSpeedStatus(statusId) {
 const PLAYER_ACTION_SPELL_SPEED_JOBS = new Set([
   'WHM', 'SCH', 'AST', 'SGE', 'BLM', 'SMN', 'RDM', 'PCT', 'BLU',
 ]);
+const PLAYER_ACTION_TANK_JOBS = new Set(['PLD', 'WAR', 'DRK', 'GNB']);
 const PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB = new Map([
   ['WHM', [['aero', 'aero ii', 'dia']]],
   ['SCH', [['bio', 'bio ii', 'biolysis']]],
@@ -43,6 +44,11 @@ const WHM_AFFLATUS_ACTIONS = new Map([
   ['afflatus rapture', 'Rapture'],
   ['afflatus misery', 'Misery'],
 ]);
+const LJ1_RAPTURE_START_MS = 50_000;
+const LJ1_RAPTURE_END_MS = 75_000;
+const LJ1_RAPTURE_REFERENCE_MS = 70_000;
+const LJ1_RAPTURE_PLENARY_DURATION_MS = 10_000;
+const LJ1_RAPTURE_HEALS = new Set(['afflatus rapture', 'medica', 'medica iii']);
 const PLAYER_ACTION_EXPLICIT_GCDS = new Set([
   'eukrasia',
   'eukrasian diagnosis',
@@ -80,6 +86,9 @@ const playerActionGameDataById = new Map();
 // this page is reloaded, without making later visits load player-action data.
 const reportPlayerActionViewStates = new Map();
 const reportSpecialHardcodedViewStates = new Map();
+// Player and zoom describe the same timeline context in both report views.
+// Keep them shared while leaving each view's remaining controls independent.
+const reportSharedTimelineViewStates = new Map();
 
 export function createPlayerActionsOverview({
   attachFightEventStatusTooltip,
@@ -92,23 +101,32 @@ export function createPlayerActionsOverview({
   formatFightDuration,
   getEncounterRelativeTimestamp,
   getFightDuration,
+  getLinkedHardcodedView,
+  getLinkedPlayer,
+  getLinkedPlayerActionsStart,
+  getLinkedPlayerActionsPhaseAnchor,
   getMitigationJobs,
   isUnknownFflogsStatus,
   mapPartyMembersToPlanSlots,
   MITIGATION_GRACE_SECONDS,
   mitigationCastDistance,
   PARTY_SLOT_ORDER,
+  resolveEncounterBossUntargetableWindows,
   resolveEncounterPhaseStarts,
+  resolveEncounterTransitionDowntime,
   swappedTankAssignmentsByFight,
+  updateNavigationQuery,
   DMU_ENCOUNTER_ID,
   getDancingMadMechanics,
+  getDancingMadLilyUsages,
   getDancingMadMitigations,
   getFightDetails,
   getMitigationCooldowns,
   getSelectedReportPhase,
   updateWithSmoothHeight,
 }) {
-  async function showReportPlayerActionsOverview(report, button) {
+  async function showReportPlayerActionsOverview(report, button, host = null) {
+    const isEmbedded = Boolean(host);
     const phaseFilter = getSelectedReportPhase();
     const fights = filterReportFightsByOutcome(report.fights ?? [], phaseFilter)
       .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID);
@@ -118,20 +136,24 @@ export function createPlayerActionsOverview({
         ? 'Clears'
         : `Phase ${phaseFilter} wipes`;
   
-    const dialog = document.createElement('dialog');
+    const dialog = document.createElement(isEmbedded ? 'section' : 'dialog');
     dialog.className = 'mitigation-overview-dialog player-actions-dialog';
+    if (isEmbedded) dialog.classList.add('embedded-report-overview');
     dialog.setAttribute('aria-labelledby', 'player-actions-title');
     const header = document.createElement('div');
     header.className = 'mitigation-overview-header';
     const heading = document.createElement('h3');
     heading.id = 'player-actions-title';
     heading.textContent = 'Player actions by pull';
-    const closeButton = document.createElement('button');
-    closeButton.className = 'mitigation-overview-close';
-    closeButton.type = 'button';
-    closeButton.textContent = 'Close';
-    closeButton.addEventListener('click', () => dialog.close());
-    header.append(heading, closeButton);
+    header.append(heading);
+    if (!isEmbedded) {
+      const closeButton = document.createElement('button');
+      closeButton.className = 'mitigation-overview-close';
+      closeButton.type = 'button';
+      closeButton.textContent = 'Close';
+      closeButton.addEventListener('click', () => dialog.close());
+      header.append(closeButton);
+    }
   
     const content = document.createElement('div');
     content.className = 'mitigation-overview-content player-actions-content';
@@ -140,16 +162,20 @@ export function createPlayerActionsOverview({
     loading.textContent = `Loading player actions for ${phaseFilterLabel.toLowerCase()}…`;
     content.append(loading);
     dialog.append(header, content);
-    document.body.append(dialog);
-    button.disabled = true;
-    dialog.addEventListener('close', () => {
-      button.disabled = false;
-      dialog.remove();
-    }, { once: true });
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.showModal();
+    if (isEmbedded) {
+      host.replaceChildren(dialog);
+    } else {
+      document.body.append(dialog);
+      button.disabled = true;
+      dialog.addEventListener('close', () => {
+        button.disabled = false;
+        dialog.remove();
+      }, { once: true });
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.showModal();
+    }
   
     try {
       // Load one pull first so the roster and phase anchors become available
@@ -176,12 +202,17 @@ export function createPlayerActionsOverview({
       const controls = document.createElement('form');
       controls.className = 'player-actions-controls';
       const savedView = reportPlayerActionViewStates.get(report.code);
+      const sharedView = reportSharedTimelineViewStates.get(report.code) ?? {};
       const playerLabel = createPlayerActionsControlLabel('Player');
       const playerSelect = document.createElement('select');
       playerSelect.setAttribute('aria-label', 'Player');
       playerSelect.append(new Option('Choose player…', ''));
       for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
-      playerSelect.value = playerNames.includes(savedView?.player) ? savedView.player : '';
+      const linkedPlayer = getLinkedPlayer?.(report.code, 'player-actions');
+      const preferredPlayer = sharedView.player || linkedPlayer || savedView?.player;
+      playerSelect.value = playerNames.find((name) => (
+        name.toLowerCase() === String(preferredPlayer).toLowerCase()
+      )) ?? '';
       playerLabel.append(playerSelect);
       const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
       const phaseAnchorSelect = document.createElement('select');
@@ -190,8 +221,10 @@ export function createPlayerActionsOverview({
       for (let phase = 1; phase <= 5; phase += 1) {
         phaseAnchorSelect.append(new Option(`Phase ${phase}`, String(phase)));
       }
-      phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(savedView?.phaseAnchor)
-        ? savedView.phaseAnchor
+      const linkedPhaseAnchor = getLinkedPlayerActionsPhaseAnchor?.(report.code);
+      const preferredPhaseAnchor = savedView?.phaseAnchor || linkedPhaseAnchor;
+      phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(preferredPhaseAnchor)
+        ? preferredPhaseAnchor
         : 'fight';
       phaseAnchorLabel.append(phaseAnchorSelect);
       const getMaximumAnchoredDuration = () => Math.max(0, ...fights.map((fight) => {
@@ -202,32 +235,39 @@ export function createPlayerActionsOverview({
       const maximumFightDurationMs = getMaximumAnchoredDuration();
       const startControl = createPlayerActionsTimeControl(
         'Start',
-        savedView?.start ?? '',
+        savedView?.start || getLinkedPlayerActionsStart?.(report.code) || '',
         maximumFightDurationMs,
         0,
       );
       const { label: startLabel, textInput: startInput, rangeInput: startRange } = startControl;
-      const endControl = createPlayerActionsTimeControl(
-        'End',
-        savedView?.end ?? '',
-        maximumFightDurationMs,
-        maximumFightDurationMs,
+      const sortLabel = createPlayerActionsControlLabel('Sort pulls');
+      const sortSelect = document.createElement('select');
+      sortSelect.setAttribute('aria-label', 'Sort player action pulls');
+      sortSelect.append(
+        new Option('Pull order', 'order'),
+        new Option('Pull length', 'length'),
       );
-      const { label: endLabel, textInput: endInput, rangeInput: endRange } = endControl;
-      const showToEndLabel = document.createElement('label');
-      showToEndLabel.className = 'player-actions-show-to-end';
-      const showToEndCheckbox = document.createElement('input');
-      showToEndCheckbox.type = 'checkbox';
-      showToEndCheckbox.checked = savedView?.showToEnd === true;
-      showToEndCheckbox.setAttribute('aria-label', 'Show every pull to its end and sort by duration');
-      showToEndLabel.append(showToEndCheckbox, 'Show every pull to its end · shortest first');
+      sortSelect.value = ['order', 'length'].includes(savedView?.sort)
+        ? savedView.sort
+        : savedView?.showToEnd === true ? 'length' : 'order';
+      sortLabel.append(sortSelect);
+      const showGcdDowntimeLabel = document.createElement('label');
+      showGcdDowntimeLabel.className = 'player-actions-show-to-end';
+      const showGcdDowntimeCheckbox = document.createElement('input');
+      showGcdDowntimeCheckbox.type = 'checkbox';
+      showGcdDowntimeCheckbox.checked = savedView?.showGcdDowntime === true;
+      showGcdDowntimeCheckbox.setAttribute('aria-label', 'Show GCD downtime');
+      showGcdDowntimeLabel.append(showGcdDowntimeCheckbox, 'Show GCD downtime');
       const zoomLabel = createPlayerActionsControlLabel('Zoom');
       const zoomInput = document.createElement('input');
       zoomInput.type = 'range';
       zoomInput.min = '10';
       zoomInput.max = '80';
       zoomInput.step = '5';
-      zoomInput.value = String(Number(savedView?.zoom) || PLAYER_ACTION_PIXELS_PER_SECOND);
+      const sharedZoom = Number(sharedView.zoomLevel) * 10;
+      zoomInput.value = String(Number.isFinite(sharedZoom) && sharedZoom > 0
+        ? sharedZoom
+        : Number(savedView?.zoom) || PLAYER_ACTION_PIXELS_PER_SECOND);
       zoomInput.setAttribute('aria-label', 'Player action timeline zoom');
       const zoomOutput = document.createElement('output');
       zoomOutput.textContent = `${zoomInput.value} px/s`;
@@ -243,10 +283,10 @@ export function createPlayerActionsOverview({
         playerLabel,
         phaseAnchorLabel,
         startLabel,
-        endLabel,
         zoomLabel,
         updateButton,
-        showToEndLabel,
+        sortLabel,
+        showGcdDowntimeLabel,
         filterNotice,
       );
   
@@ -257,13 +297,13 @@ export function createPlayerActionsOverview({
       const durationFilter = document.createElement('label');
       durationFilter.className = 'player-actions-duration-filter';
       const durationFilterText = document.createElement('span');
-      durationFilterText.textContent = 'Hide pulls ending before';
+      durationFilterText.textContent = 'Hide pulls before';
       const durationFilterControl = document.createElement('span');
       durationFilterControl.className = 'player-actions-duration-filter-control';
       const durationFilterInput = document.createElement('input');
       durationFilterInput.type = 'range';
       durationFilterInput.step = '1000';
-      durationFilterInput.setAttribute('aria-label', 'Hide player action pulls ending before this time');
+      durationFilterInput.setAttribute('aria-label', 'Hide player action pulls before this time');
       let minimumDurationMs = Math.max(0, Number(savedView?.minimumDurationMs) || 0);
       const durationFilterOutput = document.createElement('output');
       durationFilterControl.append(durationFilterInput, durationFilterOutput);
@@ -290,18 +330,25 @@ export function createPlayerActionsOverview({
           player: playerSelect.value,
           phaseAnchor: phaseAnchorSelect.value,
           start: startInput.value,
-          end: endInput.value,
-          showToEnd: showToEndCheckbox.checked,
+          sort: sortSelect.value,
+          showGcdDowntime: showGcdDowntimeCheckbox.checked,
           zoom: Number(zoomInput.value),
           minimumDurationMs,
           selectedAbilityIds: [...selectedAbilityIds],
           hideUnhighlighted: abilityFilterState.hideUnhighlighted,
         });
+        reportSharedTimelineViewStates.set(report.code, {
+          player: playerSelect.value,
+          zoomLevel: Number(zoomInput.value) / 10,
+        });
+        updateNavigationQuery({
+          player: playerSelect.value || null,
+          start: startInput.value.trim() || null,
+          phaseAnchor: phaseAnchorSelect.value || null,
+        });
       };
       const render = ({ showErrors = true } = {}) => {
         const startMs = parseFightTimeInput(startInput.value);
-        const endMs = parseFightTimeInput(endInput.value);
-        const showToEnd = showToEndCheckbox.checked;
         const maximumAnchoredDurationMs = getMaximumAnchoredDuration();
         const pixelsPerSecond = Number(zoomInput.value);
         minimumDurationMs = Math.max(startMs || 0, Math.min(minimumDurationMs, maximumAnchoredDurationMs));
@@ -310,7 +357,6 @@ export function createPlayerActionsOverview({
         durationFilterInput.value = String(minimumDurationMs);
         durationFilterOutput.textContent = formatFightDuration(minimumDurationMs);
         startRange.max = String(maximumAnchoredDurationMs);
-        endRange.max = String(maximumAnchoredDurationMs);
         if (!detailsReady) {
           status.className = `player-actions-status${detailsError ? ' error' : ''}`;
           status.textContent = detailsError
@@ -322,35 +368,21 @@ export function createPlayerActionsOverview({
         if (!playerSelect.value
           || !Number.isFinite(startMs)
           || startMs < 0
-          || startMs >= maximumAnchoredDurationMs
-          || (!showToEnd && (
-            !Number.isFinite(endMs)
-            || endMs > maximumAnchoredDurationMs
-            || endMs <= startMs
-          ))) {
+          || startMs >= maximumAnchoredDurationMs) {
           status.className = `player-actions-status${showErrors ? ' error' : ''}`;
           status.textContent = showErrors
-            ? showToEnd
-              ? `Choose a player and enter a start before ${formatFightDuration(maximumAnchoredDurationMs)}.`
-              : `Choose a player and enter a valid range from 0:00–${formatFightDuration(maximumAnchoredDurationMs)}; the end must be after the start.`
-            : showToEnd
-              ? 'Choose a player and start time.'
-              : 'Choose a player, start time, and end time.';
+            ? `Choose a player and enter a start before ${formatFightDuration(maximumAnchoredDurationMs)}.`
+            : 'Choose a player and start time.';
           updateWithSmoothHeight(rows, () => rows.replaceChildren());
           return;
         }
         status.className = 'player-actions-status';
         startInput.value = formatFightDuration(startMs);
         syncPlayerActionsTimeControl(startControl, startMs);
-        if (!showToEnd) {
-          endInput.value = formatFightDuration(endMs);
-          syncPlayerActionsTimeControl(endControl, endMs);
-        }
         saveView();
         const defaultTrackWidth = Math.max(
           1,
-          (((showToEnd ? maximumAnchoredDurationMs : endMs) - startMs) / 1000)
-            * pixelsPerSecond,
+          ((maximumAnchoredDurationMs - startMs) / 1000) * pixelsPerSecond,
         );
         rows.style.setProperty('--player-actions-track-width', `${defaultTrackWidth}px`);
         durationFilterControl.style.width = `${defaultTrackWidth}px`;
@@ -369,8 +401,8 @@ export function createPlayerActionsOverview({
           }))
           .filter(({ anchorMs, anchoredDurationMs }) => Number.isFinite(anchorMs)
             && anchoredDurationMs >= minimumDurationMs
-            && (showToEnd ? anchoredDurationMs > startMs : anchoredDurationMs >= endMs))
-          .sort((first, second) => showToEnd
+            && anchoredDurationMs > startMs)
+          .sort((first, second) => sortSelect.value === 'length'
             ? first.anchoredDurationMs - second.anchoredDurationMs
               || Number(first.fight.id) - Number(second.fight.id)
             : Number(first.fight.id) - Number(second.fight.id));
@@ -378,12 +410,11 @@ export function createPlayerActionsOverview({
           ? 'fight start'
           : `P${phaseAnchorSelect.value}`;
         const gcd = estimatePlayerGcd(fights, report, playerSelect.value);
-        status.textContent = showToEnd
-          ? `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} shown from ${anchorName} + ${formatFightDuration(startMs)} to each pull's end, shortest first. ${formatPlayerGcdSummary(gcd)}.`
-          : `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} reached ${anchorName} + ${formatFightDuration(endMs)}. ${formatPlayerGcdSummary(gcd)}.`;
+        const sortDescription = sortSelect.value === 'length' ? 'shortest first' : 'pull order';
+        status.textContent = `${eligibleFights.length} ${eligibleFights.length === 1 ? 'pull' : 'pulls'} shown from ${anchorName} + ${formatFightDuration(startMs)}, ${sortDescription}. ${formatPlayerGcdSummary(gcd)}.`;
         updateWithSmoothHeight(rows, () => {
           rows.replaceChildren(durationFilter, ...eligibleFights.map(({ fight, anchorMs, anchoredDurationMs }) => {
-            const rowEndMs = showToEnd ? getFightDuration(fight) : anchorMs + endMs;
+            const rowEndMs = getFightDuration(fight);
             const row = createPlayerActionsPullRow(
               report,
               fight,
@@ -396,24 +427,34 @@ export function createPlayerActionsOverview({
                 hideUnhighlighted: abilityFilterState.hideUnhighlighted,
               },
               gcd,
+              showGcdDowntimeCheckbox.checked,
             );
-            if (showToEnd) {
-              const width = Math.max(
-                1,
-                ((anchoredDurationMs - startMs) / 1000) * pixelsPerSecond,
-              );
-              row.style.setProperty('--player-actions-track-width', `${width}px`);
-            }
+            const width = Math.max(
+              1,
+              ((anchoredDurationMs - startMs) / 1000) * pixelsPerSecond,
+            );
+            row.style.setProperty('--player-actions-track-width', `${width}px`);
             return row;
           }));
           if (eligibleFights.length === 0) {
             const empty = document.createElement('p');
             empty.className = 'player-actions-empty';
-            empty.textContent = showToEnd
-              ? 'No pulls reached the start of this time range.'
-              : 'No pulls reached the end of this time range.';
+            empty.textContent = 'No pulls reached the start of this time range.';
             rows.append(empty);
           }
+          const identityWidth = Math.max(
+            0,
+            ...[...rows.querySelectorAll('.player-actions-pull')]
+              .map((identity) => {
+                const identityLeft = identity.getBoundingClientRect().left;
+                return Math.max(
+                  0,
+                  ...[...identity.children]
+                    .map((child) => child.getBoundingClientRect().right - identityLeft),
+                );
+              }),
+          );
+          rows.style.setProperty('--player-actions-identity-width', `${Math.ceil(identityWidth)}px`);
         });
       };
       controls.addEventListener('submit', (event) => {
@@ -425,16 +466,11 @@ export function createPlayerActionsOverview({
         saveView();
         render({ showErrors: false });
       });
-      const syncShowToEndControl = () => {
-        endInput.disabled = showToEndCheckbox.checked;
-        endRange.disabled = showToEndCheckbox.checked;
-        endLabel.classList.toggle('disabled', showToEndCheckbox.checked);
-      };
-      showToEndCheckbox.addEventListener('change', () => {
-        if (showToEndCheckbox.checked && !Number.isFinite(parseFightTimeInput(startInput.value))) {
-          syncPlayerActionsTimeControl(startControl, 0);
-        }
-        syncShowToEndControl();
+      sortSelect.addEventListener('change', () => {
+        saveView();
+        render({ showErrors: false });
+      });
+      showGcdDowntimeCheckbox.addEventListener('change', () => {
         saveView();
         render({ showErrors: false });
       });
@@ -448,7 +484,7 @@ export function createPlayerActionsOverview({
         saveView();
         render({ showErrors: false });
       });
-      for (const control of [startControl, endControl]) {
+      for (const control of [startControl]) {
         control.textInput.addEventListener('input', () => {
           const milliseconds = parseFightTimeInput(control.textInput.value);
           const currentMaximumMs = getMaximumAnchoredDuration();
@@ -469,7 +505,7 @@ export function createPlayerActionsOverview({
       updateWithSmoothHeight(content, () => {
         content.replaceChildren(controls, status, rows, abilityFilter);
       });
-      syncShowToEndControl();
+      saveView();
       render({ showErrors: false });
       void (async () => {
         try {
@@ -490,28 +526,38 @@ export function createPlayerActionsOverview({
   }
 
   function clearSpecialHardcodedViewState(reportCode = null) {
-    if (reportCode === null) reportSpecialHardcodedViewStates.clear();
-    else reportSpecialHardcodedViewStates.delete(reportCode);
+    if (reportCode === null) {
+      reportSpecialHardcodedViewStates.clear();
+      reportSharedTimelineViewStates.clear();
+    } else {
+      reportSpecialHardcodedViewStates.delete(reportCode);
+      reportSharedTimelineViewStates.delete(reportCode);
+    }
   }
 
-  async function showSpecialHardcodedViews(report, button) {
+  async function showSpecialHardcodedViews(report, button, host = null) {
+    const isEmbedded = Boolean(host);
     const fights = (report.fights ?? [])
       .filter((fight) => Number(fight.encounterID) === DMU_ENCOUNTER_ID)
       .sort((first, second) => Number(first.id) - Number(second.id));
-    const dialog = document.createElement('dialog');
+    const dialog = document.createElement(isEmbedded ? 'section' : 'dialog');
     dialog.className = 'mitigation-overview-dialog special-views-dialog';
+    if (isEmbedded) dialog.classList.add('embedded-report-overview');
     dialog.setAttribute('aria-labelledby', 'special-views-title');
     const header = document.createElement('div');
     header.className = 'mitigation-overview-header';
     const heading = document.createElement('h3');
     heading.id = 'special-views-title';
     heading.textContent = 'Special hardcoded views';
-    const closeButton = document.createElement('button');
-    closeButton.className = 'mitigation-overview-close';
-    closeButton.type = 'button';
-    closeButton.textContent = 'Close';
-    closeButton.addEventListener('click', () => dialog.close());
-    header.append(heading, closeButton);
+    header.append(heading);
+    if (!isEmbedded) {
+      const closeButton = document.createElement('button');
+      closeButton.className = 'mitigation-overview-close';
+      closeButton.type = 'button';
+      closeButton.textContent = 'Close';
+      closeButton.addEventListener('click', () => dialog.close());
+      header.append(closeButton);
+    }
 
     const content = document.createElement('div');
     content.className = 'mitigation-overview-content special-views-content';
@@ -520,16 +566,20 @@ export function createPlayerActionsOverview({
     loading.textContent = 'Loading fight details…';
     content.append(loading);
     dialog.append(header, content);
-    document.body.append(dialog);
-    button.disabled = true;
-    dialog.addEventListener('close', () => {
-      button.disabled = false;
-      dialog.remove();
-    }, { once: true });
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.showModal();
+    if (isEmbedded) {
+      host.replaceChildren(dialog);
+    } else {
+      document.body.append(dialog);
+      button.disabled = true;
+      dialog.addEventListener('close', () => {
+        button.disabled = false;
+        dialog.remove();
+      }, { once: true });
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.showModal();
+    }
 
     try {
       // Populate the controls from an already-loaded pull when possible. Loading
@@ -556,6 +606,7 @@ export function createPlayerActionsOverview({
       }
 
       const savedView = reportSpecialHardcodedViewStates.get(report.code) ?? {};
+      const sharedView = reportSharedTimelineViewStates.get(report.code) ?? {};
       const controls = document.createElement('div');
       controls.className = 'special-views-controls';
       const playerLabel = createPlayerActionsControlLabel('Player');
@@ -563,7 +614,11 @@ export function createPlayerActionsOverview({
       playerSelect.setAttribute('aria-label', 'Special view player');
       playerSelect.append(new Option('Choose player…', ''));
       for (const playerName of playerNames) playerSelect.append(new Option(playerName, playerName));
-      playerSelect.value = playerNames.includes(savedView.player) ? savedView.player : '';
+      const linkedPlayer = getLinkedPlayer?.(report.code, 'special-views');
+      const preferredPlayer = sharedView.player || linkedPlayer || savedView.player;
+      playerSelect.value = playerNames.find((name) => (
+        name.toLowerCase() === String(preferredPlayer).toLowerCase()
+      )) ?? '';
       playerLabel.append(playerSelect);
       const viewLabel = createPlayerActionsControlLabel('Job-tailored view');
       const viewSelect = document.createElement('select');
@@ -571,31 +626,147 @@ export function createPlayerActionsOverview({
       const supportedViews = new Set([
         'gcd-uptime-by-phase',
         'dot-uptime-by-phase',
+        'dot-boss-timeline',
+        'death-raise-tracker',
         'lucid-dreaming-timeline',
         'afflatus-timeline',
+        'forsaken-lilies',
+        'lj1-rapture',
+        'mitigation-timeline',
       ]);
+      const hardcodedViewAliases = new Map([
+        ['gcd uptime in each phase', 'gcd-uptime-by-phase'],
+        ['death → raise tracker', 'death-raise-tracker'],
+        ['death -> raise tracker', 'death-raise-tracker'],
+        ['dot uptime in each phase', 'dot-uptime-by-phase'],
+        ['dot timeline by boss', 'dot-boss-timeline'],
+        ['lucid dreaming timeline', 'lucid-dreaming-timeline'],
+        ['afflatus tracker', 'afflatus-timeline'],
+        ['forsaken lilies', 'forsaken-lilies'],
+        ['lj1 rapture', 'lj1-rapture'],
+        ['🏭 mitigation timeline', 'mitigation-timeline'],
+        ['mitigation timeline', 'mitigation-timeline'],
+      ]);
+      for (const view of supportedViews) hardcodedViewAliases.set(view, view);
+      const linkedHardcodedView = hardcodedViewAliases.get(
+        String(getLinkedHardcodedView?.(report.code) ?? '').trim().toLowerCase(),
+      ) ?? '';
       const populateSpecialViews = (preferredView = '') => {
         const job = playersByName.get(playerSelect.value)?.job;
         viewSelect.replaceChildren(new Option('Choose view…', ''));
         viewSelect.append(new Option('GCD uptime in each phase', 'gcd-uptime-by-phase'));
+        viewSelect.append(new Option('Death → raise tracker', 'death-raise-tracker'));
         if (PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.has(job)) {
           viewSelect.append(new Option('DoT uptime in each phase', 'dot-uptime-by-phase'));
+          viewSelect.append(new Option('DoT timeline by boss', 'dot-boss-timeline'));
         }
         if (PLAYER_ACTION_SPELL_SPEED_JOBS.has(job)) {
           viewSelect.append(new Option('Lucid Dreaming timeline', 'lucid-dreaming-timeline'));
         }
         if (job === 'WHM') {
           viewSelect.append(new Option('Afflatus tracker', 'afflatus-timeline'));
+          viewSelect.append(new Option('Forsaken lilies', 'forsaken-lilies'));
+          viewSelect.append(new Option('LJ1 Rapture', 'lj1-rapture'));
+        }
+        if (getDancingMadMitigations().some((mitigation) => getMitigationJobs(mitigation).includes(job))) {
+          viewSelect.append(new Option('Mitigation timeline', 'mitigation-timeline'));
         }
         viewSelect.disabled = !playerSelect.value;
         viewSelect.value = [...viewSelect.options].some((option) => option.value === preferredView)
           ? preferredView
           : '';
       };
-      populateSpecialViews(playerSelect.value && supportedViews.has(savedView.view)
-        ? savedView.view
+      populateSpecialViews(playerSelect.value
+        ? supportedViews.has(savedView.view) ? savedView.view : linkedHardcodedView
         : '');
       viewLabel.append(viewSelect);
+      const mitigationAssignmentLabel = createPlayerActionsControlLabel('Tank assignment');
+      mitigationAssignmentLabel.classList.add('special-views-mitigation-assignment');
+      mitigationAssignmentLabel.hidden = true;
+      const mitigationAssignmentSelect = document.createElement('select');
+      mitigationAssignmentSelect.setAttribute('aria-label', 'Mitigation timeline tank assignment');
+      mitigationAssignmentSelect.append(
+        new Option('Choose MT/OT…', ''),
+        new Option('Main tank (MT)', 'MT'),
+        new Option('Off tank (OT)', 'OT'),
+      );
+      mitigationAssignmentSelect.value = ['MT', 'OT'].includes(savedView.mitigationAssignment)
+        ? savedView.mitigationAssignment
+        : '';
+      mitigationAssignmentLabel.append(mitigationAssignmentSelect);
+      const mitigationAbilityLabel = createPlayerActionsControlLabel('Mitigation');
+      mitigationAbilityLabel.classList.add('special-views-mitigation-ability');
+      mitigationAbilityLabel.hidden = true;
+      const mitigationAbilitySelect = document.createElement('select');
+      mitigationAbilitySelect.setAttribute('aria-label', 'Mitigation timeline ability');
+      mitigationAbilityLabel.append(mitigationAbilitySelect);
+      const getPlayerPlanSlots = (playerName) => {
+        const slots = new Set();
+        for (const fight of fights) {
+          const state = getFightDetails().get(`${report.code}:${fight.id}`);
+          if (!state) continue;
+          const partySlots = mapPartyMembersToPlanSlots(state.partyMembers ?? [], state.tankSlots);
+          for (const slot of PARTY_SLOT_ORDER) {
+            if (partySlots.get(slot)?.name === playerName) slots.add(slot);
+          }
+        }
+        return slots;
+      };
+      const populateMitigationAbilities = (preferredAbility = '') => {
+        const player = playersByName.get(playerSelect.value);
+        const isTank = PLAYER_ACTION_TANK_JOBS.has(player?.job);
+        const assignedSlots = isTank
+          ? new Set(mitigationAssignmentSelect.value ? [mitigationAssignmentSelect.value] : [])
+          : getPlayerPlanSlots(playerSelect.value);
+        const choices = [];
+        const seen = new Set();
+        for (const mitigation of getDancingMadMitigations()) {
+          if (!assignedSlots.has(mitigation.assignedTo)
+            || !getMitigationJobs(mitigation).includes(player?.job)
+            || seen.has(mitigation.ability)) continue;
+          seen.add(mitigation.ability);
+          choices.push({ value: mitigation.ability, label: mitigation.nickname || mitigation.ability });
+        }
+        mitigationAbilitySelect.replaceChildren(
+          new Option('Choose mitigation…', ''),
+          ...choices.map(({ value, label }) => new Option(label, value)),
+        );
+        mitigationAbilitySelect.value = choices.some(({ value }) => value === preferredAbility)
+          ? preferredAbility
+          : '';
+        mitigationAbilitySelect.disabled = choices.length === 0;
+      };
+      populateMitigationAbilities(savedView.mitigationAbility);
+      const phaseAnchorLabel = createPlayerActionsControlLabel('Phase anchor');
+      phaseAnchorLabel.classList.add('special-views-phase-anchor');
+      phaseAnchorLabel.hidden = true;
+      const phaseAnchorSelect = document.createElement('select');
+      phaseAnchorSelect.setAttribute('aria-label', 'Special timeline phase anchor');
+      phaseAnchorSelect.append(new Option('Fight start', 'fight'));
+      for (let phase = 1; phase <= 5; phase += 1) {
+        phaseAnchorSelect.append(new Option(`Phase ${phase}`, String(phase)));
+      }
+      phaseAnchorSelect.value = ['fight', '1', '2', '3', '4', '5'].includes(savedView.timelinePhaseAnchor)
+        ? savedView.timelinePhaseAnchor
+        : 'fight';
+      phaseAnchorLabel.append(phaseAnchorSelect);
+      const configurePhaseAnchors = (bossName = null) => {
+        const previous = phaseAnchorSelect.value || savedView.timelinePhaseAnchor;
+        const normalizedBoss = String(bossName ?? '').trim().toLocaleLowerCase();
+        const options = normalizedBoss === 'chaos' || normalizedBoss === 'exdeath'
+          ? [['Phase 3', '3']]
+          : normalizedBoss === 'kefka'
+            ? [['Phase 1', '1'], ['Phase 2', '2'], ['Phase 4', '4'], ['Phase 5', '5']]
+            : [
+              ['Fight start', 'fight'],
+              ['Phase 1', '1'], ['Phase 2', '2'], ['Phase 3', '3'],
+              ['Phase 4', '4'], ['Phase 5', '5'],
+            ];
+        phaseAnchorSelect.replaceChildren(...options.map(([label, value]) => new Option(label, value)));
+        const allowedValues = new Set(options.map(([, value]) => value));
+        phaseAnchorSelect.value = allowedValues.has(previous) ? previous : options[0][1];
+        phaseAnchorSelect.disabled = options.length === 1;
+      };
       const zoomLabel = createPlayerActionsControlLabel('Zoom');
       zoomLabel.classList.add('special-views-zoom');
       zoomLabel.hidden = true;
@@ -605,7 +776,10 @@ export function createPlayerActionsOverview({
       zoomInput.max = '8';
       zoomInput.step = '0.5';
       const savedZoom = Number(savedView.timelineZoom ?? savedView.lucidZoom);
-      zoomInput.value = String(Number.isFinite(savedZoom) ? savedZoom : 2);
+      const sharedZoom = Number(sharedView.zoomLevel);
+      zoomInput.value = String(Number.isFinite(sharedZoom) && sharedZoom > 0
+        ? sharedZoom
+        : Number.isFinite(savedZoom) ? savedZoom : 2);
       let timelineMinimumDurationMs = Math.max(
         0,
         Number(savedView.timelineMinimumDurationMs ?? savedView.lucidMinimumDurationMs) || 0,
@@ -627,34 +801,98 @@ export function createPlayerActionsOverview({
         ? 'misery'
         : 'lilies';
       afflatusDisplayLabel.append(afflatusDisplaySelect);
-      controls.append(playerLabel, viewLabel, zoomLabel, afflatusDisplayLabel);
+      const bossLabel = createPlayerActionsControlLabel('Boss');
+      bossLabel.classList.add('special-views-boss');
+      bossLabel.hidden = true;
+      const bossSelect = document.createElement('select');
+      bossSelect.setAttribute('aria-label', 'DoT timeline boss');
+      bossLabel.append(bossSelect);
+      controls.append(
+        playerLabel,
+        viewLabel,
+        mitigationAssignmentLabel,
+        mitigationAbilityLabel,
+        bossLabel,
+        phaseAnchorLabel,
+        zoomLabel,
+        afflatusDisplayLabel,
+      );
 
       const status = document.createElement('p');
       status.className = 'special-views-status';
+      const progressPanel = document.createElement('div');
+      progressPanel.className = 'special-views-loading-progress';
+      progressPanel.hidden = true;
+      const progressBar = document.createElement('progress');
+      progressBar.max = 100;
+      progressBar.value = 0;
+      const progressLabel = document.createElement('span');
+      progressPanel.append(progressBar, progressLabel);
       const results = document.createElement('div');
       results.className = 'special-views-results';
       let allDetailsPromise = null;
-      const loadAllDetails = () => {
-        if (!allDetailsPromise) {
-          allDetailsPromise = (async () => {
-            await ensureReportFightDetails(report, fights, { playerActionsOnly: true });
+      let allMitigationDetailsPromise = null;
+      let latestDetailsProgress = null;
+      let latestMitigationProgress = null;
+      const loadAllDetails = (includeMitigations = false, onProgress = null) => {
+        const currentPromise = includeMitigations ? allMitigationDetailsPromise : allDetailsPromise;
+        const latestProgress = includeMitigations ? latestMitigationProgress : latestDetailsProgress;
+        if (latestProgress) onProgress?.(latestProgress);
+        if (!currentPromise) {
+          const promise = (async () => {
+            await ensureReportFightDetails(report, fights, {
+              playerActionsOnly: !includeMitigations,
+              onProgress: (progress) => {
+                const update = { phase: 'details', ...progress };
+                if (includeMitigations) latestMitigationProgress = update;
+                else latestDetailsProgress = update;
+                onProgress?.(update);
+              },
+            });
+            onProgress?.({ phase: 'actions', completed: 0, total: 1, stage: 'Loading action data' });
             await loadPlayerActionCategories(fights.flatMap((fight) => (
               getFightDetails().get(`${report.code}:${fight.id}`)?.actionCasts ?? []
             )));
+            onProgress?.({ phase: 'actions', completed: 1, total: 1, stage: 'Action data ready' });
           })().catch((error) => {
-            allDetailsPromise = null;
+            if (includeMitigations) allMitigationDetailsPromise = null;
+            else allDetailsPromise = null;
             throw error;
           });
+          if (includeMitigations) allMitigationDetailsPromise = promise;
+          else allDetailsPromise = promise;
         }
-        return allDetailsPromise;
+        return includeMitigations ? allMitigationDetailsPromise : allDetailsPromise;
+      };
+      const updateLoadingProgress = (value, label) => {
+        progressPanel.hidden = false;
+        progressBar.value = Math.max(0, Math.min(100, value));
+        progressLabel.textContent = label;
+      };
+      const hideLoadingProgress = () => {
+        progressPanel.hidden = true;
       };
       const saveView = () => {
         reportSpecialHardcodedViewStates.set(report.code, {
           player: playerSelect.value,
           view: viewSelect.value,
+          timelinePhaseAnchor: phaseAnchorSelect.value,
           timelineZoom: Number(zoomInput.value),
           timelineMinimumDurationMs,
           afflatusDisplayMode: afflatusDisplaySelect.value,
+          boss: bossSelect.value,
+          mitigationAssignment: mitigationAssignmentSelect.value,
+          mitigationAbility: mitigationAbilitySelect.value,
+        });
+        reportSharedTimelineViewStates.set(report.code, {
+          player: playerSelect.value,
+          zoomLevel: Number(zoomInput.value),
+        });
+        updateNavigationQuery({
+          player: playerSelect.value || null,
+          hardcodedView: playerSelect.value && viewSelect.value
+            ? viewSelect.options[viewSelect.selectedIndex].text
+            : null,
         });
       };
       let renderVersion = 0;
@@ -662,40 +900,135 @@ export function createPlayerActionsOverview({
         const version = ++renderVersion;
         const isLucidView = viewSelect.value === 'lucid-dreaming-timeline';
         const isAfflatusView = viewSelect.value === 'afflatus-timeline';
-        const isTimelineView = isLucidView || isAfflatusView;
-        zoomLabel.hidden = !isLucidView;
+        const isForsakenLiliesView = viewSelect.value === 'forsaken-lilies';
+        const isDeathView = viewSelect.value === 'death-raise-tracker';
+        const isDotTimelineView = viewSelect.value === 'dot-boss-timeline';
+        const isLj1RaptureView = viewSelect.value === 'lj1-rapture';
+        const isMitigationTimelineView = viewSelect.value === 'mitigation-timeline';
+        const isTimelineView = isLucidView || isAfflatusView || isMitigationTimelineView;
+        const isTank = PLAYER_ACTION_TANK_JOBS.has(playersByName.get(playerSelect.value)?.job);
+        phaseAnchorLabel.hidden = !(isTimelineView || isDotTimelineView);
+        zoomLabel.hidden = !(isTimelineView || isDotTimelineView || isForsakenLiliesView);
+        bossLabel.hidden = !isDotTimelineView;
         afflatusDisplayLabel.hidden = !isAfflatusView;
+        mitigationAssignmentLabel.hidden = !(isMitigationTimelineView && isTank);
+        mitigationAbilityLabel.hidden = !isMitigationTimelineView;
         results.replaceChildren();
         if (!playerSelect.value) {
+          hideLoadingProgress();
           status.textContent = 'Choose a player to see their job-tailored views.';
           return;
         }
         const player = playersByName.get(playerSelect.value);
         if (!viewSelect.value) {
+          hideLoadingProgress();
           status.textContent = `Choose a ${player?.job ?? 'job'} view.`;
           return;
         }
         const selectedPlayer = playerSelect.value;
+        if (isMitigationTimelineView && isTank && !mitigationAssignmentSelect.value) {
+          hideLoadingProgress();
+          status.textContent = `Choose whether ${selectedPlayer} is MT or OT.`;
+          return;
+        }
+        if (isMitigationTimelineView && !mitigationAbilitySelect.value) {
+          hideLoadingProgress();
+          status.textContent = `Choose one of ${selectedPlayer}'s mitigations.`;
+          return;
+        }
         const metric = viewSelect.value === 'dot-uptime-by-phase' ? 'dot' : 'gcd';
         const metricLabel = metric === 'dot' ? 'DoT' : 'GCD';
-        status.textContent = isTimelineView
-          ? `Loading ${selectedPlayer}'s ${isAfflatusView ? 'Afflatus' : 'Lucid Dreaming'} timeline…`
+        status.textContent = (isTimelineView || isDotTimelineView || isForsakenLiliesView)
+          ? `Loading ${selectedPlayer}'s ${isDotTimelineView
+            ? 'boss DoT'
+            : isForsakenLiliesView
+              ? 'Forsaken lilies'
+            : isAfflatusView
+              ? 'Afflatus'
+              : isMitigationTimelineView
+                ? mitigationAbilitySelect.options[mitigationAbilitySelect.selectedIndex]?.text ?? 'mitigation'
+                : 'Lucid Dreaming'} timeline…`
+          : isDeathView
+            ? `Loading ${selectedPlayer}'s raised deaths…`
+          : isLj1RaptureView
+            ? `Loading ${selectedPlayer}'s LJ1 Rapture timeline…`
           : `Loading ${selectedPlayer}'s ${metricLabel} uptime by phase…`;
+        updateLoadingProgress(2, 'Preparing view…');
+        await new Promise((resolve) => requestAnimationFrame(() => resolve()));
         try {
-          await loadAllDetails();
+          await loadAllDetails(isMitigationTimelineView, (progress) => {
+            if (version !== renderVersion) return;
+            if (progress.phase === 'actions') {
+              updateLoadingProgress(progress.completed ? 88 : 78, progress.stage);
+              return;
+            }
+            const ratio = progress.total > 0 ? progress.completed / progress.total : 1;
+            const count = progress.total > 0 ? ` (${progress.completed}/${progress.total})` : '';
+            updateLoadingProgress(5 + ratio * 70, `${progress.stage}${count}`);
+          });
           if (version !== renderVersion || !dialog.isConnected) return;
+          updateLoadingProgress(92, 'Rendering view…');
+          await new Promise((resolve) => setTimeout(resolve, 0));
           const gcd = estimatePlayerGcd(fights, report, selectedPlayer);
-          status.textContent = isTimelineView
-            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${isAfflatusView ? 'Afflatus tracker.' : 'Lucid Dreaming coverage.'}`
+          if (isDotTimelineView) {
+            const dotNames = new Set(PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.get(player?.job)?.flat() ?? []);
+            const bossNames = [...new Set(fights.flatMap((fight) => {
+              const state = getFightDetails().get(`${report.code}:${fight.id}`);
+              return (state?.playerDebuffEvents ?? [])
+                .filter((event) => event.source === selectedPlayer
+                  && dotNames.has(String(event.ability).toLocaleLowerCase())
+                  && event.target)
+                .map((event) => event.target);
+            }))].sort((first, second) => first.localeCompare(second));
+            const preferredBoss = bossSelect.value || savedView.boss;
+            bossSelect.replaceChildren(...bossNames.map((name) => new Option(name, name)));
+            bossSelect.value = bossNames.includes(preferredBoss) ? preferredBoss : (bossNames[0] ?? '');
+            configurePhaseAnchors(bossSelect.value);
+            saveView();
+          } else if (isTimelineView) {
+            configurePhaseAnchors();
+            saveView();
+          }
+          status.textContent = isForsakenLiliesView
+            ? `${selectedPlayer} (WHM) · complete Forsaken lily timelines.`
+            : isTimelineView
+            ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${isAfflatusView
+              ? 'Afflatus tracker.'
+              : isMitigationTimelineView
+                ? `${mitigationAbilitySelect.options[mitigationAbilitySelect.selectedIndex]?.text ?? mitigationAbilitySelect.value} windows.`
+                : 'Lucid Dreaming coverage.'}`
+            : isDotTimelineView
+              ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · DoTs on ${bossSelect.value || 'no matching boss'}.`
+            : isDeathView
+              ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · deaths they were raised from.`
+            : isLj1RaptureView
+              ? `${selectedPlayer} (WHM) · LJ1 Rapture, 0:50–1:15.`
             : metric === 'gcd'
             ? `${selectedPlayer} (${player?.job ?? 'unknown job'}) · ${formatPlayerGcdSummary(gcd)}.`
             : `${selectedPlayer} (${player?.job ?? 'unknown job'}) · DoT uptime by phase.`;
-          results.append(isTimelineView
+          results.replaceChildren(isForsakenLiliesView
+            ? createForsakenLiliesTimeline(
+              report,
+              fights,
+              selectedPlayer,
+              Number(zoomInput.value),
+            )
+            : isMitigationTimelineView
+            ? createMitigationSpecialTimeline(
+              report,
+              fights,
+              selectedPlayer,
+              mitigationAbilitySelect.value,
+              isTank ? mitigationAssignmentSelect.value : null,
+              Number(zoomInput.value),
+              phaseAnchorSelect.value,
+            )
+            : isTimelineView
             ? createSpecialActionTimeline(
               report,
               fights,
               selectedPlayer,
-              isAfflatusView ? 2 : Number(zoomInput.value),
+              Number(zoomInput.value),
               timelineMinimumDurationMs,
               (minimumDurationMs) => {
                 timelineMinimumDurationMs = minimumDurationMs;
@@ -703,27 +1036,54 @@ export function createPlayerActionsOverview({
               },
               isAfflatusView ? 'afflatus' : 'lucid',
               afflatusDisplaySelect.value,
+              phaseAnchorSelect.value,
+              gcd?.durationMs ?? PLAYER_ACTION_BASE_GCD_MS,
             )
-            : createUptimeByPhaseTable(report, fights, selectedPlayer, gcd, metric));
+            : isDeathView
+              ? createDeathRaiseTracker(report, fights, selectedPlayer, player?.job)
+              : isLj1RaptureView
+                ? createLj1RaptureTimeline(report, fights, selectedPlayer)
+              : isDotTimelineView
+                ? createBossDotTimeline(
+                  report, fights, selectedPlayer, player?.job, bossSelect.value,
+                  Number(zoomInput.value), phaseAnchorSelect.value,
+                )
+                : createUptimeByPhaseTable(report, fights, selectedPlayer, gcd, metric));
+          updateLoadingProgress(100, 'Ready');
+          setTimeout(() => {
+            if (version === renderVersion) hideLoadingProgress();
+          }, 350);
         } catch (error) {
           if (version !== renderVersion || !dialog.isConnected) return;
+          hideLoadingProgress();
           status.textContent = `Could not load this view: ${error.message}`;
         }
       };
       playerSelect.addEventListener('change', () => {
         const currentView = viewSelect.value;
         populateSpecialViews(currentView);
+        const player = playersByName.get(playerSelect.value);
+        if (!PLAYER_ACTION_TANK_JOBS.has(player?.job)) mitigationAssignmentSelect.value = '';
+        populateMitigationAbilities('');
         saveView();
         void render();
       });
       viewSelect.addEventListener('change', () => {
+        populateMitigationAbilities(mitigationAbilitySelect.value || savedView.mitigationAbility);
         saveView();
         void render();
       });
       zoomInput.addEventListener('input', () => {
         zoomValue.textContent = `${Number(zoomInput.value).toFixed(1)} px/s`;
         saveView();
-        if (viewSelect.value === 'lucid-dreaming-timeline') {
+        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'forsaken-lilies', 'dot-boss-timeline', 'mitigation-timeline'].includes(viewSelect.value)) {
+          void render();
+        }
+      });
+      phaseAnchorSelect.addEventListener('change', () => {
+        timelineMinimumDurationMs = 0;
+        saveView();
+        if (['lucid-dreaming-timeline', 'afflatus-timeline', 'dot-boss-timeline', 'mitigation-timeline'].includes(viewSelect.value)) {
           void render();
         }
       });
@@ -731,11 +1091,420 @@ export function createPlayerActionsOverview({
         saveView();
         if (viewSelect.value === 'afflatus-timeline') void render();
       });
-      content.replaceChildren(controls, status, results);
+      bossSelect.addEventListener('change', () => {
+        saveView();
+        if (viewSelect.value === 'dot-boss-timeline') void render();
+      });
+      mitigationAssignmentSelect.addEventListener('change', () => {
+        populateMitigationAbilities('');
+        saveView();
+        if (viewSelect.value === 'mitigation-timeline') void render();
+      });
+      mitigationAbilitySelect.addEventListener('change', () => {
+        saveView();
+        if (viewSelect.value === 'mitigation-timeline') void render();
+      });
+      content.replaceChildren(controls, status, progressPanel, results);
+      saveView();
       void render();
     } catch (error) {
       loading.textContent = `Could not load special views: ${error.message}`;
     }
+  }
+
+  function createForsakenLiliesTimeline(report, fights, playerName, pixelsPerSecond) {
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-lucid-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'special-views-lucid-rows forsaken-lilies-rows';
+    const mechanicNames = ['For', 'FT1', 'FT2', 'FT3', 'FT4', 'FT5', 'FT6', 'FT7', 'FT8'];
+    const mechanicDefinitions = mechanicNames.map((name) => getDancingMadMechanics().find((mechanic) => (
+      Number(mechanic.phase) === 2 && mechanic.mechanic === name
+    )));
+    let visiblePulls = 0;
+    let histogramDurationMs = 0;
+    let histogramBoundaries = [];
+    const histogramCounts = Array.from({ length: mechanicNames.length }, () => ({ used: 0, twice: 0 }));
+    const afflatusAttempts = [];
+
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const mechanicTimes = mechanicDefinitions.map((mechanic) => (
+        mechanic ? getEncounterRelativeTimestamp(mechanic, phaseStarts) : Number.NaN
+      ));
+      if (mechanicTimes.some((timestamp) => !Number.isFinite(timestamp))) continue;
+      const startMs = mechanicTimes[0];
+      const ft8Ms = mechanicTimes.at(-1);
+      if (getFightDuration(fight) < ft8Ms + 15_000) continue;
+      const endMs = ft8Ms + 10_000;
+      const durationMs = endMs - startMs;
+      const allCasts = (state?.actionCasts ?? [])
+        .filter((action) => (
+          action.source === playerName
+          && action.eventType !== 'begincast'
+          && WHM_AFFLATUS_ACTIONS.has(String(action.ability).toLocaleLowerCase())
+        ))
+        .map((action) => ({
+          ability: String(action.ability).toLocaleLowerCase(),
+          timestamp: Number(action.timestamp) - Number(fight.startTime),
+        }))
+        .filter((cast) => cast.timestamp >= 0 && cast.timestamp <= endMs)
+        .sort((first, second) => first.timestamp - second.timestamp);
+      const boundaries = [...mechanicTimes, endMs];
+      if (histogramBoundaries.length === 0) {
+        histogramDurationMs = durationMs;
+        histogramBoundaries = boundaries.map((timestamp) => timestamp - startMs);
+      }
+      for (let index = 0; index < histogramCounts.length; index += 1) {
+        const spends = allCasts.filter((cast) => {
+          const action = WHM_AFFLATUS_ACTIONS.get(cast.ability);
+          const isLilySpend = action === 'Solace' || action === 'Rapture';
+          const isLastBlock = index === histogramCounts.length - 1;
+          return isLilySpend
+            && cast.timestamp >= boundaries[index]
+            && (isLastBlock
+              ? cast.timestamp <= boundaries[index + 1]
+              : cast.timestamp < boundaries[index + 1]);
+        }).length;
+        if (spends >= 1) histogramCounts[index].used += 1;
+        if (spends >= 2) histogramCounts[index].twice += 1;
+      }
+      afflatusAttempts.push({
+        fight,
+        state,
+        anchorMs: startMs,
+        durationMs,
+        allCasts,
+        casts: allCasts
+          .filter((cast) => cast.timestamp >= startMs)
+          .map((cast) => ({ ...cast, timestamp: cast.timestamp - startMs })),
+      });
+
+      const row = document.createElement('section');
+      row.className = 'special-views-lucid-row forsaken-lilies-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      identity.append(pullNumber, createBestPullBadge(fight));
+
+      const track = document.createElement('div');
+      track.className = 'special-views-lucid-track forsaken-lilies-track';
+      track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+      appendAfflatusStateRanges(track, allCasts, endMs, 'lilies', startMs);
+      for (let index = 0; index < mechanicNames.length; index += 1) {
+        appendForsakenLiliesDivider(
+          track,
+          mechanicNames[index],
+          mechanicTimes[index] - startMs,
+          durationMs,
+          index,
+        );
+      }
+      appendForsakenLiliesDivider(track, '+10s', durationMs, durationMs, mechanicNames.length);
+
+      for (const cast of allCasts.filter((action) => action.timestamp >= startMs)) {
+        const castMs = cast.timestamp - startMs;
+        const afflatusName = WHM_AFFLATUS_ACTIONS.get(cast.ability);
+        const tick = document.createElement('span');
+        tick.className = `special-views-lucid-tick afflatus ${afflatusName?.toLocaleLowerCase() ?? ''}`;
+        tick.style.left = `${(castMs / durationMs) * 100}%`;
+        tick.title = `Afflatus ${afflatusName} · ${formatPreciseFightDuration(cast.timestamp)}`;
+        tick.setAttribute('aria-label', tick.title);
+        tick.textContent = afflatusName?.[0] ?? '';
+        track.append(tick);
+      }
+      appendCroppedTimelineHoverTime(track, startMs, durationMs);
+      row.append(identity, track);
+      rows.append(row);
+      visiblePulls += 1;
+    }
+
+    if (visiblePulls > 0) {
+      const histogram = createForsakenLiliesHistogram(
+        histogramCounts,
+        histogramBoundaries,
+        histogramDurationMs,
+        visiblePulls,
+        pixelsPerSecond,
+      );
+      const graphWidth = (histogramDurationMs / 1000) * pixelsPerSecond;
+      const gauge = createAfflatusSummaryRow(
+        'Lily gauge by pull',
+        'sketch',
+        graphWidth,
+      );
+      renderAfflatusGaugeSketch(
+        gauge.graph,
+        afflatusAttempts,
+        histogramDurationMs,
+        graphWidth,
+      );
+      rows.prepend(histogram, gauge.row);
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'special-views-empty';
+      empty.textContent = 'No pulls completed Forsaken and continued at least 15 seconds past FT8.';
+      rows.append(empty);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
+  function createForsakenLiliesHistogram(
+    counts,
+    boundaries,
+    durationMs,
+    ceiling,
+    pixelsPerSecond,
+  ) {
+    const row = document.createElement('section');
+    row.className = 'special-views-afflatus-summary-row forsaken-lilies-histogram-row';
+    const label = document.createElement('strong');
+    label.textContent = 'Lily spends';
+    const graph = document.createElement('div');
+    graph.className = 'forsaken-lilies-histogram';
+    graph.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+    graph.setAttribute('role', 'img');
+    graph.setAttribute(
+      'aria-label',
+      `Forsaken lily-spend histogram; graph ceiling ${ceiling} shown pulls`,
+    );
+    const ceilingLine = document.createElement('span');
+    ceilingLine.className = 'forsaken-lilies-histogram-ceiling-line';
+    const ceilingLabel = document.createElement('span');
+    ceilingLabel.className = 'forsaken-lilies-histogram-ceiling-label';
+    ceilingLabel.textContent = `Ceiling ${ceiling}`;
+    ceilingLine.append(ceilingLabel);
+    graph.append(ceilingLine);
+
+    for (let index = 0; index < counts.length; index += 1) {
+      const startMs = boundaries[index];
+      const endMs = boundaries[index + 1];
+      const bar = document.createElement('span');
+      bar.className = 'forsaken-lilies-histogram-bar';
+      bar.style.left = `${(startMs / durationMs) * 100}%`;
+      bar.style.width = `${((endMs - startMs) / durationMs) * 100}%`;
+      bar.style.height = `${(counts[index].used / ceiling) * 100}%`;
+      bar.title = `${counts[index].used}/${ceiling} used a lily · ${counts[index].twice}/${ceiling} used two or more`;
+      const usedLabel = document.createElement('span');
+      usedLabel.className = 'forsaken-lilies-histogram-value';
+      usedLabel.textContent = String(counts[index].used);
+      const twice = document.createElement('span');
+      twice.className = 'forsaken-lilies-histogram-twice';
+      twice.style.height = counts[index].used > 0
+        ? `${(counts[index].twice / counts[index].used) * 100}%`
+        : '0%';
+      if (counts[index].twice > 0) {
+        const twiceLabel = document.createElement('span');
+        twiceLabel.textContent = String(counts[index].twice);
+        twice.append(twiceLabel);
+      }
+      bar.append(twice);
+      if (counts[index].used > 0) bar.append(usedLabel);
+      graph.append(bar);
+    }
+    row.append(label, graph);
+    return row;
+  }
+
+  function appendForsakenLiliesDivider(track, labelText, elapsedMs, durationMs, index) {
+    const tick = document.createElement('span');
+    tick.className = `special-views-mechanic-tick label-tier-${index % 2}`;
+    if (elapsedMs === 0) tick.classList.add('timeline-start');
+    if (elapsedMs === durationMs) tick.classList.add('timeline-end');
+    tick.style.left = `${(elapsedMs / durationMs) * 100}%`;
+    tick.title = labelText;
+    tick.setAttribute('aria-label', labelText);
+    const label = document.createElement('span');
+    label.className = 'special-views-mechanic-label';
+    label.textContent = labelText;
+    tick.append(label);
+    track.append(tick);
+  }
+
+  function appendCroppedTimelineHoverTime(track, startMs, durationMs) {
+    const line = document.createElement('span');
+    line.className = 'special-views-lucid-hover-line';
+    const label = document.createElement('span');
+    label.className = 'special-views-lucid-hover-time';
+    track.addEventListener('mousemove', (event) => {
+      const rectangle = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rectangle.left) / rectangle.width));
+      line.style.left = `${ratio * 100}%`;
+      label.style.left = `${ratio * 100}%`;
+      label.textContent = formatPreciseFightDuration(startMs + ratio * durationMs);
+      track.classList.add('show-hover-time');
+    });
+    track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
+    track.append(line, label);
+  }
+
+  function createLj1RaptureTimeline(report, fights, playerName) {
+    const scroller = document.createElement('div');
+    scroller.className = 'lj1-rapture-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'lj1-rapture-rows';
+    const legend = document.createElement('div');
+    legend.className = 'lj1-rapture-legend';
+    legend.innerHTML = '<span class="plenary">Plenary Indulgence (10s)</span><span class="reference">1:10 reference</span>';
+    rows.append(legend);
+    let visiblePulls = 0;
+
+    for (const fight of fights) {
+      const fightDurationMs = getFightDuration(fight);
+      if (fightDurationMs < LJ1_RAPTURE_END_MS) continue;
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const playerIds = new Set((state?.partyMembers ?? [])
+        .filter((member) => member.name === playerName)
+        .map((member) => Number(member.id)));
+      const diedDuringWindow = (state?.lifeEvents ?? []).some((event) => {
+        if (event.type !== 'death' || !playerIds.has(Number(event.playerId))) return false;
+        const elapsedMs = Number(event.timestamp) - Number(fight.startTime);
+        return elapsedMs >= LJ1_RAPTURE_START_MS && elapsedMs <= LJ1_RAPTURE_END_MS;
+      });
+      if (diedDuringWindow) continue;
+      const casts = (state?.actionCasts ?? [])
+        .filter((action) => {
+          if (action.source !== playerName || action.eventType !== 'cast') return false;
+          const ability = String(action.ability).trim().toLocaleLowerCase();
+          return ability === 'plenary indulgence'
+            || LJ1_RAPTURE_HEALS.has(ability);
+        })
+        .map((action) => ({
+          ...action,
+          elapsedMs: Number(action.timestamp) - Number(fight.startTime),
+        }))
+        .filter((action) => action.elapsedMs >= LJ1_RAPTURE_START_MS
+          && action.elapsedMs <= LJ1_RAPTURE_END_MS)
+        .sort((first, second) => first.elapsedMs - second.elapsedMs);
+
+      const row = document.createElement('section');
+      row.className = 'lj1-rapture-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const lj1Mechanic = getDancingMadMechanics().find((mechanic) => (
+        Number(mechanic.phase) === 1 && mechanic.mechanic === 'LJ1'
+      ));
+      const lj1Ms = getEncounterRelativeTimestamp(lj1Mechanic ?? {}, phaseStarts);
+      const plenaryWindows = casts
+        .filter((cast) => String(cast.ability).trim().toLocaleLowerCase() === 'plenary indulgence')
+        .map((cast) => [cast.elapsedMs, cast.elapsedMs + LJ1_RAPTURE_PLENARY_DURATION_MS]);
+      const qualifyingHeal = casts.find((cast) => {
+        const ability = String(cast.ability).trim().toLocaleLowerCase();
+        return LJ1_RAPTURE_HEALS.has(ability)
+          && cast.elapsedMs >= lj1Ms
+          && cast.elapsedMs <= LJ1_RAPTURE_REFERENCE_MS
+          && plenaryWindows.some(([start, end]) => cast.elapsedMs >= start && cast.elapsedMs <= end);
+      });
+      const result = document.createElement('input');
+      result.type = 'checkbox';
+      result.className = 'lj1-rapture-result';
+      result.checked = Boolean(qualifyingHeal);
+      result.disabled = true;
+      result.setAttribute('aria-label', `Pull ${fight.id} LJ1 Rapture requirement ${qualifyingHeal ? 'met' : 'not met'}`);
+      result.title = qualifyingHeal
+        ? `${qualifyingHeal.ability} landed during Plenary between LJ1 and 1:10 · ${formatPreciseFightDuration(qualifyingHeal.elapsedMs)}`
+        : 'No Rapture, Medica, or Medica III landed during Plenary between LJ1 and 1:10';
+      identity.append(result, pullNumber, createBestPullBadge(fight));
+
+      const trackWrap = document.createElement('div');
+      trackWrap.className = 'lj1-rapture-track-wrap';
+      const track = document.createElement('div');
+      track.className = 'player-actions-track lj1-rapture-track';
+      const reference = document.createElement('span');
+      reference.className = 'lj1-rapture-reference';
+      reference.style.left = `${((LJ1_RAPTURE_REFERENCE_MS - LJ1_RAPTURE_START_MS)
+        / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100}%`;
+      reference.title = 'LJ1 reference · 1:10.0';
+      const referenceLabel = document.createElement('span');
+      referenceLabel.textContent = '1:10';
+      reference.append(referenceLabel);
+      track.append(reference);
+
+      const stackCounts = new Map();
+      for (const action of casts) {
+        const ability = String(action.ability).trim().toLocaleLowerCase();
+        const position = ((action.elapsedMs - LJ1_RAPTURE_START_MS)
+          / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100;
+        if (ability === 'plenary indulgence') {
+          const coverageEndMs = Math.min(
+            LJ1_RAPTURE_END_MS,
+            action.elapsedMs + LJ1_RAPTURE_PLENARY_DURATION_MS,
+          );
+          const coverage = document.createElement('span');
+          coverage.className = 'lj1-rapture-plenary-range';
+          coverage.style.left = `${position}%`;
+          coverage.style.width = `${((coverageEndMs - action.elapsedMs)
+            / (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS)) * 100}%`;
+          coverage.title = `Plenary Indulgence · ${formatPreciseFightDuration(action.elapsedMs)}–${formatPreciseFightDuration(coverageEndMs)}`;
+          track.append(coverage);
+        }
+        const bucket = Math.round(action.elapsedMs / 250);
+        const stackIndex = stackCounts.get(bucket) ?? 0;
+        stackCounts.set(bucket, stackIndex + 1);
+        const marker = document.createElement('span');
+        marker.className = 'player-actions-marker';
+        marker.classList.add(getPlayerActionMarkerCategory(action));
+        marker.style.left = `${position}%`;
+        marker.style.setProperty('--action-offset', `${stackIndex * -5}px`);
+        marker.style.zIndex = String(4 + stackIndex);
+        marker.append(createPlayerActionIcon(action, action.elapsedMs));
+        track.append(marker);
+      }
+
+      for (const [label, elapsedMs] of [['0:50', LJ1_RAPTURE_START_MS], ['1:15', LJ1_RAPTURE_END_MS]]) {
+        const endpoint = document.createElement('span');
+        endpoint.className = `lj1-rapture-endpoint ${elapsedMs === LJ1_RAPTURE_START_MS ? 'start' : 'end'}`;
+        endpoint.textContent = label;
+        track.append(endpoint);
+      }
+      appendLj1RaptureHoverTime(track);
+      trackWrap.append(track);
+      row.append(identity, trackWrap);
+      rows.append(row);
+      visiblePulls += 1;
+    }
+
+    if (visiblePulls === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'special-views-empty';
+      empty.textContent = 'No pulls reached 1:15 without the selected WHM dying from 0:50–1:15.';
+      rows.append(empty);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
+  function appendLj1RaptureHoverTime(track) {
+    const line = document.createElement('span');
+    line.className = 'player-actions-hover-line';
+    const label = document.createElement('span');
+    label.className = 'player-actions-hover-time';
+    track.addEventListener('mousemove', (event) => {
+      const rectangle = track.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (event.clientX - rectangle.left) / rectangle.width));
+      const timestamp = LJ1_RAPTURE_START_MS
+        + ratio * (LJ1_RAPTURE_END_MS - LJ1_RAPTURE_START_MS);
+      line.style.left = `${ratio * 100}%`;
+      label.style.left = `${ratio * 100}%`;
+      label.textContent = formatPreciseFightDuration(timestamp);
+      track.classList.add('show-hover-time');
+    });
+    track.addEventListener('mouseleave', () => track.classList.remove('show-hover-time'));
+    track.append(line, label);
   }
 
   function createUptimeByPhaseTable(report, fights, playerName, gcd, metric) {
@@ -816,6 +1585,452 @@ export function createPlayerActionsOverview({
     return scroller;
   }
 
+  function createDeathRaiseTracker(report, fights, playerName, playerJob) {
+    const table = document.createElement('table');
+    table.className = 'special-views-table special-views-death-table';
+    const head = document.createElement('thead');
+    const headingRow = document.createElement('tr');
+    for (const label of ['Pull', 'Death', 'Mechanic']) {
+      const cell = document.createElement('th');
+      cell.scope = 'col';
+      cell.textContent = label;
+      headingRow.append(cell);
+    }
+    head.append(headingRow);
+    const body = document.createElement('tbody');
+    let raisedDeathCount = 0;
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const sameNamePlayers = (state?.partyMembers ?? [])
+        .filter((member) => member.name === playerName);
+      const player = sameNamePlayers.find((member) => member.job === playerJob)
+        ?? sameNamePlayers.find((member) => member.role)
+        ?? sameNamePlayers[0];
+      if (!player) continue;
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const lifeEvents = (state?.lifeEvents ?? [])
+        .filter((event) => Number(event.playerId) === Number(player.id))
+        .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+      for (let index = 0; index < lifeEvents.length; index += 1) {
+        const death = lifeEvents[index];
+        if (death.type !== 'death') continue;
+        const candidates = lifeEvents.slice(index + 1);
+        const nextDeathIndex = candidates.findIndex((event) => event.type === 'death');
+        const beforeNextDeath = nextDeathIndex >= 0 ? candidates.slice(0, nextDeathIndex) : candidates;
+        const raise = beforeNextDeath.find((event) => event.type === 'resurrect');
+        if (!raise) continue;
+        const deathMs = Number(death.timestamp) - Number(fight.startTime);
+        const mechanic = getDancingMadMechanics().reduce((latest, candidate) => {
+          const candidateMs = getEncounterRelativeTimestamp(candidate, phaseStarts);
+          if (!Number.isFinite(candidateMs) || candidateMs > deathMs) return latest;
+          if (!latest) return candidate;
+          return candidateMs > getEncounterRelativeTimestamp(latest, phaseStarts) ? candidate : latest;
+        }, null);
+        const row = document.createElement('tr');
+        const values = [
+          `Pull ${fight.id}`,
+          formatPreciseFightDuration(deathMs),
+          mechanic?.mechanic ?? '—',
+        ];
+        values.forEach((value, valueIndex) => {
+          const cell = document.createElement(valueIndex === 0 ? 'th' : 'td');
+          if (valueIndex === 0) cell.scope = 'row';
+          cell.textContent = value;
+          row.append(cell);
+        });
+        body.append(row);
+        raisedDeathCount += 1;
+        index = lifeEvents.indexOf(raise);
+      }
+    }
+    if (raisedDeathCount === 0) {
+      const row = document.createElement('tr');
+      const cell = document.createElement('td');
+      cell.colSpan = 3;
+      cell.className = 'special-views-empty';
+      cell.textContent = 'No deaths followed by an accepted raise.';
+      row.append(cell);
+      body.append(row);
+    }
+    table.append(head, body);
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-table-scroll';
+    scroller.append(table);
+    return scroller;
+  }
+
+  function createBossDotTimeline(
+    report,
+    fights,
+    playerName,
+    job,
+    bossName,
+    pixelsPerSecond,
+    phaseAnchor,
+  ) {
+    const families = PLAYER_ACTION_DOT_STATUS_FAMILIES_BY_JOB.get(job) ?? [];
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-lucid-scroll special-views-dot-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'special-views-dot-rows';
+    const legend = document.createElement('div');
+    legend.className = 'special-views-dot-legend';
+    for (const [label, className] of [
+      ['DoT uptime', 'uptime'], ['DoT downtime', 'downtime'],
+      ['Untargetable', 'untargetable'], ['Invulnerable', 'invulnerable'],
+      ['DoT up during invulnerability', 'invulnerable-uptime'],
+      ['DoT cast', 'cast'],
+    ]) {
+      const item = document.createElement('span');
+      item.className = className;
+      item.textContent = label;
+      legend.append(item);
+    }
+    rows.append(legend);
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor);
+      const fullDurationMs = getFightDuration(fight);
+      if (!Number.isFinite(anchorMs) || fullDurationMs <= anchorMs) continue;
+      const durationMs = fullDurationMs - anchorMs;
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const shiftAndClipWindows = (windows) => mergeIntervals(windows.map(([start, end]) => [
+        Math.max(0, start - anchorMs),
+        Math.min(durationMs, end - anchorMs),
+      ]));
+      const bossIds = new Set((state?.enemyActors ?? [])
+        .filter((actor) => actor.name === bossName)
+        .map((actor) => Number(actor.id)));
+      for (const event of state?.playerDebuffEvents ?? []) {
+        if (event.target === bossName) bossIds.add(Number(event.targetId));
+      }
+      const targetableWindows = mergeIntervals([...bossIds].flatMap((actorId) => (
+        buildActorTargetableWindows(
+          state?.targetabilityEvents, actorId, Number(fight.startTime), Number(fight.endTime),
+        ).map(([start, end]) => [start - Number(fight.startTime), end - Number(fight.startTime)])
+      )));
+      const effectiveTargetableWindows = targetableWindows.length > 0
+        ? targetableWindows
+        : [[0, fullDurationMs]];
+      const untargetableWindows = shiftAndClipWindows([
+        ...invertIntervals(effectiveTargetableWindows, 0, fullDurationMs),
+        ...resolveEncounterBossUntargetableWindows(
+          DANCING_MAD_ENCOUNTER_NAME,
+          bossName,
+          phaseStarts,
+          fullDurationMs,
+        ),
+      ]);
+      const invulnerabilityStatus = getBossInvulnerabilityStatus(bossName);
+      const invulnerabilityWindows = shiftAndClipWindows(buildStatusWindows(
+        (state?.enemyInvulnerabilityEvents ?? []).filter((event) => (
+          event.target === playerName
+          && String(event.ability).toLocaleLowerCase() === invulnerabilityStatus
+        )),
+        Number(fight.startTime),
+        fullDurationMs,
+      ));
+      const row = document.createElement('section');
+      row.className = 'special-views-dot-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      identity.append(pullNumber, createBestPullBadge(fight));
+      const lanes = document.createElement('div');
+      lanes.className = 'special-views-dot-lanes';
+      lanes.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+      for (const family of families) {
+        const lane = document.createElement('div');
+        lane.className = 'special-views-dot-track';
+        const familyNames = new Set(family.map((name) => name.toLocaleLowerCase()));
+        const dotWindows = buildDotWindows(
+          state?.playerDebuffEvents,
+          playerName,
+          familyNames,
+          bossIds,
+          bossName,
+          Number(fight.startTime),
+          fullDurationMs,
+        ).map((interval) => ({
+          ...interval,
+          start: Math.max(0, interval.start - anchorMs),
+          end: Math.min(durationMs, interval.end - anchorMs),
+        })).filter((interval) => interval.end > interval.start);
+        appendTimelineRange(lane, 0, durationMs, durationMs, 'downtime', 'DoT downtime');
+        for (const interval of dotWindows) {
+          appendTimelineRange(
+            lane, interval.start, interval.end, durationMs, 'uptime',
+            `${interval.ability} · ${formatPreciseFightDuration(interval.start)}–${formatPreciseFightDuration(interval.end)}`,
+          );
+        }
+        for (const [start, end] of invulnerabilityWindows) {
+          appendTimelineRange(lane, start, end, durationMs, 'invulnerable', 'Boss invulnerable');
+          for (const dot of dotWindows) {
+            const overlapStart = Math.max(start, dot.start);
+            const overlapEnd = Math.min(end, dot.end);
+            if (overlapEnd > overlapStart) {
+              appendTimelineRange(
+                lane, overlapStart, overlapEnd, durationMs, 'invulnerable-uptime',
+                `${dot.ability} active while boss is invulnerable`,
+              );
+            }
+          }
+        }
+        for (const [start, end] of untargetableWindows) {
+          appendTimelineRange(lane, start, end, durationMs, 'untargetable', 'Boss untargetable');
+        }
+        appendBossDotCastTicks(
+          lane,
+          state?.playerDebuffEvents,
+          playerName,
+          familyNames,
+          bossIds,
+          bossName,
+          Number(fight.startTime),
+          anchorMs,
+          durationMs,
+        );
+        const label = document.createElement('span');
+        label.className = 'special-views-dot-lane-label';
+        label.textContent = family.join(' / ');
+        lane.append(label);
+        appendLucidDreamingHoverTime(lane, durationMs);
+        lanes.append(lane);
+      }
+      appendSpecialTimelineMechanicTicks(lanes, fight, state, durationMs, anchorMs);
+      row.append(identity, lanes);
+      rows.append(row);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
+  function appendBossDotCastTicks(
+    lane,
+    events,
+    playerName,
+    familyNames,
+    bossIds,
+    bossName,
+    fightStart,
+    anchorMs,
+    durationMs,
+  ) {
+    for (const event of events ?? []) {
+      if (event.source !== playerName
+        || !familyNames.has(String(event.ability).toLocaleLowerCase())
+        || (!bossIds.has(Number(event.targetId)) && event.target !== bossName)
+        || !['applydebuff', 'refreshdebuff'].includes(event.eventType)) continue;
+      const elapsedMs = Number(event.timestamp) - fightStart - anchorMs;
+      if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > durationMs) continue;
+      const tick = document.createElement('span');
+      tick.className = 'special-views-dot-cast-tick';
+      tick.style.left = `${(elapsedMs / durationMs) * 100}%`;
+      tick.title = `${event.ability} on ${bossName} · ${formatPreciseFightDuration(elapsedMs)}`;
+      lane.append(tick);
+    }
+  }
+
+  function getBossInvulnerabilityStatus(bossName) {
+    const normalizedBoss = String(bossName ?? '').trim().toLocaleLowerCase();
+    if (normalizedBoss === 'chaos') return 'fated hero';
+    if (normalizedBoss === 'exdeath') return 'epic hero';
+    return '';
+  }
+
+  function buildDotWindows(events, playerName, familyNames, bossIds, bossName, fightStart, durationMs) {
+    const relevant = (events ?? []).filter((event) => event.source === playerName
+      && familyNames.has(String(event.ability).toLocaleLowerCase())
+      && (bossIds.has(Number(event.targetId)) || event.target === bossName))
+      .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+    const windows = [];
+    let open = null;
+    for (const event of relevant) {
+      const timestamp = Math.max(0, Math.min(durationMs, Number(event.timestamp) - fightStart));
+      if (event.eventType === 'removedebuff') {
+        if (open && timestamp > open.start) windows.push({ ...open, end: timestamp });
+        open = null;
+      } else if (!open) {
+        open = { start: timestamp, ability: event.ability };
+      } else {
+        open.ability = event.ability;
+      }
+    }
+    if (open && durationMs > open.start) windows.push({ ...open, end: durationMs });
+    return windows;
+  }
+
+  function buildStatusWindows(events, fightStart, durationMs) {
+    const windows = [];
+    let start = null;
+    for (const event of [...events].sort((a, b) => Number(a.timestamp) - Number(b.timestamp))) {
+      const timestamp = Math.max(0, Math.min(durationMs, Number(event.timestamp) - fightStart));
+      if (event.eventType === 'removebuff' || event.eventType === 'removedebuff') {
+        if (Number.isFinite(start) && timestamp > start) windows.push([start, timestamp]);
+        start = null;
+      } else if (!Number.isFinite(start)) {
+        start = timestamp;
+      }
+    }
+    if (Number.isFinite(start) && durationMs > start) windows.push([start, durationMs]);
+    return windows;
+  }
+
+  function invertIntervals(intervals, rangeStart, rangeEnd) {
+    const inverted = [];
+    let cursor = rangeStart;
+    for (const [start, end] of mergeIntervals(intervals)) {
+      if (start > cursor) inverted.push([cursor, Math.min(start, rangeEnd)]);
+      cursor = Math.max(cursor, end);
+    }
+    if (cursor < rangeEnd) inverted.push([cursor, rangeEnd]);
+    return inverted.filter(([start, end]) => end > start);
+  }
+
+  function mergeIntervals(intervals) {
+    const merged = [];
+    for (const [start, end] of intervals
+      .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+      .sort((first, second) => first[0] - second[0])) {
+      const previous = merged.at(-1);
+      if (previous && start <= previous[1]) previous[1] = Math.max(previous[1], end);
+      else merged.push([start, end]);
+    }
+    return merged;
+  }
+
+  function appendTimelineRange(track, start, end, durationMs, className, title) {
+    if (!(end > start) || !(durationMs > 0)) return;
+    const range = document.createElement('span');
+    range.className = `special-views-dot-range ${className}`;
+    range.style.left = `${(start / durationMs) * 100}%`;
+    range.style.width = `${((end - start) / durationMs) * 100}%`;
+    range.title = title;
+    track.append(range);
+  }
+
+  function createMitigationSpecialTimeline(
+    report,
+    fights,
+    playerName,
+    abilityName,
+    tankAssignment,
+    pixelsPerSecond,
+    phaseAnchor = 'fight',
+  ) {
+    const scroller = document.createElement('div');
+    scroller.className = 'special-views-lucid-scroll special-views-mitigation-scroll';
+    const rows = document.createElement('div');
+    rows.className = 'special-views-lucid-rows';
+    const selectedMitigations = getDancingMadMitigations().filter((mitigation) => (
+      mitigation.ability === abilityName
+    ));
+
+    for (const fight of fights) {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor);
+      const durationMs = getFightDuration(fight) - anchorMs;
+      if (!Number.isFinite(anchorMs) || durationMs <= 0) continue;
+      const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
+      const partySlots = mapPartyMembersToPlanSlots(state?.partyMembers ?? [], state?.tankSlots);
+      const assignedSlots = tankAssignment
+        ? new Set([tankAssignment])
+        : new Set(PARTY_SLOT_ORDER.filter((slot) => partySlots.get(slot)?.name === playerName));
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const windows = selectedMitigations
+        .filter((mitigation) => assignedSlots.has(mitigation.assignedTo))
+        .filter((mitigation) => {
+          const jobs = getMitigationJobs(mitigation);
+          return jobs.length === 0 || jobs.includes(player?.job);
+        })
+        .map((mitigation) => {
+          const phaseStartMs = phaseStarts.get(Number(mitigation.phase));
+          if (!Number.isFinite(phaseStartMs)) return null;
+          return {
+            mitigation,
+            startMs: phaseStartMs + Number(mitigation.startElapsedSeconds) * 1000 - anchorMs,
+            endMs: phaseStartMs + Number(mitigation.endElapsedSeconds) * 1000 - anchorMs,
+          };
+        })
+        .filter((window) => window && window.endMs >= 0 && window.startMs <= durationMs);
+
+      const row = document.createElement('section');
+      row.className = 'special-views-lucid-row special-views-mitigation-row';
+      const identity = document.createElement('div');
+      identity.className = 'special-views-lucid-pull';
+      const pullNumber = document.createElement('strong');
+      pullNumber.textContent = `Pull ${fight.id}`;
+      identity.append(pullNumber, createBestPullBadge(fight));
+      const track = document.createElement('div');
+      track.className = 'special-views-lucid-track special-views-mitigation-track';
+      track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
+
+      for (const window of windows) {
+        const clippedStart = Math.max(0, window.startMs);
+        const clippedEnd = Math.min(durationMs, window.endMs);
+        const range = document.createElement('span');
+        range.className = 'special-views-mitigation-window';
+        range.style.left = `${(clippedStart / durationMs) * 100}%`;
+        range.style.width = `${((clippedEnd - clippedStart) / durationMs) * 100}%`;
+        range.title = `${window.mitigation.nickname || window.mitigation.ability} window · ${formatPreciseFightDuration(window.startMs + anchorMs)}–${formatPreciseFightDuration(window.endMs + anchorMs)}`;
+        track.append(range);
+        for (const [timestamp, kind, label] of [
+          [window.startMs, 'start', 'Window begins'],
+          [window.endMs, 'end', 'Window ends'],
+        ]) {
+          if (timestamp < 0 || timestamp > durationMs) continue;
+          const tick = document.createElement('span');
+          tick.className = `special-views-mitigation-window-tick ${kind}`;
+          tick.style.left = `${(timestamp / durationMs) * 100}%`;
+          tick.title = `${label} · ${formatPreciseFightDuration(timestamp + anchorMs)}`;
+          tick.setAttribute('aria-label', tick.title);
+          track.append(tick);
+        }
+      }
+
+      appendSpecialTimelineMechanicTicks(track, fight, state, durationMs, anchorMs);
+      const abilityIds = new Set(selectedMitigations.map((mitigation) => Number(mitigation.abilityId)));
+      const casts = (state?.mitigationCasts ?? [])
+        .filter((cast) => cast.source === playerName && abilityIds.has(Number(cast.abilityId)))
+        .map((cast) => ({
+          cast,
+          elapsedMs: Number(cast.timestamp) - Number(fight.startTime),
+        }))
+        .filter(({ elapsedMs }) => elapsedMs >= anchorMs && elapsedMs <= anchorMs + durationMs);
+      for (const { cast, elapsedMs } of casts) {
+        const tick = document.createElement('span');
+        tick.className = 'special-views-mitigation-cast';
+        tick.style.left = `${((elapsedMs - anchorMs) / durationMs) * 100}%`;
+        tick.title = `${abilityName} · ${formatPreciseFightDuration(elapsedMs)}`;
+        tick.setAttribute('aria-label', tick.title);
+        track.append(tick);
+      }
+
+      const endLabel = document.createElement('span');
+      endLabel.className = 'special-views-lucid-end';
+      endLabel.textContent = formatFightDuration(durationMs);
+      track.append(endLabel);
+      appendLucidDreamingHoverTime(track, durationMs);
+      row.append(identity, track);
+      rows.append(row);
+    }
+    scroller.append(rows);
+    return scroller;
+  }
+
   function createSpecialActionTimeline(
     report,
     fights,
@@ -825,12 +2040,24 @@ export function createPlayerActionsOverview({
     onMinimumDurationChange,
     mode,
     afflatusDisplayMode = 'lilies',
+    phaseAnchor = 'fight',
+    gcdDurationMs = PLAYER_ACTION_BASE_GCD_MS,
   ) {
     const scroller = document.createElement('div');
     scroller.className = 'special-views-lucid-scroll';
     const rows = document.createElement('div');
     rows.className = 'special-views-lucid-rows';
-    const maximumDurationMs = Math.max(0, ...fights.map(getFightDuration));
+    const anchoredFights = fights.map((fight) => {
+      const state = getFightDetails().get(`${report.code}:${fight.id}`);
+      const anchorMs = getPlayerActionsPhaseAnchorMs(fight, state, phaseAnchor);
+      return {
+        fight,
+        state,
+        anchorMs,
+        durationMs: Number.isFinite(anchorMs) ? getFightDuration(fight) - anchorMs : Number.NaN,
+      };
+    }).filter(({ durationMs }) => durationMs > 0);
+    const maximumDurationMs = Math.max(0, ...anchoredFights.map(({ durationMs }) => durationMs));
     const maximumTrackWidth = (maximumDurationMs / 1000) * pixelsPerSecond;
     const thresholdRow = document.createElement('label');
     thresholdRow.className = 'special-views-lucid-threshold';
@@ -854,11 +2081,9 @@ export function createPlayerActionsOverview({
     thresholdControl.append(thresholdInput, thresholdValue);
     thresholdRow.append(thresholdText, thresholdControl);
     rows.append(thresholdRow);
-    for (const fight of fights) {
-      const state = getFightDetails().get(`${report.code}:${fight.id}`);
-      const durationMs = getFightDuration(fight);
-      if (!(durationMs > 0)) continue;
-      const casts = (state?.actionCasts ?? [])
+    const afflatusAttempts = [];
+    for (const { fight, state, anchorMs, durationMs } of anchoredFights) {
+      const allCasts = (state?.actionCasts ?? [])
         .filter((action) => {
           if (action.source !== playerName || action.eventType === 'begincast') return false;
           const ability = String(action.ability).toLocaleLowerCase();
@@ -870,8 +2095,14 @@ export function createPlayerActionsOverview({
           ability: String(action.ability).toLocaleLowerCase(),
           timestamp: Number(action.timestamp) - Number(fight.startTime),
         }))
-        .filter((cast) => cast.timestamp >= 0 && cast.timestamp <= durationMs)
+        .filter((cast) => cast.timestamp >= 0 && cast.timestamp <= getFightDuration(fight))
         .sort((first, second) => first.timestamp - second.timestamp);
+      const casts = allCasts
+        .filter((cast) => cast.timestamp >= anchorMs)
+        .map((cast) => ({ ...cast, timestamp: cast.timestamp - anchorMs }));
+      if (mode === 'afflatus') {
+        afflatusAttempts.push({ fight, state, durationMs, casts, allCasts, anchorMs });
+      }
       const row = document.createElement('section');
       row.className = 'special-views-lucid-row';
       row.dataset.durationMs = String(durationMs);
@@ -885,8 +2116,15 @@ export function createPlayerActionsOverview({
       track.className = 'special-views-lucid-track';
       track.style.width = `${(durationMs / 1000) * pixelsPerSecond}px`;
       if (mode === 'afflatus') {
-        appendAfflatusStateRanges(track, casts, durationMs, afflatusDisplayMode);
+        appendAfflatusStateRanges(
+          track,
+          allCasts,
+          getFightDuration(fight),
+          afflatusDisplayMode,
+          anchorMs,
+        );
       }
+      appendSpecialTimelineMechanicTicks(track, fight, state, durationMs, anchorMs);
       let coveredUntil = null;
       for (const cast of casts) {
         const castMs = cast.timestamp;
@@ -917,6 +2155,17 @@ export function createPlayerActionsOverview({
       row.append(identity, track);
       rows.append(row);
     }
+    let afflatusSummary = null;
+    if (mode === 'afflatus') {
+      afflatusSummary = createAfflatusSummaryGraphs(
+        afflatusAttempts,
+        maximumDurationMs,
+        maximumTrackWidth,
+        Number(thresholdInput.value),
+        gcdDurationMs,
+      );
+      thresholdRow.after(afflatusSummary.element);
+    }
     thresholdInput.addEventListener('input', () => {
       const thresholdMs = Number(thresholdInput.value);
       thresholdValue.textContent = formatFightDuration(thresholdMs);
@@ -926,15 +2175,462 @@ export function createPlayerActionsOverview({
       for (const row of rows.querySelectorAll('.special-views-lucid-row')) {
         row.hidden = Number(row.dataset.durationMs) < thresholdMs;
       }
+      afflatusSummary?.render(thresholdMs);
       onMinimumDurationChange(thresholdMs);
     });
     scroller.append(rows);
     return scroller;
   }
 
-  function appendAfflatusStateRanges(track, casts, durationMs, displayMode) {
+  function createAfflatusSummaryGraphs(
+    attempts,
+    maximumDurationMs,
+    maximumTrackWidth,
+    initialThresholdMs,
+    gcdDurationMs,
+  ) {
+    const element = document.createElement('div');
+    element.className = 'special-views-afflatus-summaries';
+    const density = createAfflatusSummaryRow(
+      'Lily use density',
+      'density',
+      maximumTrackWidth,
+    );
+    const sketch = createAfflatusSummaryRow(
+      'Lily gauge by pull',
+      'sketch',
+      maximumTrackWidth,
+    );
+    element.append(density.row, sketch.row);
+    const render = (thresholdMs = initialThresholdMs) => {
+      const visibleAttempts = attempts.filter(({ durationMs }) => durationMs >= thresholdMs);
+      renderAfflatusUseDensity(
+        density.graph,
+        visibleAttempts,
+        maximumDurationMs,
+        gcdDurationMs,
+      );
+      renderAfflatusGaugeSketch(
+        sketch.graph,
+        visibleAttempts,
+        maximumDurationMs,
+        maximumTrackWidth,
+      );
+    };
+    render(initialThresholdMs);
+    return { element, render };
+  }
+
+  function createAfflatusSummaryRow(labelText, kind, width) {
+    const row = document.createElement('section');
+    row.className = 'special-views-afflatus-summary-row';
+    const label = document.createElement('strong');
+    label.textContent = labelText;
+    const graph = document.createElement('div');
+    graph.className = `special-views-afflatus-summary-graph ${kind}`;
+    graph.style.width = `${width}px`;
+    row.append(label, graph);
+    return { row, graph };
+  }
+
+  function createAfflatusSummarySvg(label) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNamespace, 'svg');
+    svg.setAttribute('viewBox', '0 0 1000 120');
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    return svg;
+  }
+
+  function renderAfflatusUseDensity(
+    graph,
+    attempts,
+    maximumDurationMs,
+    gcdDurationMs,
+  ) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = createAfflatusSummarySvg('Density of lily spends across the shown pulls');
+    if (!(maximumDurationMs > 0)) {
+      graph.replaceChildren(svg);
+      return;
+    }
+    const spends = attempts.flatMap(({ casts }) => casts
+      .filter((cast) => ['Solace', 'Rapture'].includes(WHM_AFFLATUS_ACTIONS.get(cast.ability)))
+      .map((cast) => cast.timestamp))
+      .map((timestamp) => ({
+        timestamp,
+        weight: 1 / Math.max(
+          1,
+          attempts.filter(({ durationMs }) => durationMs >= timestamp).length,
+        ),
+      }));
+    const sampleCount = 501;
+    const flatRadiusMs = Math.max(1, gcdDurationMs);
+    const taperRadiusMs = flatRadiusMs * 0.5;
+    const densities = Array.from({ length: sampleCount }, (_, index) => {
+      const timestamp = (index / (sampleCount - 1)) * maximumDurationMs;
+      return spends.reduce((total, spend) => {
+        const distance = Math.abs(timestamp - spend.timestamp);
+        if (distance <= flatRadiusMs) return total + spend.weight;
+        if (distance >= flatRadiusMs + taperRadiusMs) return total;
+        const taper = 1 - (distance - flatRadiusMs) / taperRadiusMs;
+        return total + taper * spend.weight;
+      }, 0);
+    });
+    const points = densities.map((value, index) => [
+      (index / (sampleCount - 1)) * 1000,
+      112 - (Math.min(3, value) / 3) * 104,
+    ]);
+    for (const value of [1, 2, 3]) {
+      const y = 112 - (value / 3) * 104;
+      const line = document.createElementNS(svgNamespace, 'line');
+      line.classList.add('special-views-afflatus-density-guide');
+      line.setAttribute('x1', '0');
+      line.setAttribute('x2', '1000');
+      line.setAttribute('y1', String(y));
+      line.setAttribute('y2', String(y));
+      svg.append(line);
+    }
+    const area = document.createElementNS(svgNamespace, 'path');
+    area.classList.add('special-views-afflatus-density-area');
+    area.setAttribute(
+      'd',
+      `M 0 112 ${points.map(([x, y]) => `L ${x.toFixed(2)} ${y.toFixed(2)}`).join(' ')} L 1000 112 Z`,
+    );
+    svg.append(area);
+    appendPlannedLilyUsageTicks(svg, attempts, maximumDurationMs);
+    graph.replaceChildren(svg);
+    appendAfflatusDensityScale(graph);
+    appendLucidDreamingHoverTime(graph, maximumDurationMs);
+  }
+
+  function appendAfflatusDensityScale(graph) {
+    for (const value of [1, 2, 3]) {
+      const label = document.createElement('span');
+      label.className = 'special-views-afflatus-density-y-label';
+      label.textContent = String(value);
+      label.style.top = `${((112 - (value / 3) * 104) / 120) * 100}%`;
+      graph.append(label);
+    }
+  }
+
+  function resolvePlannedLilyUsageTimestamps(attempts, maximumDurationMs) {
+    if (!(maximumDurationMs > 0) || attempts.length === 0) return [];
+    const timestamps = [];
+    for (const usage of getDancingMadLilyUsages()) {
+      const resolvedTimes = attempts.map(({ fight, state, anchorMs, durationMs }) => {
+        const phaseStarts = resolveEncounterPhaseStarts(
+          DANCING_MAD_ENCOUNTER_NAME,
+          fight,
+          state?.phaseReferenceEvents ?? [],
+        );
+        const phaseStartMs = phaseStarts.get(Number(usage.phase));
+        const timestamp = phaseStartMs + Number(usage.elapsedSeconds) * 1000 - anchorMs;
+        return Number.isFinite(timestamp) && timestamp >= 0 && timestamp <= durationMs
+          ? timestamp
+          : Number.NaN;
+      }).filter(Number.isFinite);
+      if (resolvedTimes.length === 0) continue;
+      const timestamp = resolvedTimes.reduce((sum, value) => sum + value, 0) / resolvedTimes.length;
+      if (timestamp >= 0 && timestamp <= maximumDurationMs) timestamps.push(timestamp);
+    }
+    return timestamps.sort((first, second) => first - second);
+  }
+
+  function appendPlannedLilyUsageTicks(svg, attempts, maximumDurationMs) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    for (const timestamp of resolvePlannedLilyUsageTimestamps(attempts, maximumDurationMs)) {
+      const x = (timestamp / maximumDurationMs) * 1000;
+      const line = document.createElementNS(svgNamespace, 'line');
+      line.classList.add('special-views-afflatus-planned-use');
+      line.setAttribute('x1', x);
+      line.setAttribute('x2', x);
+      line.setAttribute('y1', '8');
+      line.setAttribute('y2', '112');
+      const title = document.createElementNS(svgNamespace, 'title');
+      title.textContent = `Recommended lily use · ${formatPreciseFightDuration(timestamp)}`;
+      line.append(title);
+      svg.append(line);
+    }
+  }
+
+  function createPlannedAfflatusGaugeOverlay(attempts, maximumDurationMs) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const overlay = createAfflatusSummarySvg('Recommended lily gauge trajectory');
+    overlay.classList.add('special-views-afflatus-recommended-overlay');
+    const spends = resolvePlannedLilyUsageTimestamps(attempts, maximumDurationMs);
+    const points = createAfflatusGaugePointsFromSpendTimestamps(spends, maximumDurationMs)
+      .map(([timestamp, lilies]) => [
+        (timestamp / maximumDurationMs) * 1000,
+        112 - (lilies / 3) * 104,
+      ]);
+    const path = document.createElementNS(svgNamespace, 'path');
+    path.classList.add('special-views-afflatus-recommended-line');
+    path.setAttribute(
+      'd',
+      points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' '),
+    );
+    const title = document.createElementNS(svgNamespace, 'title');
+    title.textContent = 'Recommended lily gauge from planned usages';
+    path.append(title);
+    overlay.append(path);
+    return overlay;
+  }
+
+  function renderAfflatusGaugeSketch(
+    graph,
+    attempts,
+    maximumDurationMs,
+    renderedWidth,
+  ) {
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const svg = createAfflatusSummarySvg('Smooth lily gauge traces for each shown pull');
+    const renderVersion = Number(graph.dataset.renderVersion ?? 0) + 1;
+    graph.dataset.renderVersion = String(renderVersion);
+    graph.classList.add('loading');
+    if (!(maximumDurationMs > 0)) {
+      graph.replaceChildren(svg);
+      graph.classList.remove('loading');
+      return;
+    }
+    const attemptsWithPoints = [];
+    for (const { fight, durationMs, casts, allCasts, anchorMs = 0 } of attempts) {
+      const path = document.createElementNS(svgNamespace, 'path');
+      const gaugePoints = anchorMs > 0
+        ? createAnchoredAfflatusGaugePoints(allCasts, anchorMs, durationMs)
+        : createAfflatusGaugePoints(casts, durationMs);
+      attemptsWithPoints.push({ durationMs, gaugePoints });
+      const points = gaugePoints.map(([timestamp, lilies]) => [
+        (timestamp / maximumDurationMs) * 1000,
+        112 - (lilies / 3) * 104,
+      ]);
+      path.classList.add('special-views-afflatus-gauge-line');
+      path.setAttribute(
+        'd',
+        points.map(([x, y], index) => `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`).join(' '),
+      );
+      const title = document.createElementNS(svgNamespace, 'title');
+      title.textContent = `Pull ${fight.id}`;
+      path.append(title);
+      svg.append(path);
+    }
+    const recommendedOverlay = createPlannedAfflatusGaugeOverlay(attempts, maximumDurationMs);
+    graph.replaceChildren(svg, recommendedOverlay);
+    appendLucidDreamingHoverTime(graph, maximumDurationMs);
+    void renderAfflatusGaugeDensity(
+      graph,
+      svg,
+      attemptsWithPoints,
+      maximumDurationMs,
+      renderVersion,
+      renderedWidth,
+    );
+  }
+
+  async function renderAfflatusGaugeDensity(
+    graph,
+    fallbackSvg,
+    attempts,
+    maximumDurationMs,
+    renderVersion,
+    renderedWidth,
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (Number(graph.dataset.renderVersion) !== renderVersion || !graph.isConnected) return;
+    // Match the backing raster to the rendered timeline width so one canvas
+    // pixel remains one CSS pixel at every zoom level. The original connector's
+    // center pixel plus two pixels on either side therefore always displays as 5px.
+    const width = Math.max(1, graph.clientWidth || Math.round(renderedWidth) || 1000);
+    const height = 120;
+    const density = new Float32Array(width * height);
+    const connectorDensity = new Float32Array(width * height);
+    const sigma = 4;
+    const radius = Math.ceil(sigma * 3);
+    const gaussian = Array.from({ length: radius * 2 + 1 }, (_, index) => {
+      const distance = index - radius;
+      return Math.exp(-(distance * distance) / (2 * sigma * sigma));
+    });
+    for (let startX = 0; startX < width; startX += 80) {
+      if (Number(graph.dataset.renderVersion) !== renderVersion || !graph.isConnected) return;
+      if (startX > 0 && startX % 320 === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      const endX = Math.min(width, startX + 80);
+      for (const { durationMs, gaugePoints } of attempts) {
+        for (let x = startX; x < endX; x += 1) {
+          const timestamp = (x / (width - 1)) * maximumDurationMs;
+          if (timestamp > durationMs) continue;
+          const lilies = interpolateAfflatusGauge(gaugePoints, timestamp);
+          const centerY = Math.round(112 - (lilies / 3) * 104);
+          for (let offset = -radius; offset <= radius; offset += 1) {
+            const y = centerY + offset;
+            if (y < 0 || y >= height) continue;
+            density[y * width + x] += gaussian[offset + radius];
+          }
+        }
+      }
+    }
+    // A lily spend creates two gauge points at the same timestamp: the value
+    // immediately before the spend and the value immediately after it. Sampling
+    // one gauge value per x-coordinate cannot represent that instantaneous drop,
+    // so explicitly add its vertical segment to the density raster.
+    for (const { gaugePoints } of attempts) {
+      for (let index = 1; index < gaugePoints.length; index += 1) {
+        const previous = gaugePoints[index - 1];
+        const next = gaugePoints[index];
+        if (previous[0] !== next[0] || previous[1] === next[1]) continue;
+        const centerX = Math.round((next[0] / maximumDurationMs) * (width - 1));
+        const firstY = Math.round(112 - (previous[1] / 3) * 104);
+        const lastY = Math.round(112 - (next[1] / 3) * 104);
+        const minimumY = Math.min(firstY, lastY);
+        const maximumY = Math.max(firstY, lastY);
+        for (let x = Math.max(0, centerX - 2); x <= Math.min(width - 1, centerX + 2); x += 1) {
+          for (let centerY = minimumY; centerY <= maximumY; centerY += 1) {
+            for (let offset = -radius; offset <= radius; offset += 1) {
+              const y = centerY + offset;
+              if (y < 0 || y >= height) continue;
+              connectorDensity[y * width + x] += gaussian[offset + radius];
+            }
+          }
+        }
+      }
+    }
+    if (Number(graph.dataset.renderVersion) !== renderVersion || !fallbackSvg.isConnected) return;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'special-views-afflatus-gauge-density';
+    canvas.width = width;
+    canvas.height = height;
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Smoothed additive density of lily gauge values across shown pulls');
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    const image = context.createImageData(width, height);
+    for (let index = 0; index < density.length; index += 1) {
+      const amount = density[index];
+      const connectorAmount = connectorDensity[index];
+      if (amount <= 0.002 && connectorAmount <= 0.002) continue;
+      const pixelIndex = index * 4;
+      image.data[pixelIndex] = 96;
+      image.data[pixelIndex + 1] = 165;
+      image.data[pixelIndex + 2] = 250;
+      const traceAlpha = 1 - Math.exp(-amount * 0.35);
+      const connectorAlpha = 0.3 * (1 - Math.exp(-connectorAmount * 0.35));
+      image.data[pixelIndex + 3] = Math.round(
+        255 * (1 - (1 - traceAlpha) * (1 - connectorAlpha)),
+      );
+    }
+    context.putImageData(image, 0, 0);
+    fallbackSvg.replaceWith(canvas);
+    graph.classList.remove('loading');
+  }
+
+  function interpolateAfflatusGauge(points, timestamp) {
+    let previous = points[0] ?? [0, 3];
+    for (let index = 1; index < points.length; index += 1) {
+      const next = points[index];
+      if (next[0] <= timestamp) {
+        previous = next;
+        continue;
+      }
+      if (next[0] === previous[0]) return next[1];
+      const ratio = (timestamp - previous[0]) / (next[0] - previous[0]);
+      return previous[1] + (next[1] - previous[1]) * ratio;
+    }
+    return previous[1];
+  }
+
+  function appendSpecialTimelineMechanicTicks(track, fight, state, durationMs, anchorMs = 0) {
+    const phaseStarts = resolveEncounterPhaseStarts(
+      DANCING_MAD_ENCOUNTER_NAME,
+      fight,
+      state?.phaseReferenceEvents ?? [],
+    );
+    let visibleMechanicIndex = 0;
+    for (const mechanic of getDancingMadMechanics()) {
+      const elapsedMs = getEncounterRelativeTimestamp(mechanic, phaseStarts) - anchorMs;
+      if (!Number.isFinite(elapsedMs) || elapsedMs < 0 || elapsedMs > durationMs) continue;
+      const tick = document.createElement('span');
+      tick.className = `special-views-mechanic-tick label-tier-${visibleMechanicIndex % 2}`;
+      tick.style.left = `${(elapsedMs / durationMs) * 100}%`;
+      tick.title = `${mechanic.mechanic} · ${formatPreciseFightDuration(elapsedMs)}`;
+      tick.setAttribute('aria-label', tick.title);
+      const label = document.createElement('span');
+      label.className = 'special-views-mechanic-label';
+      label.textContent = mechanic.mechanic;
+      tick.append(label);
+      track.append(tick);
+      visibleMechanicIndex += 1;
+    }
+  }
+
+  function createAfflatusGaugePoints(casts, durationMs) {
+    const spendTimestamps = casts.filter((cast) => (
+      ['Solace', 'Rapture'].includes(WHM_AFFLATUS_ACTIONS.get(cast.ability))
+    )).map((cast) => cast.timestamp);
+    return createAfflatusGaugePointsFromSpendTimestamps(spendTimestamps, durationMs);
+  }
+
+  function createAfflatusGaugePointsFromSpendTimestamps(spendTimestamps, durationMs) {
+    const points = [[0, 3]];
+    let lilies = 3;
+    let timestamp = 0;
+    const appendRegeneration = (nextTimestamp) => {
+      if (lilies < 3) {
+        const cappedAt = timestamp + (3 - lilies) * 20_000;
+        if (cappedAt < nextTimestamp) {
+          points.push([cappedAt, 3]);
+          lilies = 3;
+          timestamp = cappedAt;
+        }
+      }
+      lilies = Math.min(3, lilies + (nextTimestamp - timestamp) / 20_000);
+      points.push([nextTimestamp, lilies]);
+      timestamp = nextTimestamp;
+    };
+    for (const spendTimestamp of spendTimestamps) {
+      appendRegeneration(spendTimestamp);
+      lilies = Math.max(0, lilies - 1);
+      points.push([spendTimestamp, lilies]);
+    }
+    appendRegeneration(durationMs);
+    return points;
+  }
+
+  function createAnchoredAfflatusGaugePoints(casts, anchorMs, durationMs) {
+    const fullPoints = createAfflatusGaugePoints(casts, anchorMs + durationMs);
+    let anchorLilies = fullPoints[0]?.[1] ?? 3;
+    for (let index = 0; index < fullPoints.length; index += 1) {
+      const [timestamp, lilies] = fullPoints[index];
+      if (timestamp <= anchorMs) {
+        anchorLilies = lilies;
+        continue;
+      }
+      const previous = fullPoints[index - 1];
+      if (previous && previous[0] < anchorMs && timestamp > previous[0]) {
+        const ratio = (anchorMs - previous[0]) / (timestamp - previous[0]);
+        anchorLilies = previous[1] + (lilies - previous[1]) * ratio;
+      }
+      break;
+    }
+    return [
+      [0, anchorLilies],
+      ...fullPoints
+        .filter(([timestamp]) => timestamp > anchorMs)
+        .map(([timestamp, lilies]) => [timestamp - anchorMs, lilies]),
+    ];
+  }
+
+  function appendAfflatusStateRanges(
+    track,
+    casts,
+    fullDurationMs,
+    displayMode,
+    anchorMs = 0,
+  ) {
+    const durationMs = fullDurationMs - anchorMs;
     const events = casts.map((cast) => ({ ...cast, type: 'cast' }));
-    for (let timestamp = 20_000; timestamp < durationMs; timestamp += 20_000) {
+    for (let timestamp = 20_000; timestamp < fullDurationMs; timestamp += 20_000) {
       events.push({ timestamp, type: 'lily-generation' });
     }
     events.sort((first, second) => first.timestamp - second.timestamp
@@ -943,14 +2639,16 @@ export function createPlayerActionsOverview({
     let miseryCharges = 0;
     let rangeStart = 0;
     for (const event of events) {
-      appendAfflatusStateRange(
-        track,
-        rangeStart,
-        event.timestamp,
-        durationMs,
-        displayMode,
-        displayMode === 'misery' ? miseryCharges : lilies,
-      );
+      if (event.timestamp > anchorMs) {
+        appendAfflatusStateRange(
+          track,
+          Math.max(rangeStart, anchorMs) - anchorMs,
+          event.timestamp - anchorMs,
+          durationMs,
+          displayMode,
+          displayMode === 'misery' ? miseryCharges : lilies,
+        );
+      }
       if (event.type === 'lily-generation') {
         lilies = Math.min(3, lilies + 1);
       } else {
@@ -966,7 +2664,7 @@ export function createPlayerActionsOverview({
     }
     appendAfflatusStateRange(
       track,
-      rangeStart,
+      Math.max(rangeStart, anchorMs) - anchorMs,
       durationMs,
       durationMs,
       displayMode,
@@ -1150,7 +2848,6 @@ export function createPlayerActionsOverview({
     const visibilityCheckbox = document.createElement('input');
     visibilityCheckbox.type = 'checkbox';
     visibilityCheckbox.checked = filterState.hideUnhighlighted;
-    visibilityCheckbox.disabled = selectedAbilityIds.size === 0;
     visibilityCheckbox.setAttribute('aria-label', 'Hide unhighlighted actions');
     visibilityLabel.append(visibilityCheckbox, 'Hide unhighlighted actions');
     form.append(searchWrap, visibilityLabel);
@@ -1170,9 +2867,7 @@ export function createPlayerActionsOverview({
         remove.setAttribute('aria-label', `Remove ${ability.name}`);
         remove.addEventListener('click', () => {
           selectedAbilityIds.delete(ability.id);
-          if (selectedAbilityIds.size === 0) filterState.hideUnhighlighted = false;
           visibilityCheckbox.checked = filterState.hideUnhighlighted;
-          visibilityCheckbox.disabled = selectedAbilityIds.size === 0;
           renderSelected();
           onChange();
         });
@@ -1655,7 +3350,13 @@ export function createPlayerActionsOverview({
     const fightStart = Number(fight.startTime);
     const fightDuration = getFightDuration(fight);
     if (!Number.isFinite(fightStart) || fightDuration <= 0) {
-      return { gcdPercent: null, dotPercent: null };
+      return {
+        gcdPercent: null,
+        dotPercent: null,
+        gcdDowntimeWindows: [],
+        untargetableWindows: [],
+        deadWindows: [],
+      };
     }
     // Uptime describes only the slice currently shown in the timeline, not the whole pull.
     const rangeStartMs = Math.max(0, Number(shownStartMs) || 0);
@@ -1664,11 +3365,40 @@ export function createPlayerActionsOverview({
       Number.isFinite(Number(shownEndMs)) ? Number(shownEndMs) : fightDuration,
     );
     const rangeDurationMs = rangeEndMs - rangeStartMs;
-    if (rangeDurationMs <= 0) return { gcdPercent: null, dotPercent: null };
+    if (rangeDurationMs <= 0) {
+      return {
+        gcdPercent: null,
+        dotPercent: null,
+        gcdDowntimeWindows: [],
+        untargetableWindows: [],
+        deadWindows: [],
+      };
+    }
     const player = (state?.partyMembers ?? []).find((member) => member.name === playerName);
     const actions = (state?.actionCasts ?? []).filter((action) => action.source === playerName);
-    const untargetableWindows = buildGlobalUntargetableWindows(
+    const phaseStarts = resolveEncounterPhaseStarts(
+      DANCING_MAD_ENCOUNTER_NAME,
+      fight,
+      state?.phaseReferenceEvents ?? [],
+    );
+    const observedUntargetableWindows = buildGlobalUntargetableWindows(
       state?.targetabilityEvents,
+      fightStart,
+      fightStart + fightDuration,
+    ).map(([start, end]) => [start - fightStart, end - fightStart]);
+    const configuredTransitionWindows = resolveEncounterTransitionDowntime(
+      DANCING_MAD_ENCOUNTER_NAME,
+      phaseStarts,
+      fightDuration,
+    );
+    const untargetableWindows = [
+      ...observedUntargetableWindows,
+      ...configuredTransitionWindows,
+    ];
+    const deadWindows = buildPlayerDeadWindows(
+      state?.lifeEvents,
+      actions,
+      player,
       fightStart,
       fightStart + fightDuration,
     ).map(([start, end]) => [start - fightStart, end - fightStart]);
@@ -1722,6 +3452,13 @@ export function createPlayerActionsOverview({
     const gcdPercent = gcdIntervals.length > 0 && actionableDurationMs > 0
       ? Math.min(100, (gcdOccupiedMs / actionableDurationMs) * 100)
       : null;
+    const gcdDowntimeWindows = gcdIntervals.length > 0
+      ? buildUncoveredIntervals(
+        [...gcdIntervals, ...untargetableWindows, ...deadWindows],
+        rangeStartMs,
+        rangeEndMs,
+      )
+      : [];
     const dotPercent = calculatePlayerDotUptimePercent(
       state?.playerDebuffEvents,
       playerName,
@@ -1732,7 +3469,13 @@ export function createPlayerActionsOverview({
       rangeEndMs,
       state?.targetabilityEvents,
     );
-    return { gcdPercent, dotPercent };
+    return {
+      gcdPercent,
+      dotPercent,
+      gcdDowntimeWindows,
+      untargetableWindows,
+      deadWindows,
+    };
   }
 
   function calculatePlayerDotUptimePercent(
@@ -1821,7 +3564,9 @@ export function createPlayerActionsOverview({
     const actorStates = new Map();
     const windows = [];
     let windowStart = null;
-    for (const event of events ?? []) {
+    const orderedEvents = [...(events ?? [])]
+      .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+    for (const event of orderedEvents) {
       const timestamp = Math.max(fightStart, Math.min(fightEnd, Number(event.timestamp)));
       if (!Number.isFinite(timestamp) || !Number.isFinite(Number(event.actorId))) continue;
       const wasGloballyUntargetable = actorStates.size > 0
@@ -1839,13 +3584,47 @@ export function createPlayerActionsOverview({
     return windows.filter(([start, end]) => end > start);
   }
 
+  function buildPlayerDeadWindows(lifeEvents, actions, player, fightStart, fightEnd) {
+    if (!Number.isFinite(Number(player?.id))) return [];
+    const lifeTransitions = (lifeEvents ?? [])
+      .filter((event) => Number(event.playerId) === Number(player.id));
+    // FFLogs does not consistently emit a resurrect event. A later action from
+    // the same player is definitive proof that their dead interval has ended.
+    const proofOfLife = (actions ?? [])
+      .filter((action) => Number(action.sourceId) === Number(player.id)
+        || action.source === player.name)
+      .map((action) => ({ type: 'alive', timestamp: Number(action.timestamp) }));
+    const transitions = [...lifeTransitions, ...proofOfLife]
+      .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
+    const windows = [];
+    let deathStart = null;
+    for (const event of transitions) {
+      const timestamp = Math.max(fightStart, Math.min(fightEnd, Number(event.timestamp)));
+      if (!Number.isFinite(timestamp)) continue;
+      if (event.type === 'death' && !Number.isFinite(deathStart)) {
+        deathStart = timestamp;
+      } else if (['resurrect', 'alive'].includes(event.type) && Number.isFinite(deathStart)) {
+        if (timestamp > deathStart) windows.push([deathStart, timestamp]);
+        deathStart = null;
+      }
+    }
+    if (Number.isFinite(deathStart) && fightEnd > deathStart) {
+      windows.push([deathStart, fightEnd]);
+    }
+    return windows;
+  }
+
   function buildActorTargetableWindows(events, actorId, fightStart, fightEnd) {
     const actorEvents = (events ?? [])
       .filter((event) => Number(event.actorId) === Number(actorId))
       .sort((first, second) => Number(first.timestamp) - Number(second.timestamp));
     if (actorEvents.length === 0) return [];
     const windows = [];
-    let isTargetable = actorEvents[0].isTargetable === false;
+    // A targetability update describes the new state. Infer the state before the
+    // first update as its opposite: a first `false` closes a window that began at
+    // pull start, while a first `true` opens a window at that event's timestamp.
+    const wasTargetableBeforeFirstUpdate = actorEvents[0].isTargetable === false;
+    let isTargetable = wasTargetableBeforeFirstUpdate;
     let windowStart = isTargetable ? fightStart : null;
     for (const event of actorEvents) {
       const timestamp = Math.max(fightStart, Math.min(fightEnd, Number(event.timestamp)));
@@ -1906,6 +3685,22 @@ export function createPlayerActionsOverview({
     return duration;
   }
 
+  function buildUncoveredIntervals(intervals, minimum, maximum) {
+    const covered = intervals
+      .map(([start, end]) => [Math.max(minimum, start), Math.min(maximum, end)])
+      .filter(([start, end]) => Number.isFinite(start) && Number.isFinite(end) && end > start)
+      .sort((first, second) => first[0] - second[0] || first[1] - second[1]);
+    const uncovered = [];
+    let cursor = minimum;
+    for (const [start, end] of covered) {
+      if (start > cursor) uncovered.push([cursor, start]);
+      cursor = Math.max(cursor, end);
+      if (cursor >= maximum) break;
+    }
+    if (cursor < maximum) uncovered.push([cursor, maximum]);
+    return uncovered;
+  }
+
   function createPlayerActionUptimeMetrics({ gcdPercent, dotPercent }) {
     const wrapper = document.createElement('span');
     wrapper.className = 'player-actions-uptime-metrics';
@@ -1932,6 +3727,7 @@ export function createPlayerActionsOverview({
     displayAnchorMs = 0,
     abilityFilter = { selectedAbilityIds: new Set(), hideUnhighlighted: false },
     gcd = null,
+    showGcdDowntime = false,
   ) {
     const row = document.createElement('section');
     row.className = 'player-actions-row';
@@ -1953,6 +3749,28 @@ export function createPlayerActionsOverview({
     trackWrap.className = 'player-actions-track-wrap';
     const track = document.createElement('div');
     track.className = 'player-actions-track';
+    if (showGcdDowntime) {
+      const appendRegion = (regionType, regionLabel, [regionStartMs, regionEndMs]) => {
+        const region = document.createElement('span');
+        region.className = `player-actions-gcd-region ${regionType}`;
+        const clippedStartMs = Math.max(startMs, regionStartMs);
+        const clippedEndMs = Math.min(endMs, regionEndMs);
+        if (clippedEndMs <= clippedStartMs) return;
+        region.style.left = `${((clippedStartMs - startMs) / (endMs - startMs)) * 100}%`;
+        region.style.width = `${((clippedEndMs - clippedStartMs) / (endMs - startMs)) * 100}%`;
+        region.title = `${regionLabel} · ${formatPreciseFightDuration(clippedStartMs - displayAnchorMs)}–${formatPreciseFightDuration(clippedEndMs - displayAnchorMs)}`;
+        track.append(region);
+      };
+      for (const window of uptimeMetrics.gcdDowntimeWindows) {
+        appendRegion('downtime', 'GCD downtime', window);
+      }
+      for (const window of uptimeMetrics.untargetableWindows) {
+        appendRegion('untargetable', 'Untargetable', window);
+      }
+      for (const window of uptimeMetrics.deadWindows) {
+        appendRegion('dead', 'Dead', window);
+      }
+    }
     const playerActions = (state?.actionCasts ?? []).filter((cast) => cast.source === playerName);
     const { visibleActions, castSpans } = pairPlayerActionEvents(playerActions);
     const actions = visibleActions.filter((cast) => {
@@ -2034,6 +3852,55 @@ export function createPlayerActionsOverview({
     track.append(hoverLine, hoverTime);
     trackWrap.append(track);
     row.append(identity, trackWrap);
+    return row;
+  }
+
+  function createPlayerActionTimelinePreview(
+    report,
+    fight,
+    playerName,
+    startMs,
+    endMs,
+    { windowStartMs = null, windowEndMs = null } = {},
+  ) {
+    const fightDuration = getFightDuration(fight);
+    const clippedStartMs = Math.max(0, Number(startMs) || 0);
+    const clippedEndMs = Math.min(fightDuration, Number(endMs) || fightDuration);
+    const row = createPlayerActionsPullRow(
+      report,
+      fight,
+      playerName,
+      clippedStartMs,
+      clippedEndMs,
+      0,
+      { selectedAbilityIds: new Set(), hideUnhighlighted: false },
+      null,
+      true,
+    );
+    row.classList.add('mitigation-player-actions-row');
+    row.style.setProperty('--player-actions-identity-width', '132px');
+    row.style.setProperty('--player-actions-track-width', '560px');
+    const identity = row.querySelector('.player-actions-pull');
+    identity?.replaceChildren();
+    const player = document.createElement('strong');
+    player.textContent = playerName;
+    const range = document.createElement('span');
+    range.textContent = `${formatPreciseFightDuration(clippedStartMs)}–${formatPreciseFightDuration(clippedEndMs)}`;
+    identity?.append(player, range);
+    const track = row.querySelector('.player-actions-track');
+    const appendWindowTick = (timestamp, kind, label) => {
+      const elapsedMs = Number(timestamp);
+      if (!track || !Number.isFinite(elapsedMs)
+        || elapsedMs < clippedStartMs || elapsedMs > clippedEndMs) return;
+      const tick = document.createElement('span');
+      tick.className = `mitigation-window-tick ${kind}`;
+      tick.style.left = `${((elapsedMs - clippedStartMs) / (clippedEndMs - clippedStartMs)) * 100}%`;
+      tick.title = `${label} · ${formatPreciseFightDuration(elapsedMs)}`;
+      tick.setAttribute('aria-label', tick.title);
+      track.append(tick);
+    };
+    appendWindowTick(windowStartMs, 'start', 'Window begins');
+    appendWindowTick(windowEndMs, 'end', 'Window ends');
     return row;
   }
   
@@ -2154,6 +4021,7 @@ export function createPlayerActionsOverview({
   
   return {
     clearSpecialHardcodedViewState,
+    createPlayerActionTimelinePreview,
     showReportPlayerActionsOverview,
     showSpecialHardcodedViews,
   };

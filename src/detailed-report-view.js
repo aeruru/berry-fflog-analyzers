@@ -6,13 +6,17 @@ export function createDetailedReportViewModule(dependencies) {
     createFightDetailsPanel,
     createFightMitigationPanel,
     createLinkGroup,
+    DANCING_MAD_ENCOUNTER_NAME,
     formatFightDuration,
     formatFightStartTime,
     formatReportDateRange,
     getBestDmuPull,
+    getDancingMadMechanic,
+    getDancingMadPhase,
     getFightDetails,
     getFightDuration,
     getIsShiftHeld,
+    getLinkedReportView,
     getOpenFightDetailKeys,
     getOpenFightMitigationKeys,
     getPullColorClass,
@@ -22,6 +26,7 @@ export function createDetailedReportViewModule(dependencies) {
     reloadFightDetails,
     reloadSelectedReport,
     renderLookupResult,
+    resolveEncounterPhaseStarts,
     setSelectedReportPhase,
     showReportMitigationHistoryOverview,
     showReportPlayerActionsOverview,
@@ -29,11 +34,34 @@ export function createDetailedReportViewModule(dependencies) {
     toggleFightDetails,
     toggleFightMitigations,
     updateSelectedReportReloadButton,
+    updateNavigationQuery,
   } = dependencies;
+  // Session-only report navigation. These maps intentionally die on reload:
+  // each report remembers its last shell view and phase filter, while the
+  // individual view modules retain their own detailed controls in memory.
+  const selectedViewByReport = new Map();
+  const selectedPhaseByReport = new Map();
+  const reportViewAliases = new Map([
+    ['pull summaries', 'pull-summaries'],
+    ['pull-summaries', 'pull-summaries'],
+    ['all mit graphs', 'mitigation-graphs'],
+    ['mitigation-graphs', 'mitigation-graphs'],
+    ['player actions per pull', 'player-actions'],
+    ['player-actions', 'player-actions'],
+    ['special hardcoded views', 'special-views'],
+    ['special-views', 'special-views'],
+  ]);
+
+  function getInitialReportView(reportCode) {
+    const linkedView = String(getLinkedReportView?.(reportCode) ?? '').trim().toLowerCase();
+    return reportViewAliases.get(linkedView) ?? 'pull-summaries';
+  }
 
   function createDetailedReportView(report) {
     const article = document.createElement('article');
     article.className = 'detailed-report-card';
+    const selectedPhase = selectedPhaseByReport.get(report.code) ?? 'all';
+    setSelectedReportPhase(selectedPhase);
   
     const fights = report.fights.filter(isDmuPull)
       .sort((first, second) => Number(second.startTime) - Number(first.startTime));
@@ -73,34 +101,35 @@ export function createDetailedReportViewModule(dependencies) {
     for (let phase = 1; phase <= 5; phase += 1) {
       phaseFilter.append(new Option(`Phase ${phase} wipes`, String(phase)));
     }
-    phaseFilter.value = getSelectedReportPhase();
+    phaseFilter.value = selectedPhase;
     phaseFilter.addEventListener('change', () => {
+      selectedPhaseByReport.set(report.code, phaseFilter.value);
       setSelectedReportPhase(phaseFilter.value);
       renderLookupResult();
     });
   
-    const mitigationOverviewButton = document.createElement('button');
-    mitigationOverviewButton.className = 'report-mitigation-overview-button';
-    mitigationOverviewButton.type = 'button';
-    mitigationOverviewButton.textContent = 'View all mit graphs';
-    mitigationOverviewButton.addEventListener('click', () => {
-      showReportMitigationHistoryOverview(report, mitigationOverviewButton);
+    const viewSelect = document.createElement('select');
+    viewSelect.className = 'report-view-select';
+    viewSelect.setAttribute('aria-label', 'Report view');
+    viewSelect.append(
+      new Option('Pull Summaries', 'pull-summaries'),
+      new Option('All Mit Graphs', 'mitigation-graphs'),
+      new Option('Player Actions per Pull', 'player-actions'),
+      new Option('Special Hardcoded Views', 'special-views'),
+    );
+    viewSelect.value = selectedViewByReport.get(report.code) ?? getInitialReportView(report.code);
+    selectedViewByReport.set(report.code, viewSelect.value);
+    updateNavigationQuery({
+      report: report.code,
+      view: viewSelect.options[viewSelect.selectedIndex].text,
     });
-  
-    const playerActionsButton = document.createElement('button');
-    playerActionsButton.className = 'report-player-actions-button';
-    playerActionsButton.type = 'button';
-    playerActionsButton.textContent = 'View player actions';
-    playerActionsButton.addEventListener('click', () => {
-      showReportPlayerActionsOverview(report, playerActionsButton);
-    });
-  
-    const specialViewsButton = document.createElement('button');
-    specialViewsButton.className = 'report-special-views-button';
-    specialViewsButton.type = 'button';
-    specialViewsButton.textContent = 'Special hardcoded views';
-    specialViewsButton.addEventListener('click', () => {
-      showSpecialHardcodedViews(report, specialViewsButton);
+    viewSelect.addEventListener('change', () => {
+      selectedViewByReport.set(report.code, viewSelect.value);
+      updateNavigationQuery({
+        report: report.code,
+        view: viewSelect.options[viewSelect.selectedIndex].text,
+      });
+      renderLookupResult();
     });
   
     const fightCount = document.createElement('span');
@@ -117,29 +146,48 @@ export function createDetailedReportViewModule(dependencies) {
     actions.append(
       reloadButton,
       phaseFilter,
-      mitigationOverviewButton,
-      playerActionsButton,
-      specialViewsButton,
+      viewSelect,
       pullSummary,
     );
     summary.append(info, actions);
   
-    const fightList = document.createElement('div');
-    fightList.className = 'detailed-fight-list';
-    if (visibleFights.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'detailed-empty-state';
-      empty.textContent = getSelectedReportPhase() === 'all'
-        ? 'This report does not include DMU fight data.'
-        : getSelectedReportPhase() === 'clears'
-          ? 'No clears found in this report.'
-          : `No wipes ended during Phase ${getSelectedReportPhase()} in this report.`;
-      fightList.append(empty);
+    const viewHost = document.createElement('div');
+    viewHost.className = 'report-view-content';
+    const selectedView = viewSelect.value;
+    if (selectedView === 'pull-summaries') {
+      const fightList = document.createElement('div');
+      fightList.className = 'detailed-fight-list';
+      if (visibleFights.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'detailed-empty-state';
+        empty.textContent = getSelectedReportPhase() === 'all'
+          ? 'This report does not include DMU fight data.'
+          : getSelectedReportPhase() === 'clears'
+            ? 'No clears found in this report.'
+            : `No wipes ended during Phase ${getSelectedReportPhase()} in this report.`;
+        fightList.append(empty);
+      } else {
+        fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
+      }
+      viewHost.append(fightList);
     } else {
-      fightList.append(...visibleFights.map((fight) => createDetailedFightCard(report, fight, highlightedFight)));
+      const loading = document.createElement('p');
+      loading.className = 'detailed-empty-state';
+      loading.textContent = 'Loading selected report view…';
+      viewHost.append(loading);
+      queueMicrotask(() => {
+        if (!viewHost.isConnected) return;
+        if (selectedView === 'mitigation-graphs') {
+          void showReportMitigationHistoryOverview(report, viewSelect, viewHost);
+        } else if (selectedView === 'player-actions') {
+          void showReportPlayerActionsOverview(report, viewSelect, viewHost);
+        } else if (selectedView === 'special-views') {
+          void showSpecialHardcodedViews(report, viewSelect, viewHost);
+        }
+      });
     }
   
-    article.append(summary, fightList);
+    article.append(summary, viewHost);
     return article;
   }
   
@@ -309,7 +357,25 @@ export function createDetailedReportViewModule(dependencies) {
     const start = document.createElement('span');
     start.textContent = formatFightStartTime(report.startTime, fight.startTime);
     const duration = document.createElement('span');
-    duration.textContent = formatFightDuration(getFightDuration(fight));
+    const fightDurationMs = getFightDuration(fight);
+    duration.textContent = formatFightDuration(fightDurationMs);
+    if (!fight.kill && !fight.lastPhaseIsIntermission) {
+      const state = getFightDetails().get(detailKey);
+      const phaseStarts = resolveEncounterPhaseStarts(
+        DANCING_MAD_ENCOUNTER_NAME,
+        fight,
+        state?.phaseReferenceEvents ?? [],
+      );
+      const endingPhase = getDancingMadPhase(fightDurationMs, phaseStarts);
+      const reportedPhase = Math.max(1, Number(fight.lastPhase) || 1);
+      if (endingPhase === reportedPhase && Number.isFinite(phaseStarts.get(reportedPhase))) {
+        const mechanic = getDancingMadMechanic(fightDurationMs, phaseStarts, reportedPhase);
+        if (mechanic?.mechanic) {
+          duration.textContent += ` · ${mechanic.mechanic}`;
+          duration.title = `Wiped during ${mechanic.mechanic}`;
+        }
+      }
+    }
     const health = document.createElement('strong');
     health.className = isHighlighted ? 'highlighted' : '';
     health.textContent = `${bossRemaining.toFixed(1)}% remaining`;

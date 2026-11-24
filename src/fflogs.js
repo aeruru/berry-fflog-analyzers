@@ -188,8 +188,10 @@ export async function fetchFightEventDetails(
   const phaseEventFilters = phaseEventReferences.map((reference) => {
     const eventType = String(reference.eventType ?? '').replace(/\s+/g, '').toLowerCase();
     const ability = escapeFflogsFilterString(reference.ability);
+    const target = escapeFflogsFilterString(reference.target);
     const conditions = [`type = "${eventType}"`];
     if (ability) conditions.push(`ability.name = "${ability}"`);
+    if (target) conditions.push(`target.name = "${target}"`);
     return `(${conditions.join(' AND ')})`;
   });
   const assignmentFilters = [
@@ -205,12 +207,18 @@ export async function fetchFightEventDetails(
     `(type = "refreshbuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
     `(type = "removebuff" AND ability.name = "${escapeFflogsFilterString(abilityName)}")`,
   ]);
+  const bossInvulnerabilityFilters = ['Epic Hero', 'Fated Hero'].flatMap((abilityName) => [
+    `(type = "applydebuff" AND ability.name = "${abilityName}")`,
+    `(type = "refreshdebuff" AND ability.name = "${abilityName}")`,
+    `(type = "removedebuff" AND ability.name = "${abilityName}")`,
+  ]);
   const filterExpression = [
     BASE_FIGHT_EVENT_FILTER,
     ...mitigationFilters,
     ...phaseEventFilters,
     ...assignmentFilters,
     ...deathCauseBuffFilters,
+    ...bossInvulnerabilityFilters,
   ].join(' OR ');
   let report = null;
   let eventEndTime = null;

@@ -2,9 +2,12 @@
 export function createEncounterTiming({ getDefinitions, getMechanics }) {
   function getEncounterEventReferences(encounterName) {
     return (getDefinitions().get(encounterName)?.phases ?? [])
-      .filter((definition) => definition.start?.type === 'event')
-      .map((definition) => definition.start.event)
-      .filter(Boolean);
+      .flatMap((definition) => {
+        const event = definition.start?.event;
+        if (!event) return [];
+        const eventTypes = event.eventTypes ?? [event.eventType];
+        return eventTypes.filter(Boolean).map((eventType) => ({ ...event, eventType }));
+      });
   }
 
   function normalizeEventType(eventType) {
@@ -27,6 +30,27 @@ export function createEncounterTiming({ getDefinitions, getMechanics }) {
       if (start.type === 'fixed') {
         const offsetMs = Number(start.seconds) * 1000;
         if (Number.isFinite(offsetMs)) phaseStarts.set(phase, relativeStartMs + offsetMs);
+        continue;
+      }
+
+      if (start.type === 'targetedEventAfterMechanic') {
+        const reference = start.event ?? {};
+        const mechanic = getMechanics().find((candidate) => (
+          Number(candidate.phase) === relativePhase
+          && candidate.mechanic === start.mechanic
+        ));
+        const thresholdMs = relativeStartMs
+          + (Number(mechanic?.elapsedSeconds) + Number(start.delaySeconds ?? 0)) * 1000;
+        const eventTypes = new Set((reference.eventTypes ?? [reference.eventType])
+          .map(normalizeEventType));
+        const matchingElapsedTimes = phaseReferenceEvents
+          .filter((event) => eventTypes.has(event.eventType)
+            && (!reference.target || event.target === reference.target))
+          .map((event) => Number(event.timestamp) - pullStartTimestamp)
+          .filter((elapsedMs) => Number.isFinite(elapsedMs) && elapsedMs >= thresholdMs);
+        if (matchingElapsedTimes.length > 0) {
+          phaseStarts.set(phase, Math.min(...matchingElapsedTimes));
+        }
         continue;
       }
 
@@ -62,6 +86,53 @@ export function createEncounterTiming({ getDefinitions, getMechanics }) {
     return phase;
   }
 
+  function resolveEncounterTransitionDowntime(encounterName, phaseStarts, fightEndMs) {
+    const definitions = getDefinitions().get(encounterName)?.phases ?? [];
+    const windows = [];
+    for (const definition of definitions) {
+      const phase = Number(definition.phase);
+      const phaseStartMs = phaseStarts.get(phase);
+      const targetableEndSeconds = Number(definition.targetableEndSeconds);
+      if (!Number.isFinite(phaseStartMs) || !Number.isFinite(targetableEndSeconds)) continue;
+      const nextPhaseStartMs = phaseStarts.get(phase + 1);
+      const endMs = Number.isFinite(nextPhaseStartMs) ? nextPhaseStartMs : fightEndMs;
+      const startMs = phaseStartMs + targetableEndSeconds * 1000;
+      if (Number.isFinite(endMs) && endMs > startMs) windows.push([startMs, endMs]);
+    }
+    return windows;
+  }
+
+  function resolveEncounterBossUntargetableWindows(
+    encounterName,
+    bossName,
+    phaseStarts,
+    fightEndMs,
+  ) {
+    const normalizedBossName = String(bossName ?? '').trim().toLocaleLowerCase();
+    const definitions = getDefinitions().get(encounterName)?.phases ?? [];
+    const windows = [];
+    for (const definition of definitions) {
+      const isUntargetable = (definition.untargetableBosses ?? []).some((candidate) => (
+        String(candidate).trim().toLocaleLowerCase() === normalizedBossName
+      ));
+      const phase = Number(definition.phase);
+      const phaseStartMs = phaseStarts.get(phase);
+      const nextPhaseStartMs = phaseStarts.get(phase + 1);
+      const endMs = Number.isFinite(nextPhaseStartMs) ? nextPhaseStartMs : fightEndMs;
+      const targetableEndSeconds = Number(definition.targetableEndSeconds);
+      if (!isUntargetable && !Number.isFinite(targetableEndSeconds)) continue;
+      const startMs = isUntargetable
+        ? phaseStartMs
+        : phaseStartMs + targetableEndSeconds * 1000;
+      // A phase-level targetable end describes transition downtime for every
+      // boss; a named untargetable boss covers the entire phase.
+      if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+        windows.push([startMs, endMs]);
+      }
+    }
+    return windows;
+  }
+
   function getEncounterRelativeTimestamp(entry, phaseStarts) {
     const phaseStartMs = phaseStarts.get(Number(entry.phase));
     const relativeMs = Number(entry.elapsedSeconds) * 1000;
@@ -90,6 +161,8 @@ export function createEncounterTiming({ getDefinitions, getMechanics }) {
     getEncounterEventReferences,
     getEncounterRelativeTimestamp,
     normalizeEventType,
+    resolveEncounterBossUntargetableWindows,
     resolveEncounterPhaseStarts,
+    resolveEncounterTransitionDowntime,
   };
 }

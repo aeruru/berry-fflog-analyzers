@@ -3,6 +3,7 @@ export function createMitigationHistory(dependencies) {
   const {
     PARTY_SLOT_ORDER,
     createBestPullBadge,
+    createPlayerActionTimelinePreview,
     createMitigationAbilityIcon,
     filterReportFightsByOutcome,
     formatFightDuration,
@@ -17,9 +18,11 @@ export function createMitigationHistory(dependencies) {
     updateWithSmoothHeight,
   } = dependencies;
   const pinnedMitigationHistoryZoomPreviews = [];
+  let openMitigationActionPreview = null;
   let mitigationHistoryPopupId = 0;
 
-  async function showReportMitigationHistoryOverview(report, button) {
+  async function showReportMitigationHistoryOverview(report, button, host = null) {
+    const isEmbedded = Boolean(host);
     const phaseFilter = getSelectedReportPhase();
     const filteredReport = {
       ...report,
@@ -31,8 +34,9 @@ export function createMitigationHistory(dependencies) {
         || PARTY_SLOT_ORDER.indexOf(first.assignedTo) - PARTY_SLOT_ORDER.indexOf(second.assignedTo)
         || String(first.nickname ?? first.ability).localeCompare(String(second.nickname ?? second.ability)));
   
-    const dialog = document.createElement('dialog');
+    const dialog = document.createElement(isEmbedded ? 'section' : 'dialog');
     dialog.className = 'mitigation-overview-dialog';
+    if (isEmbedded) dialog.classList.add('embedded-report-overview');
     dialog.setAttribute('aria-labelledby', 'mitigation-overview-title');
   
     const header = document.createElement('div');
@@ -40,12 +44,15 @@ export function createMitigationHistory(dependencies) {
     const heading = document.createElement('h3');
     heading.id = 'mitigation-overview-title';
     heading.textContent = 'All mitigations';
-    const closeButton = document.createElement('button');
-    closeButton.className = 'mitigation-overview-close';
-    closeButton.type = 'button';
-    closeButton.textContent = '×';
-    closeButton.addEventListener('click', () => dialog.close());
-    header.append(heading, closeButton);
+    header.append(heading);
+    if (!isEmbedded) {
+      const closeButton = document.createElement('button');
+      closeButton.className = 'mitigation-overview-close';
+      closeButton.type = 'button';
+      closeButton.textContent = '×';
+      closeButton.addEventListener('click', () => dialog.close());
+      header.append(closeButton);
+    }
   
     const content = document.createElement('div');
     content.className = 'mitigation-overview-content';
@@ -59,16 +66,20 @@ export function createMitigationHistory(dependencies) {
     loading.textContent = `Loading mitigation histories for ${phaseFilterLabel.toLowerCase()}…`;
     content.append(loading);
     dialog.append(header, content);
-    document.body.append(dialog);
-    button.disabled = true;
-    dialog.addEventListener('close', () => {
-      button.disabled = false;
-      dialog.remove();
-    }, { once: true });
-    dialog.addEventListener('click', (event) => {
-      if (event.target === dialog) dialog.close();
-    });
-    dialog.showModal();
+    if (isEmbedded) {
+      host.replaceChildren(dialog);
+    } else {
+      document.body.append(dialog);
+      button.disabled = true;
+      dialog.addEventListener('close', () => {
+        button.disabled = false;
+        dialog.remove();
+      }, { once: true });
+      dialog.addEventListener('click', (event) => {
+        if (event.target === dialog) dialog.close();
+      });
+      dialog.showModal();
+    }
   
     try {
       const configuredRoles = PARTY_SLOT_ORDER.filter((role) =>
@@ -84,7 +95,8 @@ export function createMitigationHistory(dependencies) {
       const strip = document.createElement('div');
       strip.className = 'mitigation-overview-strip';
       strip.setAttribute('role', 'tabpanel');
-      const loadedHistories = [];
+      const loadedHistories = new Map();
+      const roleLoadPromises = new Map();
       const mitigationOrder = new Map(mitigations.map((mitigation, index) =>
         [mitigationIdentity(mitigation), index]));
   
@@ -108,7 +120,7 @@ export function createMitigationHistory(dependencies) {
           ?? Number(mitigation.endElapsedSeconds) * 1000;
         details.textContent = `P${mitigation.phase} · ${mitigation.assignedTo} · ${formatFightDuration(startMs)}–${formatFightDuration(endMs)}`;
         cardHeader.append(title, details);
-        card.append(cardHeader, createMitigationHistorySummary(rows), createMitigationHistoryTable(rows));
+        card.append(cardHeader, createMitigationHistorySummary(rows), createMitigationHistoryTable(rows, report));
         return card;
       };
   
@@ -118,7 +130,7 @@ export function createMitigationHistory(dependencies) {
           tab.setAttribute('aria-selected', String(selected));
           tab.tabIndex = selected ? 0 : -1;
         });
-        strip.replaceChildren(...loadedHistories
+        strip.replaceChildren(...[...loadedHistories.values()]
           .filter(({ mitigation }) => activeRole === 'all' || mitigation.assignedTo === activeRole)
           .sort((first, second) => mitigationOrder.get(mitigationIdentity(first.mitigation))
             - mitigationOrder.get(mitigationIdentity(second.mitigation)))
@@ -130,6 +142,50 @@ export function createMitigationHistory(dependencies) {
         const nextCard = [...strip.children]
           .find((candidate) => Number(candidate.dataset.mitigationOrder) > order);
         strip.insertBefore(card, nextCard ?? null);
+      };
+
+      const phaseFilterNotice = document.createElement('p');
+      phaseFilterNotice.className = 'mitigation-overview-filter-notice';
+      const getRoleMitigations = (role) => role === 'all'
+        ? mitigations
+        : mitigations.filter((mitigation) => mitigation.assignedTo === role);
+      const setFinishedRoleStatus = (role) => {
+        if (activeRole !== role) return;
+        const roleMitigations = getRoleMitigations(role);
+        const historiesWithData = roleMitigations.filter((mitigation) => (
+          loadedHistories.has(mitigationIdentity(mitigation))
+        )).length;
+        const roleLabel = role === 'all' ? '' : `${role} `;
+        phaseFilterNotice.textContent = historiesWithData > 0
+          ? `Phase filter: ${phaseFilterLabel} · ${historiesWithData} of ${roleMitigations.length} ${roleLabel}windows have pull data`
+          : `No ${roleLabel}mitigation histories have eligible ${phaseFilterLabel.toLowerCase()} data.`;
+      };
+      const loadRole = (role) => {
+        if (!roleLoadPromises.has(role)) {
+          roleLoadPromises.set(role, (async () => {
+            const roleMitigations = getRoleMitigations(role);
+            let processedCount = 0;
+            for (const mitigation of roleMitigations) {
+              if (!dialog.isConnected) return;
+              const identity = mitigationIdentity(mitigation);
+              if (!loadedHistories.has(identity)) {
+                const rows = await loadMitigationResultHistory(filteredReport, mitigation);
+                if (rows.length > 0) {
+                  const history = { mitigation, rows };
+                  loadedHistories.set(identity, history);
+                  if (activeRole === role) insertHistoryCard(history);
+                }
+              }
+              processedCount += 1;
+              if (activeRole === role) {
+                const roleLabel = role === 'all' ? '' : `${role} `;
+                phaseFilterNotice.textContent = `Loaded ${processedCount} of ${roleMitigations.length} ${roleLabel}mitigation windows · ${phaseFilterLabel}`;
+              }
+              await new Promise((resolve) => requestAnimationFrame(resolve));
+            }
+          })());
+        }
+        return roleLoadPromises.get(role).then(() => setFinishedRoleStatus(role));
       };
   
       for (const role of ['all', ...configuredRoles]) {
@@ -143,52 +199,27 @@ export function createMitigationHistory(dependencies) {
           activeRole = role;
           setMitigationSlot(role);
           renderRole();
+          phaseFilterNotice.textContent = `Loading ${role === 'all' ? '' : `${role} `}${phaseFilterLabel.toLowerCase()} mitigations…`;
+          void loadRole(role);
         });
         tabs.append(tab);
       }
-      const phaseFilterNotice = document.createElement('p');
-      phaseFilterNotice.className = 'mitigation-overview-filter-notice';
-      phaseFilterNotice.textContent = `Loading ${phaseFilterLabel.toLowerCase()} mitigations…`;
+      phaseFilterNotice.textContent = `Loading ${activeRole === 'all' ? '' : `${activeRole} `}${phaseFilterLabel.toLowerCase()} mitigations…`;
       renderRole();
       updateWithSmoothHeight(content, () => {
         content.replaceChildren(tabs, phaseFilterNotice, strip);
       });
   
-      // Load the selected tab first, then fill the other tabs. Each group retains the
-      // phase-aware chronological order established above, while yielding between
-      // cards keeps the dialog responsive and lets completed graphs paint immediately.
-      const preferredMitigations = activeRole === 'all'
-        ? mitigations
-        : mitigations.filter((mitigation) => mitigation.assignedTo === activeRole);
-      const remainingMitigations = activeRole === 'all'
-        ? []
-        : mitigations.filter((mitigation) => mitigation.assignedTo !== activeRole);
-      const loadOrder = [...preferredMitigations, ...remainingMitigations];
-      for (const mitigation of loadOrder) {
-        if (!dialog.isConnected) return;
-        const rows = await loadMitigationResultHistory(filteredReport, mitigation);
-        if (rows.length > 0) {
-          const history = { mitigation, rows };
-          loadedHistories.push(history);
-          if (activeRole === 'all' || mitigation.assignedTo === activeRole) {
-            insertHistoryCard(history);
-          }
-        }
-        phaseFilterNotice.textContent = `Loaded ${loadedHistories.length} of ${mitigations.length} mitigations · ${phaseFilterLabel}`;
-        await new Promise((resolve) => requestAnimationFrame(resolve));
-      }
-  
-      if (loadedHistories.length === 0) {
-        phaseFilterNotice.textContent = `No mitigation histories have eligible ${phaseFilterLabel.toLowerCase()} data.`;
-        return;
-      }
-      phaseFilterNotice.textContent = `Phase filter: ${phaseFilterLabel}`;
+      // Only the active role is evaluated. Other roles are loaded on first selection,
+      // avoiding a hidden all-role calculation whenever this report view opens.
+      await loadRole(activeRole);
     } catch (error) {
       loading.textContent = `Could not load mitigation histories: ${error.message}`;
     }
   }
   
   function closeOpenMitigationHistoryPopups(except = null) {
+    closeMitigationActionPreview();
     document.querySelectorAll('.mitigation-result-history-anchor.open').forEach((anchor) => {
       if (anchor === except) return;
       anchor.classList.remove('open');
@@ -200,6 +231,63 @@ export function createMitigationHistory(dependencies) {
         anchor.append(tooltip);
       }
     });
+  }
+
+  function closeMitigationActionPreview() {
+    openMitigationActionPreview?.remove();
+    openMitigationActionPreview = null;
+  }
+
+  function showMitigationActionPreview(report, row, tableRow) {
+    closeMitigationActionPreview();
+    const playerName = row.result.player?.name;
+    if (!playerName) return;
+    const castElapsedMs = Number(row.result.cast?.elapsedMs);
+    const centerMs = Number.isFinite(castElapsedMs)
+      ? castElapsedMs
+      : Number(row.result.startMs);
+    if (!Number.isFinite(centerMs)) return;
+
+    const preview = document.createElement('div');
+    preview.className = 'mitigation-action-preview';
+    preview.setAttribute('role', 'dialog');
+    preview.setAttribute('aria-label', `${playerName} actions surrounding this mitigation`);
+    const closeButton = document.createElement('button');
+    closeButton.className = 'mitigation-action-preview-close';
+    closeButton.type = 'button';
+    closeButton.textContent = '×';
+    closeButton.setAttribute('aria-label', 'Close player actions timeline');
+    closeButton.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeMitigationActionPreview();
+    });
+    const timeline = createPlayerActionTimelinePreview(
+      report,
+      row.fight,
+      playerName,
+      centerMs - 15_000,
+      centerMs + 15_000,
+      {
+        windowStartMs: row.result.startMs,
+        windowEndMs: row.result.endMs,
+      },
+    );
+    preview.append(closeButton, timeline);
+    (tableRow.closest('dialog') ?? document.body).append(preview);
+    openMitigationActionPreview = preview;
+
+    const bounds = tableRow.getBoundingClientRect();
+    const previewBounds = preview.getBoundingClientRect();
+    const left = Math.max(8, Math.min(
+      bounds.left,
+      window.innerWidth - previewBounds.width - 8,
+    ));
+    const top = Math.max(8, Math.min(
+      bounds.bottom + 6,
+      window.innerHeight - previewBounds.height - 8,
+    ));
+    preview.style.left = `${left}px`;
+    preview.style.top = `${top}px`;
   }
   
   function positionOpenMitigationHistoryPopup() {
@@ -686,7 +774,7 @@ export function createMitigationHistory(dependencies) {
     return rgbColor(red);
   }
   
-  function createMitigationHistoryTable(rows) {
+  function createMitigationHistoryTable(rows, report = null) {
     if (rows.length === 0) {
       const empty = document.createElement('span');
       empty.textContent = 'No pulls reached this assignment.';
@@ -695,7 +783,7 @@ export function createMitigationHistory(dependencies) {
     const table = document.createElement('table');
     table.className = 'mitigation-history-table';
     const headRow = document.createElement('tr');
-    for (const label of ['#', 'Badge', 'Result']) {
+    for (const label of ['#', 'Badge', 'Player', 'Result']) {
       const heading = document.createElement('th');
       heading.scope = 'col';
       heading.textContent = label;
@@ -706,15 +794,43 @@ export function createMitigationHistory(dependencies) {
     const body = document.createElement('tbody');
     for (const row of rows) {
       const tableRow = document.createElement('tr');
+      if (report && row.result.player?.name) {
+        tableRow.className = 'mitigation-history-action-row';
+        tableRow.tabIndex = 0;
+        tableRow.title = 'Show player actions surrounding this mitigation';
+        const openTimeline = (event) => {
+          event.stopPropagation();
+          showMitigationActionPreview(report, row, tableRow);
+        };
+        tableRow.addEventListener('click', openTimeline);
+        tableRow.addEventListener('keydown', (event) => {
+          if (!['Enter', ' '].includes(event.key)) return;
+          event.preventDefault();
+          openTimeline(event);
+        });
+      }
       const pullCell = document.createElement('td');
       pullCell.textContent = String(row.fight.id);
       const badgeCell = document.createElement('td');
       badgeCell.append(createBestPullBadge(row.fight));
+      const playerCell = document.createElement('td');
+      playerCell.className = 'mitigation-history-player';
+      playerCell.textContent = row.result.player?.name ?? '—';
+      if (row.result.player?.job) {
+        playerCell.title = `${row.result.player.name} (${row.result.player.job})`;
+      }
       const resultCell = document.createElement('td');
       resultCell.className = `mitigation-history-result ${row.result.statusClass}`;
       resultCell.textContent = row.result.status;
       if (row.result.statusColor) resultCell.style.setProperty('--timing-color', row.result.statusColor);
-      tableRow.append(pullCell, badgeCell, resultCell);
+      if (row.result.status === 'On cooldown' && row.result.cooldownPreviousCast) {
+        resultCell.title = `Last used at ${formatFightDuration(
+          row.result.cooldownPreviousCast.elapsedMs,
+        )}${row.result.cooldownMechanic?.mechanic
+          ? ` during ${row.result.cooldownMechanic.mechanic}`
+          : ''}.`;
+      }
+      tableRow.append(pullCell, badgeCell, playerCell, resultCell);
       body.append(tableRow);
     }
     table.append(head, body);
@@ -732,6 +848,13 @@ export function createMitigationHistory(dependencies) {
     mitigationHistoryPopupId += 1;
     return mitigationHistoryPopupId;
   }
+
+  document.addEventListener('click', (event) => {
+    if (!openMitigationActionPreview) return;
+    if (openMitigationActionPreview.contains(event.target)
+      || event.target.closest('.mitigation-history-action-row')) return;
+    closeMitigationActionPreview();
+  });
 
   return {
     closeOpenMitigationHistoryPopups,

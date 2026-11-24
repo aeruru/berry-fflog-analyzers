@@ -177,7 +177,7 @@ export function createFightDetailsController(dependencies) {
       .map((entry) => Number(entry.abilityId))
       .sort((a, b) => a - b);
     const phaseReferences = getEncounterEventReferences(DANCING_MAD_ENCOUNTER_NAME);
-    return JSON.stringify({ version: 34, abilityIds, phaseReferences });
+    return JSON.stringify({ version: 35, abilityIds, phaseReferences });
   }
 
   function getPersistentFightDetailsKey(reportCode, fight) {
@@ -237,7 +237,11 @@ export function createFightDetailsController(dependencies) {
     return panel;
   }
 
-  async function ensureReportFightDetails(report, fights, { playerActionsOnly = false } = {}) {
+  async function ensureReportFightDetails(
+    report,
+    fights,
+    { playerActionsOnly = false, onProgress = null } = {},
+  ) {
     const fightDetails = getFightDetails();
     const isReady = playerActionsOnly
       ? isReadyPlayerActionFightDetailState
@@ -246,12 +250,22 @@ export function createFightDetailsController(dependencies) {
       const detailKey = `${report.code}:${fight.id}`;
       return !isReady(fightDetails.get(detailKey), fight);
     });
+    const total = initiallyUncachedFights.length;
+    const reportProgress = (stage) => {
+      const completed = initiallyUncachedFights.filter((fight) => (
+        isReady(fightDetails.get(`${report.code}:${fight.id}`), fight)
+      )).length;
+      onProgress?.({ completed, total, stage });
+    };
+    reportProgress(total > 0 ? 'Preparing fight details' : 'Fight details ready');
     if (getUsingTestData()) {
       for (const fight of initiallyUncachedFights) {
         fightDetails.set(
           `${report.code}:${fight.id}`,
           attachFightFingerprint(normalizeEmbeddedFightDetails(report, fight), fight),
         );
+        reportProgress('Loading embedded fight details');
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
       return;
     }
@@ -263,6 +277,7 @@ export function createFightDetailsController(dependencies) {
         const cachedDetails = await readCachedFightDetails(report.code, fight, { playerActionsOnly });
         if (cachedDetails) fightDetails.set(`${report.code}:${fight.id}`, cachedDetails);
       }));
+      reportProgress('Reading cached fight details');
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     const uncachedFights = initiallyUncachedFights.filter((fight) => (
@@ -295,6 +310,7 @@ export function createFightDetailsController(dependencies) {
             fight,
           );
           fightDetails.set(`${report.code}:${fight.id}`, normalizedDetails);
+          reportProgress('Loading fight details from FFLogs');
           await writeCachedFightDetails(report.code, fight, cacheRecord);
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
