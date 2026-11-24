@@ -51,6 +51,8 @@ export function createReportController(dependencies) {
     setSelectedReport,
     setStatus,
     setUsingTestData,
+    startupNavigation,
+    updateNavigationQuery,
   } = dependencies;
 
   async function initialize() {
@@ -64,7 +66,10 @@ export function createReportController(dependencies) {
       await loadMitigationCooldowns();
       const token = await completeFflogsLogin();
       if (token) setStatus('FFLogs login complete. Loading your account...');
-      if (isLoggedInToFflogs()) {
+      if (startupNavigation?.useTestData) {
+        await enableTestData();
+        setStatus('Ready to use local test data.');
+      } else if (isLoggedInToFflogs()) {
         const currentUser = await fetchCurrentFflogsUser();
         setCurrentUser(currentUser);
         setStatus('Loading your reports...');
@@ -73,6 +78,10 @@ export function createReportController(dependencies) {
         setReports(reports);
         setStatus('Ready to query FFLogs.');
         setReportsStatus(formatLoadedReportsStatus(reports.length));
+      }
+      if (startupNavigation?.report) {
+        elements.reportSearchInput.value = startupNavigation.report;
+        await searchForReport({ preventDefault() {} });
       }
     } catch (error) {
       setStatus(error.message, true);
@@ -160,26 +169,12 @@ export function createReportController(dependencies) {
     elements.testDataButton.disabled = true;
     try {
       if (!getUsingTestData()) {
-        setReportsStatus('Loading local test report data...');
-        const response = await fetch('./test-data/reports.json');
-        if (!response.ok) throw new Error(`Test report data returned ${response.status}.`);
-        const payload = await response.json();
-        const localReports = await Promise.all(payload.reports.map(loadExternalTestFightDetails));
-        const testReports = await Promise.all([
-          ...localReports,
-          createGroupingScenarioReport(),
-          createOneEventPageReport(getDancingMadMitigations()),
-        ].map(materializePaginatedTestReport));
-        setReports(testReports
-          .filter((report) => report?.fights?.length > 0)
-          .map((report, reportIndex) => addTestMitigationCasts(report, payload.actors ?? [], reportIndex)));
-        resetSelectedReportForDataSourceChange();
-        setUsingTestData(true);
-        setReportsStatus('Using local test report data.');
+        await enableTestData();
         return;
       }
 
       setUsingTestData(false);
+      updateNavigationQuery({ testData: false, report: null, view: null });
       const currentUser = getCurrentUser();
       if (!isLoggedInToFflogs() || !currentUser) {
         setReports([]);
@@ -198,6 +193,26 @@ export function createReportController(dependencies) {
       elements.testDataButton.disabled = false;
       renderReports();
     }
+  }
+
+  async function enableTestData() {
+    setReportsStatus('Loading local test report data...');
+    const response = await fetch('./test-data/reports.json');
+    if (!response.ok) throw new Error(`Test report data returned ${response.status}.`);
+    const payload = await response.json();
+    const localReports = await Promise.all(payload.reports.map(loadExternalTestFightDetails));
+    const testReports = await Promise.all([
+      ...localReports,
+      createGroupingScenarioReport(),
+      createOneEventPageReport(getDancingMadMitigations()),
+    ].map(materializePaginatedTestReport));
+    setReports(testReports
+      .filter((report) => report?.fights?.length > 0)
+      .map((report, reportIndex) => addTestMitigationCasts(report, payload.actors ?? [], reportIndex)));
+    resetSelectedReportForDataSourceChange();
+    setUsingTestData(true);
+    updateNavigationQuery({ testData: true, report: null, view: null });
+    setReportsStatus('Using local test report data.');
   }
 
   function resetSelectedReportForDataSourceChange() {
@@ -258,6 +273,7 @@ export function createReportController(dependencies) {
       const selectedReport = await fetchReportByCode(reportCode);
       if (!selectedReport) throw new Error(`FFLogs could not find report ${reportCode}.`);
       setSelectedReport(selectedReport);
+      updateNavigationQuery({ report: reportCode, view: null });
       setOpenFightDetailKeys(new Set());
       setOpenFightMitigationKeys(new Set());
       renderLookupResult();
@@ -274,6 +290,7 @@ export function createReportController(dependencies) {
 
   function loadKnownReport(report) {
     setSelectedReport(report);
+    updateNavigationQuery({ report: report.code, view: null });
     setOpenFightDetailKeys(new Set());
     setOpenFightMitigationKeys(new Set());
     elements.reportSearchInput.value = report.code;

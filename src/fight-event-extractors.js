@@ -205,19 +205,20 @@ export function createFightEventExtractors({
       || (event.type === 'applydebuff' && Number(event.abilityGameID) === 1002911);
   }
 
-  function extractPhaseReferenceEvents(events, actorNames) {
+  function extractPhaseReferenceEvents(events, actorNames, abilityNames = new Map()) {
     const references = getEncounterEventReferences(encounterName);
     const referenceTypes = new Set(references.map((reference) => normalizeEventType(reference.eventType)));
     return events.map((event) => {
       const eventType = normalizeEventType(event.eventType ?? event.type);
       const source = event.source ?? event.sourceName ?? actorNames.get(Number(event.sourceID ?? event.sourceId));
-      let ability = event.ability?.name ?? event.abilityName ?? event.ability;
-      if (ability === undefined) {
+      const target = event.target ?? event.targetName ?? actorNames.get(Number(event.targetID ?? event.targetId));
+      let ability = getEventAbilityName(event, abilityNames);
+      if (ability == null) {
         const candidates = references.filter((reference) => normalizeEventType(reference.eventType) === eventType
           && (!reference.source || reference.source === source));
         if (candidates.length === 1) ability = candidates[0].ability;
       }
-      return { eventType, ability, source, timestamp: Number(event.timestamp) };
+      return { eventType, ability, source, target, timestamp: Number(event.timestamp) };
     }).filter((event) => referenceTypes.has(event.eventType) && Number.isFinite(event.timestamp));
   }
 

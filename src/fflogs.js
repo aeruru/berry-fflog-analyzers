@@ -188,8 +188,10 @@ export async function fetchFightEventDetails(
   const phaseEventFilters = phaseEventReferences.map((reference) => {
     const eventType = String(reference.eventType ?? '').replace(/\s+/g, '').toLowerCase();
     const ability = escapeFflogsFilterString(reference.ability);
+    const target = escapeFflogsFilterString(reference.target);
     const conditions = [`type = "${eventType}"`];
     if (ability) conditions.push(`ability.name = "${ability}"`);
+    if (target) conditions.push(`target.name = "${target}"`);
     return `(${conditions.join(' AND ')})`;
   });
   const assignmentFilters = [

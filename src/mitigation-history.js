@@ -823,6 +823,13 @@ export function createMitigationHistory(dependencies) {
       resultCell.className = `mitigation-history-result ${row.result.statusClass}`;
       resultCell.textContent = row.result.status;
       if (row.result.statusColor) resultCell.style.setProperty('--timing-color', row.result.statusColor);
+      if (row.result.status === 'On cooldown' && row.result.cooldownPreviousCast) {
+        resultCell.title = `Last used at ${formatFightDuration(
+          row.result.cooldownPreviousCast.elapsedMs,
+        )}${row.result.cooldownMechanic?.mechanic
+          ? ` during ${row.result.cooldownMechanic.mechanic}`
+          : ''}.`;
+      }
       tableRow.append(pullCell, badgeCell, playerCell, resultCell);
       body.append(tableRow);
     }

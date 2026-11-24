@@ -1066,6 +1066,10 @@ h2 {
   min-width: 220px;
 }
 
+.special-views-controls .player-actions-control-label[hidden] {
+  display: none;
+}
+
 .special-views-controls label > span {
   color: var(--muted);
   font-size: 0.66rem;
@@ -1124,6 +1128,51 @@ h2 {
   margin: 0;
 }
 
+.special-views-loading-progress {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(180px, 420px) auto;
+  max-width: 620px;
+}
+
+.special-views-loading-progress[hidden] {
+  display: none;
+}
+
+.special-views-loading-progress progress {
+  accent-color: var(--accent);
+  height: 10px;
+  width: 100%;
+}
+
+.special-views-loading-progress progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--accent), #83c5ff, var(--accent));
+  background-size: 180% 100%;
+  transition: width 160ms ease-out;
+  animation: special-views-progress-shimmer 1.1s linear infinite;
+}
+
+.special-views-loading-progress progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--accent), #83c5ff, var(--accent));
+  background-size: 180% 100%;
+  transition: width 160ms ease-out;
+  animation: special-views-progress-shimmer 1.1s linear infinite;
+}
+
+@keyframes special-views-progress-shimmer {
+  to {
+    background-position: -180% 0;
+  }
+}
+
+.special-views-loading-progress span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .special-views-table-scroll {
   max-width: 100%;
   overflow: auto;
@@ -1163,6 +1212,162 @@ h2 {
   color: var(--muted);
   padding: 18px !important;
   text-align: center !important;
+}
+
+.lj1-rapture-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px 0 28px;
+}
+
+.lj1-rapture-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.lj1-rapture-legend {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.66rem;
+  font-weight: 800;
+  gap: 14px;
+  margin-left: 182px;
+}
+
+.lj1-rapture-legend span {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.lj1-rapture-legend span::before {
+  content: '';
+  display: inline-block;
+}
+
+.lj1-rapture-legend .plenary::before {
+  background: rgb(74 222 128 / 28%);
+  border: 1px solid rgb(74 222 128 / 72%);
+  height: 8px;
+  width: 22px;
+}
+
+.lj1-rapture-legend .reference::before {
+  border-left: 2px solid #facc15;
+  height: 13px;
+  width: 1px;
+}
+
+.lj1-rapture-row {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 170px minmax(0, 900px);
+}
+
+.lj1-rapture-row .special-views-lucid-pull {
+  justify-content: flex-start;
+  padding-left: 4px;
+}
+
+.lj1-rapture-result {
+  appearance: none;
+  background: #dc2626;
+  border: 2px solid #fecaca;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 35%), 0 0 8px rgb(220 38 38 / 48%);
+  flex: 0 0 auto;
+  height: 18px;
+  margin: 0;
+  position: relative;
+  width: 18px;
+}
+
+.lj1-rapture-result:checked {
+  background: #16a34a;
+  border-color: #bbf7d0;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 35%), 0 0 8px rgb(22 163 74 / 52%);
+}
+
+.lj1-rapture-result:checked::after {
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  content: '';
+  height: 8px;
+  left: 5px;
+  position: absolute;
+  top: 2px;
+  transform: rotate(45deg);
+  width: 4px;
+}
+
+.lj1-rapture-result:disabled {
+  cursor: help;
+  opacity: 1;
+}
+
+.lj1-rapture-track-wrap {
+  padding: 49px 0 24px;
+}
+
+.lj1-rapture-track {
+  width: min(900px, 72vw);
+}
+
+.lj1-rapture-plenary-range {
+  background: rgb(74 222 128 / 28%);
+  border: 1px solid rgb(74 222 128 / 72%);
+  bottom: -5px;
+  box-sizing: border-box;
+  height: 16px;
+  pointer-events: auto;
+  position: absolute;
+  z-index: 1;
+}
+
+.lj1-rapture-reference {
+  border-left: 2px solid #facc15;
+  bottom: -7px;
+  height: 55px;
+  pointer-events: auto;
+  position: absolute;
+  z-index: 3;
+}
+
+.lj1-rapture-reference span {
+  color: #facc15;
+  font-size: 0.62rem;
+  font-weight: 800;
+  left: 0;
+  position: absolute;
+  top: 100%;
+  transform: translateX(-50%);
+}
+
+.lj1-rapture-unreached {
+  background: rgb(15 23 42 / 70%);
+  bottom: -5px;
+  height: 16px;
+  position: absolute;
+  z-index: 2;
+}
+
+.lj1-rapture-endpoint {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  position: absolute;
+  top: calc(100% + 6px);
+}
+
+.lj1-rapture-endpoint.start {
+  left: 0;
+}
+
+.lj1-rapture-endpoint.end {
+  right: 0;
 }
 
 .special-views-death-table th:not(:first-child),
@@ -1462,6 +1667,43 @@ h2 {
   background: rgba(239, 68, 68, 0.48);
 }
 
+.special-views-mitigation-track {
+  height: 20px;
+}
+
+.special-views-mitigation-window {
+  background: rgb(16 185 129 / 28%);
+  border-block: 1px solid rgb(52 211 153 / 72%);
+  bottom: 2px;
+  position: absolute;
+  top: 2px;
+  z-index: 1;
+}
+
+.special-views-mitigation-window-tick {
+  background: #6ee7b7;
+  bottom: -4px;
+  position: absolute;
+  top: -4px;
+  transform: translateX(-1px);
+  width: 2px;
+  z-index: 4;
+}
+
+.special-views-mitigation-window-tick.end {
+  background: #34d399;
+}
+
+.special-views-mitigation-cast {
+  background: #60a5fa;
+  bottom: -2px;
+  position: absolute;
+  top: -2px;
+  transform: translateX(-1px);
+  width: 2px;
+  z-index: 6;
+}
+
 .special-views-lucid-tick {
   background: #fff;
   bottom: -3px;
@@ -1520,6 +1762,84 @@ h2 {
 
 .special-views-mechanic-tick.label-tier-1 .special-views-mechanic-label {
   top: 30px;
+}
+
+.forsaken-lilies-track .special-views-mechanic-tick.timeline-start .special-views-mechanic-label {
+  transform: none;
+}
+
+.forsaken-lilies-track .special-views-mechanic-tick.timeline-end .special-views-mechanic-label {
+  transform: translateX(-100%);
+}
+
+.forsaken-lilies-histogram-row {
+  margin: 14px 0 4px;
+}
+
+.forsaken-lilies-histogram {
+  background: color-mix(in srgb, var(--track) 88%, transparent);
+  border: 1px solid var(--muted);
+  height: 100px;
+  overflow: visible;
+  position: relative;
+}
+
+.forsaken-lilies-histogram-ceiling-line {
+  border-top: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 3;
+}
+
+.forsaken-lilies-histogram-ceiling-label {
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  position: absolute;
+  right: 0;
+  top: -14px;
+  white-space: nowrap;
+}
+
+.forsaken-lilies-histogram-bar {
+  background: rgb(59 130 246 / 72%);
+  border-left: 1px solid color-mix(in srgb, var(--surface-strong) 65%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--surface-strong) 65%, transparent);
+  bottom: 0;
+  position: absolute;
+}
+
+.forsaken-lilies-histogram-twice {
+  background: rgb(239 68 68 / 78%);
+  bottom: 0;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.forsaken-lilies-histogram-value,
+.forsaken-lilies-histogram-twice > span {
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  left: 50%;
+  line-height: 1;
+  pointer-events: none;
+  position: absolute;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 75%);
+  transform: translate(-50%, -50%);
+  z-index: 2;
+}
+
+.forsaken-lilies-histogram-value {
+  top: 9px;
+}
+
+.forsaken-lilies-histogram-twice > span {
+  top: 50%;
 }
 
 .special-views-afflatus-state {
@@ -1867,7 +2187,10 @@ h2 {
 
 @media (prefers-reduced-motion: reduce) {
   .fight-best-pull-badge,
-  .fight-best-pull-label {
+  .fight-best-pull-label,
+  .special-views-loading-progress progress::-webkit-progress-value,
+  .special-views-loading-progress progress::-moz-progress-bar {
+    animation: none;
     transition: none;
   }
 }
@@ -2408,10 +2731,47 @@ h2 {
   text-transform: uppercase;
 }
 
+.mitigation-table .mitigation-phase-divider th {
+  border-bottom-color: color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--muted);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  padding-bottom: 5px;
+  padding-top: 13px;
+}
+
+.mitigation-table .mitigation-phase-divider:first-child th {
+  padding-top: 5px;
+}
+
 .mitigation-ability-content {
   align-items: center;
   display: inline-flex;
   gap: 6px;
+  position: relative;
+}
+
+.mitigation-cooldown-detail {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  bottom: calc(100% + 7px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  display: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  left: 0;
+  padding: 6px 8px;
+  pointer-events: none;
+  position: absolute;
+  white-space: nowrap;
+  z-index: 100;
+}
+
+.mitigation-result.on-cooldown:hover .mitigation-cooldown-detail,
+.mitigation-result.on-cooldown:focus-within .mitigation-cooldown-detail {
+  display: block;
 }
 
 .mitigation-ability-icon {
